@@ -30,7 +30,7 @@ for (const seed of seeds) {
   console.log(`== seed ${seed} ${sim.cp.terrain}/${sim.cp.origin} month ${sim.month} pop ${sim.stats().population} ${withLine ? '(test line from month 24)' : '(no metro)'} centre ${centre.x.toFixed(0)},${centre.y.toFixed(0)}`);
   console.log('-- by distance from the centre (cells of 50 m)\n' + fmtRows(g.byDist));
   console.log('-- by station walk time\n' + fmtRows(g.byStation));
-  console.log(`-- towers (>= 60 m): ${g.skyline}   re-subdivided streets: ${sim.resubdivided}`);
+  console.log(`-- towers (>= 60 m): ${g.skyline}   re-subdivided streets: ${sim.resubdivided}  assemblies ${JSON.stringify(sim.asm.stats)} active ${sim.asm.list.length}`);
   console.log(`-- roads at start   all: ${fmt(rs0)}\n                  core: ${fmt(rs0.core)}\n               outside: ${fmt(rs0.outside)}`);
   console.log(`-- roads at month ${sim.month}  all: ${fmt(rs)}\n                  core: ${fmt(rs.core)}\n               outside: ${fmt(rs.outside)}`);
 }

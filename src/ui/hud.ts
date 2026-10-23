@@ -122,12 +122,14 @@ export class Hud {
   private lmSig = '';
 
   private renderLandmarks(s: StateMsg) {
-    const sig = JSON.stringify(s.landmarks.map((l) => [l.id, l.state, Math.round(l.pct * 10), l.served, l.carPark, l.eventDay]));
+    const sig = JSON.stringify([s.landmarks.map((l) => [l.id, l.state, Math.round(l.pct * 10), l.served, l.carPark, l.eventDay]), s.assemblies.map((a) => [a.id, a.phase, Math.round(a.pct * 10), a.acquired])]);
     if (sig === this.lmSig) return;
     this.lmSig = sig;
     const el = this.el.lmlist;
-    if (!s.landmarks.length) { el.innerHTML = '<div class="muted small">None yet.</div>'; return; }
-    el.innerHTML = s.landmarks.slice().sort((a, b) => (a.state === b.state ? a.name.localeCompare(b.name) : a.state === 'building' ? -1 : 1)).map((l) => {
+    const PH = ['buying plots', 'hoardings up', 'demolition', 'site cleared', 'foundations', 'structure', 'facade'];
+    const dev = s.assemblies.map((a) => `<button class="lm" data-lx="${a.x}" data-ly="${a.y}"><span>${a.label}</span><i class="b">${PH[a.phase] ?? ''}${a.phase === 0 ? ` ${a.acquired}/${a.total}` : ''}</i></button>`).join('');
+    if (!s.landmarks.length && !s.assemblies.length) { el.innerHTML = '<div class="muted small">None yet.</div>'; return; }
+    el.innerHTML = dev + s.landmarks.slice().sort((a, b) => (a.state === b.state ? a.name.localeCompare(b.name) : a.state === 'building' ? -1 : 1)).map((l) => {
       const badge = l.state === 'building' ? `<i class="b">building ${Math.round(l.pct * 100)}%</i>` : l.eventDay ? '<i class="ev">event day</i>' : l.carPark ? '<i class="cp">car park</i>' : l.served ? '<i class="sv">served</i>' : '<i class="ns">no station</i>';
       return `<button class="lm" data-lx="${l.x}" data-ly="${l.y}"><span>${l.name}</span>${badge}</button>`;
     }).join('');

@@ -33,6 +33,8 @@ export interface Lot {
   edge: number;               // road edge whose frontage created the plot (-1 = carved); back rows inherit it
   hgt: number;                // height in metres of the current building (0 = default for its level)
   nhgt: number;               // height of the building under construction
+  asm: number;                // large-plot assembly this plot belongs to (id), 0 = none
+  astate: number;             // 0 pending, 1 acquired (hoarding), 2 holdout, 3 cleared
 }
 
 const HB = 2; // hash bucket (cells)
@@ -80,6 +82,12 @@ export class LotStore {
   remove(l: Lot) {
     l.alive = false;
     this.buckets(l, (k) => { const a = this.hash.get(k); if (a) { const i = a.indexOf(l.id); if (i >= 0) a.splice(i, 1); } });
+  }
+
+  /** Put a removed plot back (a failed assembly leaves its land vacant). */
+  restore(l: Lot) {
+    l.alive = true; l.type = BT.None; l.level = 0; l.demo = 0; l.constr = 0;
+    this.buckets(l, (k) => { let a = this.hash.get(k); if (!a) this.hash.set(k, (a = [])); if (!a.includes(l.id)) a.push(l.id); });
   }
 
   private setGeom(l: Lot, q: number[]) {
@@ -150,7 +158,7 @@ export class LotStore {
     for (const o of this.near(cx, cy, 1)) if (quadsOverlap(q, o.poly)) return null;
     const l: Lot = {
       id: this.lots.length, x: 0, y: 0, ang: 0, w: 0, d: 0, cell: 0, cls, type: BT.None, level: 0, target: 0, constr: 0, constrTotal: 0, age: 0, low: 0,
-      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(this.profiles[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0, lm: 0, edge, hgt: 0, nhgt: 0,
+      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(this.profiles[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0, lm: 0, edge, hgt: 0, nhgt: 0, asm: 0, astate: 0,
     };
     this.setGeom(l, q);
     l.flags = this.flags[l.cell] & Flag.Docks;

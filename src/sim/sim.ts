@@ -9,6 +9,7 @@ import { RoadGraph, RC, ROAD_HALF } from './roads';
 import { LotStore, LOT_W, type Lot } from './lots';
 import { PROFILE_INDEX, ZONING, deriveProfiles, densClass, hash01, type DistrictProfile } from './profiles';
 import { DensityField, FIELD } from './field';
+import { AssemblySystem, type AsmPlan } from './assembly';
 import { LandmarkSystem } from './landmarkSys';
 import { LANDMARKS, landmarkAt } from './landmarks';
 import { makeCityProfile, type CityProfile } from './cityprofile';
@@ -117,6 +118,7 @@ export class Sim {
   cp: CityProfile;
   profiles: DistrictProfile[];
   lm!: LandmarkSystem;
+  asm = new AssemblySystem(this);
   lastEventMonth = -99;
 
   constructor(public seed: number, force?: { terrain?: CityProfile['terrain']; origin?: CityProfile['origin'] }) {
@@ -135,7 +137,7 @@ export class Sim {
     this.roads.blockFlags = Flag.Docks;
     this.roads.corridor = {
       blocked: (ax, ay, bx, by) => this.lots.inCorridor(ax, ay, bx, by, ROAD_HALF[RC.Local] + 0.05)
-        .some((l) => (l.flags & (Flag.Docks | Flag.Planned)) || l.constr > 0 || l.type === BT.Ind || isAmenity(l.type) || l.level >= 2),
+        .some((l) => (l.flags & (Flag.Docks | Flag.Planned)) || l.asm > 0 || l.constr > 0 || l.type === BT.Ind || isAmenity(l.type) || l.level >= 2),
       clear: (ax, ay, bx, by) => { for (const l of this.lots.inCorridor(ax, ay, bx, by, ROAD_HALF[RC.Local] + 0.05)) this.lots.remove(l); },
     };
     this.aggregate();
@@ -242,6 +244,10 @@ export class Sim {
         if (!r || this.month < r.month + t.after.months) continue;
       }
       const vars = this.eventVars();
+      if (def.landmark && !def.id.endsWith('_after')) {
+        const ld = LANDMARKS.find((x) => x.id === def.landmark)!;
+        vars.pre_a = this.lm.preview(ld.id, ld.sites[0]); vars.pre_b = this.lm.preview(ld.id, ld.sites[1]);
+      }
       let variant: Variant | null = null;
       if (def.variants) {
         variant = def.variants.find((v) => (v.when.deal === undefined || v.when.deal === this.docks.deal?.id) &&
@@ -283,18 +289,18 @@ export class Sim {
       case 'log': this.say(e.text); break;
       case 'docksDeal': {
         const d = { ...e.deal, name: fill(e.deal.name, this.eventVars()) };
-        this.docks = { state: 'active', deal: d, start: this.month, deadline: d.deadline ? this.month + d.deadline : 0, roadRelief: false, lateLogged: false };
+        // the old port is bought up, fenced and demolished block by block first (about 8 months), then the planned blocks are staked out
+        this.docks = { state: 'active', deal: d, start: this.month, deadline: d.deadline ? this.month + d.deadline + 8 : 0, roadRelief: false, lateLogged: false };
         for (const l of this.docksLots()) {
-          l.type = BT.None; l.level = 0; l.constr = 0; l.target = 0;
           const r = this.rng.next();
           let t: number = BT.Res, lv = 1;
           if (d.density === 'high') { if (r < 0.34) lv = 3; else if (r < 0.66) lv = 2; else if (r < 0.82) { t = BT.Com; lv = 3; } else { t = BT.Com; lv = 2; } }
           else if (d.density === 'mid') { if (r < 0.7) lv = 2; else { t = BT.Com; lv = 2; } }
           else { lv = r < 0.45 ? 2 : 1; if (r > 0.9) t = BT.Com; }
           l.planType = t; l.planLevel = lv;
-          l.flags |= Flag.Planned;
           if (d.carLockAll) l.flags |= Flag.CarLocked;
         }
+        this.asm.startDocks(this.docksLots(), SITE_TEXT[this.cp.site].project);
         this.say(`Docks deal signed with ${d.name}${d.deadline ? `: metro needed within ${d.deadline} months` : ''}`);
         break;
       }
@@ -341,7 +347,7 @@ export class Sim {
   }
 
   private docksTick() {
-    if (this.docks.state !== 'active') return;
+    if (this.docks.state !== 'active' || this.asm.docksPending) return;
     const late = this.docks.deadline > 0 && this.month > this.docks.deadline;
     let remaining = 0, starts = 0, newlyLocked = 0;
     for (const l of this.docksLots()) {
@@ -374,7 +380,7 @@ export class Sim {
       if (!l.planLevel) continue;
       planned++;
       if (l.flags & Flag.CarLocked) locked++;
-      if (!(l.flags & Flag.Planned)) built++;
+      if (!(l.flags & Flag.Planned) && !l.asm) built++;  // staked-out blocks are Planned until built; while the old port is still being cleared (assembly) nothing is built
       if (d.state === 'active' && this.walkToStation(l.cell) <= TUNE.serveWalk) served++;
     }
     const deal = d.deal;
@@ -408,6 +414,7 @@ export class Sim {
     this.month++;
     this.progressConstruction();
     this.lm.tick();
+    this.asm.tick();
     this.aggregate();
     this.computeCongestion();
     this.computeDriveTimes();
@@ -429,7 +436,7 @@ export class Sim {
     for (const l of this.lots.lots) {
       if (!l.alive) continue;
       l.age = Math.min(65000, l.age + 1);
-      if (l.demo > 0 && --l.demo === 0) { if (l.ntype) l.type = l.ntype; l.ntype = 0; l.level = 0; }
+      if (l.demo > 0 && --l.demo === 0) { if (l.ntype) l.type = l.ntype; else l.type = BT.None; l.ntype = 0; l.level = 0; l.hgt = 0; }
       if (l.constr > 0 && --l.constr === 0) { l.level = l.target; l.hgt = l.nhgt; l.nhgt = 0; l.target = 0; l.age = 0; l.built = this.month; }
     }
   }
@@ -437,9 +444,9 @@ export class Sim {
   /** Capacity of a plot relative to a standard detached one: follows frontage width, denser tiers stack a bit more. */
   capOf(l: Lot) { return (l.w / LOT_W) * (1 + 0.15 * l.dens); }
   /** Homes (Res) or jobs (Com / Ind) a building of this kind, level and height holds on the plot: storeys x a per-storey figure for mid and high rise. */
-  capacity(l: Lot, kind: number, level: number, h: number): number {
+  capacity(l: Lot, kind: number, level: number, h: number, w = l.w): number {
     if (level <= 0) return 0;
-    const cap = this.capOf(l), floors = Math.max(2, Math.round(h / 3.3));
+    const cap = (w / LOT_W) * (1 + 0.15 * l.dens), floors = Math.max(2, Math.round(h / 3.3));
     if (kind === BT.Res) return (level === 1 || !h ? HOMES[level] : floors * (level === 3 ? 17 : 11)) * cap;
     if (kind === BT.Com) return (level === 1 || !h ? COM_JOBS[level] : floors * 17) * cap;
     if (kind === BT.Ind) return IND_JOBS[level] * cap;
@@ -449,11 +456,11 @@ export class Sim {
   lotJobs(l: Lot) { return l.type === BT.Com || l.type === BT.Ind ? Math.round(this.capacity(l, l.type, l.level, l.hgt)) : 0; }
 
   /** Height of a new mid / high-rise building on this plot: capped by the field's allowed height and by the plot's width (tall needs a wide plot). */
-  pickHeight(l: Lot, level: number): number {
+  pickHeight(l: Lot, level: number, ambition = false): number {
     if (level < 2) return 0;
     const hm = this.field.hmaxAt(l.x, l.y), r = hash01(l.id, this.month);
     if (level === 2) return Math.round(Math.min(24, Math.max(13, hm)) * (0.72 + 0.28 * r));
-    const wcap = 24 + 70 * Math.max(0, l.w - 0.4);
+    const wcap = ambition ? 1e9 : 24 + 70 * Math.max(0, l.w - 0.4);
     return Math.round(Math.max(FIELD.level3, Math.min(hm, wcap) * (0.62 + 0.38 * r)));
   }
 
@@ -789,7 +796,7 @@ export class Sim {
       return b;
     };
     for (const l of lots) {
-      if (l.constr || (l.flags & (Flag.Planned | Flag.Docks)) && !l.type) continue;
+      if (l.constr || l.asm || (l.flags & (Flag.Planned | Flag.Docks)) && !l.type) continue;
       if (l.flags & Flag.Planned) continue;
       const v = this.fieldAt(this.lvS, l.x, l.y), t = l.type, lv = l.level;
       const jit = this.rng.next() * 0.12;
@@ -807,15 +814,15 @@ export class Sim {
       } else if (t === BT.Res && lv < 3) {
         const cap = l.flags & Flag.CarLocked ? 2 : 3;
         if (lv + 1 > cap || lv + 1 > maxL) continue;
-        if (v > TUNE.upLV[lv] - 0.1 * pR && l.age >= (lv === 1 ? 10 : 8)) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: lv + 1, h: this.pickHeight(l, lv + 1) });
+        if (v > TUNE.upLV[lv] - 0.1 * pR && l.age >= (lv === 1 ? 10 : 8)) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: lv + 1, h: this.pickHeight(l, lv + 1, true) });
       } else if (t === BT.Com && lv < 3) {
         if (lv + 1 > maxL) continue;
-        if (v > TUNE.comUpLV[lv] - 0.1 * pC && l.age >= (lv === 1 ? 5 : 10)) com.push({ l, s: v + 0.1 + jit, kind: BT.Com, to: lv + 1, h: this.pickHeight(l, lv + 1) });
-      } else if ((t === BT.Res || t === BT.Com) && lv === 3 && l.hgt > 0 && l.age >= 36 && !(l.flags & Flag.CarLocked)) {
+        if (v > TUNE.comUpLV[lv] - 0.1 * pC && l.age >= (lv === 1 ? 5 : 10)) com.push({ l, s: v + 0.1 + jit, kind: BT.Com, to: lv + 1, h: this.pickHeight(l, lv + 1, true) });
+      } else if ((t === BT.Res || t === BT.Com) && lv === 3 && l.hgt > 0 && l.age >= 24 && !(l.flags & Flag.CarLocked)) {
         // a better-connected centre rebuilds its towers taller
         const hm = F.hmaxAt(l.x, l.y);
-        if (hm >= 45 && hm > l.hgt * 1.4 && v > 0.7) {
-          const h = this.pickHeight(l, 3);
+        if (hm >= 40 && hm > l.hgt * 1.3 && v > 0.7) {
+          const h = this.pickHeight(l, 3, true);
           if (h > l.hgt * 1.25) (t === BT.Res ? res : com).push({ l, s: v + 0.02 + jit, kind: t, to: 3, h });
         }
       }
@@ -835,13 +842,26 @@ export class Sim {
         if (c.to === 2 && mids >= TUNE.maxMidStarts) continue;
         const z = this.zoneOf(c.l.cell);
         if (zoneOps[z] >= 6) continue;
-        const add = this.capacity(c.l, c.kind, c.to, c.h) - (c.l.type === c.kind ? this.capacity(c.l, c.kind, c.l.level, c.l.hgt) : 0);
+        let h = c.h, plan: AsmPlan | null = null;
+        if (c.to === 3 && c.kind !== BT.Ind && h >= 36) {
+          // a tall building consumes several plots: assemble a site, or settle for what one plot allows
+          if (!this.asm.canStart(this.homes * PERSONS_PER_HOME)) continue;
+          plan = this.asm.planRow(c.l, h);
+          if (!plan) h = Math.max(FIELD.level3, Math.min(35, 24 + 70 * Math.max(0, c.l.w - 0.4)));
+        }
+        const wEff = plan ? Math.hypot(plan.quad[2] - plan.quad[0], plan.quad[3] - plan.quad[1]) : c.l.w;
+        const add = this.capacity(c.l, c.kind, c.to, h, wEff) - (c.l.type === c.kind ? this.capacity(c.l, c.kind, c.l.level, c.l.hgt) : 0);
         if (add > this[poolKey] * 2.5 + 10) continue;
         this[poolKey] -= add;
         taken.add(c.l.id); zoneOps[z]++; ops++;
         if (c.to === 3) towers++; else if (c.to === 2) mids++;
+        if (plan) {
+          const months = Math.max(3, Math.min(14, Math.round(h / 9)));
+          this.asm.start(plan, { type: c.kind, level: 3, hgt: h, months, label: `${c.kind === BT.Res ? 'Residential' : 'Office'} tower (${h} m)` });
+          continue;
+        }
         if (c.to >= 2) this.tryMerge(c.l, c.to);
-        this.startBuild(c.l, c.kind, c.to);
+        this.startBuild(c.l, c.kind, c.to, c.to === 3 ? h : undefined);
       }
     };
     if (this.comDemand > this.resDemand) { place(com, 'comPool', 120); place(res, 'resPool', 300); }
@@ -850,7 +870,7 @@ export class Sim {
 
     // decline: buildings whose value falls empty out
     for (const l of lots) {
-      if (!l.type || isAmenity(l.type) || l.constr || (l.flags & Flag.Planned)) continue;
+      if (!l.type || isAmenity(l.type) || l.constr || l.asm || (l.flags & Flag.Planned)) continue;
       const v = this.fieldAt(this.lvS, l.x, l.y);
       if (v < TUNE.downLV[l.level]) l.low = Math.min(255, l.low + 1); else l.low = 0;
       if (l.low >= 6 && this.rng.next() < 0.25) {
@@ -860,7 +880,7 @@ export class Sim {
       }
     }
     if (this.resDemand < -0.6) {
-      for (const l of lots) if (l.type === BT.Res && !l.constr && this.lvS[l.cell] < 0.3 && this.rng.next() < 0.02) { l.type = BT.None; l.level = 0; }
+      for (const l of lots) if (l.type === BT.Res && !l.constr && !l.asm && this.lvS[l.cell] < 0.3 && this.rng.next() < 0.02) { l.type = BT.None; l.level = 0; }
     }
     this.placeParks(lots);
     this.carveHubSquares();
@@ -895,7 +915,7 @@ export class Sim {
 
   private reprofile(e: number): boolean {
     const ls = (this.lots.byEdge.get(e) ?? []).filter((l) => l.alive);
-    if (ls.some((l) => (l.flags & (Flag.Core | Flag.Docks | Flag.Planned)) || l.lm || l.constr || l.demo || l.type === BT.Landmark)) return false;
+    if (ls.some((l) => (l.flags & (Flag.Core | Flag.Docks | Flag.Planned)) || l.asm || l.lm || l.constr || l.demo || l.type === BT.Landmark)) return false;
     for (const l of ls) {
       const vacant = l.type === BT.None;
       const old = (l.type === BT.Res || l.type === BT.Com) && l.level <= 1 && l.age >= 24 && !(l.flags & Flag.CarLocked) && hash01(l.id, 7) < 0.7;
@@ -935,7 +955,7 @@ export class Sim {
 
   /** A bigger building may replace its small row neighbour: the two plots become one. */
   private tryMerge(l: Lot, to: number) {
-    if (l.dens === 0 || l.w > 0.7 || (l.flags & (Flag.Core | Flag.Docks | Flag.Planned))) return;
+    if (l.asm || l.dens === 0 || l.w > 0.7 || (l.flags & (Flag.Core | Flag.Docks | Flag.Planned))) return;
     if (this.rng.next() > (to === 3 ? 0.4 : 0.15)) return;
     const nb = this.lots.near(l.x, l.y, 0.9).filter((o) => o !== l && o.alive && o.dens === l.dens && o.back === l.back && o.cls === l.cls && !o.constr && !o.demo
       && !(o.flags & (Flag.Core | Flag.Docks | Flag.Planned | Flag.CarLocked)) && !isAmenity(o.type) && o.level <= 1 && o.type !== BT.Ind);
@@ -950,7 +970,7 @@ export class Sim {
     for (const l of lots) {
       const z = this.zoneOf(l.cell);
       if (l.type === BT.Park) have[z]++;
-      else if (!l.type && !l.flags) cands[z].push(l);
+      else if (!l.type && !l.flags && !l.asm) cands[z].push(l);
     }
     for (let z = 0; z < ZONES; z++) {
       const want = Math.min(16, Math.floor(this.zHomes[z] / 320));
@@ -1180,9 +1200,9 @@ export class Sim {
     const n = ls.length;
     const f = () => new Float32Array(n), u = () => new Uint8Array(n);
     const m: LotsMsg = { n, id: new Int32Array(n), x: f(), y: f(), ang: f(), w: f(), d: f(), type: u(), level: u(), target: u(), constr: u(), constrTotal: u(), flags: u(), planType: u(), planLevel: u(), served: u(),
-      hgt: u(), nhgt: u(), poly: new Float32Array(n * 8), dens: u(), prof: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u(), lm: u() };
+      asm: new Uint16Array(n), astate: u(), hgt: u(), nhgt: u(), poly: new Float32Array(n * 8), dens: u(), prof: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u(), lm: u() };
     ls.forEach((l, k) => {
-      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.prof[k] = l.prof; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype; m.lm[k] = l.lm; m.hgt[k] = Math.min(255, l.hgt); m.nhgt[k] = Math.min(255, l.nhgt);
+      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.prof[k] = l.prof; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype; m.lm[k] = l.lm; m.asm[k] = l.asm; m.astate[k] = l.astate; m.hgt[k] = Math.min(255, l.hgt); m.nhgt[k] = Math.min(255, l.nhgt);
       m.id[k] = l.id; m.x[k] = l.x; m.y[k] = l.y; m.ang[k] = l.ang; m.w[k] = l.w; m.d[k] = l.d;
       m.type[k] = l.type; m.level[k] = l.level; m.target[k] = l.target; m.constr[k] = l.constr; m.constrTotal[k] = l.constrTotal;
       m.flags[k] = l.flags; m.planType[k] = l.planType; m.planLevel[k] = l.planLevel;
@@ -1202,6 +1222,7 @@ export class Sim {
       event: this.eventInfo(),
       docks: this.docksInfo(),
       landmarks: this.lm.info(),
+      assemblies: this.asm.infos(),
       desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
       log: this.log.slice(-8), speed: this.speed,
     };
