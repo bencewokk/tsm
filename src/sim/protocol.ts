@@ -5,6 +5,8 @@ export interface InitMsg {
   seed: number;
   height: Float32Array;
   water: Uint8Array;
+  /** static raster flags at start (docks, steep) */
+  flags: Uint8Array;
   villages: Village[];
   bay: { x: number; y: number; r: number };
 }

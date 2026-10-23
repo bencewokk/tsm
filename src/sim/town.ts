@@ -1,7 +1,7 @@
 import { N, BT, Flag } from './constants';
 import { Rng, fbm } from './rng';
 import { RoadGraph, RC, arterialPath, RULES } from './roads';
-import { LotStore } from './lots';
+import { LotStore, LOT_W, LOT_D } from './lots';
 import { angDiff, lineDiff } from './geom';
 import type { Grid } from './terrain';
 
@@ -112,7 +112,7 @@ export function layoutTown(c: TownCtx) {
     for (const l of lots.near(d.x, d.y, 10)) {
       if (l.type || (l.flags & Flag.Docks)) continue;
       const dist = Math.hypot(l.x - d.x, l.y - d.y);
-      if (dist > 9.5 || rng.next() > 1.08 - dist * 0.085) continue;
+      if (dist > 9.5 || rng.next() > (dist < 6.2 ? 1.3 : 1.08) - dist * 0.085) continue;
       if (!parkDone && dist < 4 && rng.next() < 0.25) { l.type = BT.Park; l.level = 1; parkDone = true; continue; }
       if (dist < 2.6 && rng.next() < 0.6) { l.type = BT.Com; l.level = 1; }
       else { l.type = BT.Res; l.level = 1; }
@@ -120,6 +120,31 @@ export function layoutTown(c: TownCtx) {
     }
   }
   for (const l of lots.lots) if (l.alive && (l.flags & Flag.Docks)) { l.type = BT.Ind; l.level = rng.next() < 0.25 ? 2 : 1; l.age = 60; }
+
+  // old town cores: the original plots around each village centre, a paved square at the central junction and a church on it
+  for (const d of c.districts) {
+    const near = lots.near(d.x, d.y, 7).filter((l) => !(l.flags & Flag.Docks));
+    for (const l of near) if (Math.hypot(l.x - d.x, l.y - d.y) < 6.2) l.flags |= Flag.Core;
+    // the old core is dense: back plots fill the block interiors behind the street fronts
+    for (const l of near) {
+      if (!(l.flags & Flag.Core) || Math.hypot(l.x - d.x, l.y - d.y) > 4.6) continue;
+      const k = LOT_D + 0.06, bx = l.x - Math.sin(l.ang) * k, by = l.y + Math.cos(l.ang) * k;
+      const b = lots.tryAdd(bx, by, l.ang + Math.PI, LOT_W, LOT_D, RC.Local);
+      if (!b) continue;
+      b.flags |= Flag.Core;
+      if (rng.next() < 0.8) { b.type = BT.Res; b.level = 1; b.age = 24; }
+    }
+    const byDist = near.slice().sort((a, b) => Math.hypot(a.x - d.x, a.y - d.y) - Math.hypot(b.x - d.x, b.y - d.y) || a.id - b.id);
+    const sq = byDist[0];
+    if (!sq) continue;
+    sq.type = BT.Square; sq.level = 1;
+    // the church faces the square: the closest other plot
+    const ch = byDist.slice(1).find((l) => Math.hypot(l.x - sq.x, l.y - sq.y) < 1.6) ?? byDist[1];
+    if (ch) { ch.type = BT.Landmark; ch.level = 1; }
+    // a second paved plot opposite makes the square read as a plaza across the street
+    const opp = byDist.slice(1).find((l) => l !== ch && Math.hypot(l.x - sq.x, l.y - sq.y) < 1.3 && l.type !== BT.Landmark);
+    if (opp && rng.next() < 0.7) { opp.type = BT.Square; opp.level = 1; }
+  }
 }
 
 // ------------------------------------------------------------------ growth agents

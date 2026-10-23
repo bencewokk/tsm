@@ -35,9 +35,9 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   const m = ev.data;
   if (m.type === 'init') {
     init = m;
-    terrain = buildTerrain(m.height, m.water);
+    terrain = buildTerrain(m.height, m.water, m.flags);
     env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment);
-    city = new CityView(m.water, (x, z) => terrain!.sample(x, z));
+    city = new CityView(m.water, m.flags, m.villages, (x, z) => terrain!.sample(x, z));
     env.scene.add(city.group);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
     env.scene.add(metro.group);
@@ -268,4 +268,18 @@ async function demo(deal = 0, lineAt = 10) {
   planner.commit();
   await sl(400);
 }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
+/** Dev helper: save the canvas at full size to screenshots/<name>.png (served by the dev server only). */
+async function shot(name: string) {
+  env.render();
+  const url = env.renderer.domElement.toDataURL('image/png');
+  await fetch(`/__shot?name=${encodeURIComponent(name)}`, { method: 'POST', body: url });
+  return name;
+}
+/** Dev helper: point the camera at a cell position from an azimuth / polar angle. */
+function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
+  const tx = x * CELL, tz = y * CELL;
+  env.controls.target.set(tx, 0, tz);
+  env.camera.position.set(tx + Math.sin(az) * Math.sin(pol) * dist, Math.cos(pol) * dist, tz + Math.cos(az) * Math.sin(pol) * dist);
+  env.controls.update();
+}
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, shot, view, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };

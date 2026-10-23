@@ -1,122 +1,85 @@
 import * as THREE from 'three';
-import { N, CELL, BT, Flag } from '../sim/constants';
+import { N, CELL, Flag } from '../sim/constants';
 import type { StateMsg, LotsMsg, RoadsMsg } from '../sim/protocol';
+import type { Village } from '../sim/terrain';
 import { vhash } from './common';
 import { patchBuildingMaterial } from './look';
+import { Layer, unitGeos } from './layers';
+import { kindOf, partsFor, GROUND, SITE, PAL, type Part, type Kind } from './forms';
+import { Harbour } from './harbour';
 
-/** A box in a lot's local frame: u along the street, v across it (metres). */
-export interface Box { u: number; v: number; w: number; d: number; h: number; color: number }
+// road widths (m) by class, and the narrow cobbled lanes of the old cores
+const ROAD_W = [16, 11, 8];
+const CORE_W = 6.5;
+const ASPHALT = [new THREE.Color(0x7d8186), new THREE.Color(0x8c8f93), new THREE.Color(0x9a9c9f)];
+const COBBLE = new THREE.Color(0xbfae94);
+const KERB = new THREE.Color(0xd9d5cb);
 
-const COL = { res: 0xf6f0e2, res2: 0xf1e9d8, com: 0xfbfaf6, com2: 0xeef0f0, ind: 0xd9d1c3, ind2: 0xcfc6b6, park: 0xc5d6b0 };
-
-/** Building massing for (type, level) on a lot. Purely visual; seeded by lot id. */
-export function buildingForm(id: number, type: number, level: number): Box[] {
-  const r = (k: number) => vhash(id, k);
-  const out: Box[] = [];
-  if (type === BT.Res) {
-    if (level === 1) {
-      if (r(1) < 0.5) {
-        out.push({ u: -9 + r(2) * 2, v: (r(3) - 0.5) * 6, w: 12 + r(4) * 3, d: 10 + r(5) * 3, h: 6 + r(6) * 3, color: COL.res });
-        out.push({ u: 9 - r(7) * 2, v: (r(8) - 0.5) * 6, w: 11 + r(9) * 3, d: 10 + r(10) * 3, h: 6 + r(11) * 3, color: COL.res2 });
-      } else out.push({ u: (r(2) - 0.5) * 8, v: (r(3) - 0.5) * 6, w: 15 + r(4) * 5, d: 12 + r(5) * 3, h: 7 + r(6) * 3, color: r(7) < 0.5 ? COL.res : COL.res2 });
-    } else if (level === 2) {
-      out.push({ u: 0, v: -4, w: 32, d: 15, h: 14 + r(2) * 10, color: COL.res });
-      if (r(3) < 0.6) out.push({ u: (r(4) - 0.5) * 12, v: 9, w: 14, d: 12, h: 10 + r(5) * 6, color: COL.res2 });
-    } else if (level === 3) {
-      out.push({ u: 0, v: 0, w: 35, d: 31, h: 8, color: COL.res2 });
-      out.push({ u: (r(4) - 0.5) * 6, v: (r(5) - 0.5) * 5, w: 18 + r(6) * 4, d: 18 + r(7) * 4, h: 55 + r(2) * 45, color: COL.res });
-    }
-  } else if (type === BT.Com) {
-    if (level === 1) out.push({ u: 0, v: -4, w: 28 + r(1) * 6, d: 20 + r(2) * 5, h: 7 + r(3) * 3, color: COL.com });
-    else if (level === 2) out.push({ u: 0, v: 0, w: 33, d: 29, h: 22 + r(2) * 16, color: COL.com });
-    else if (level === 3) {
-      out.push({ u: 0, v: 0, w: 37, d: 33, h: 12, color: COL.com2 });
-      out.push({ u: 0, v: 0, w: 23 + r(3) * 4, d: 23 + r(4) * 4, h: 100 + r(2) * 60, color: COL.com });
-    }
-  } else if (type === BT.Ind) {
-    out.push({ u: 0, v: 0, w: 35, d: 28 + r(1) * 4, h: level >= 2 ? 13 : 9, color: r(2) < 0.5 ? COL.ind : COL.ind2 });
-    if (level >= 2 && r(3) < 0.6) out.push({ u: 13, v: 10, w: 4, d: 4, h: 34, color: COL.ind2 });
-  } else if (type === BT.Park) {
-    out.push({ u: 0, v: 0, w: 37, d: 33, h: 0.8, color: COL.park });
-  }
-  return out;
-}
-
-function boxGeo(): THREE.BufferGeometry {
-  const g = new THREE.BoxGeometry(1, 1, 1);
-  g.translate(0, 0.5, 0);
-  return g;
-}
-
-const ROAD_W = [17, 12, 9]; // metres by class
-const ROAD_COL = [new THREE.Color(0xe9e5dc), new THREE.Color(0xf0ede6), new THREE.Color(0xf5f3ee)];
-
-interface Anim { start: number; count: number; lot: number }
+interface Anim { lot: number; parts: { layer: Layer; i: number }[] }
 
 export class CityView {
   group = new THREE.Group();
-  buildings: THREE.InstancedMesh;
-  ghosts: THREE.InstancedMesh;
-  roads: THREE.Mesh;
-  trees: THREE.InstancedMesh;
-  craneMast: THREE.InstancedMesh;
-  craneJib: THREE.InstancedMesh;
-  buildingMat: THREE.MeshStandardMaterial;
+  wallMat: THREE.MeshStandardMaterial;
+  glassMat: THREE.MeshStandardMaterial;
+  plainMat: THREE.MeshStandardMaterial;
+  treeMat: THREE.MeshStandardMaterial;
   roadMat: THREE.MeshStandardMaterial;
+  ghostMat: THREE.MeshStandardMaterial;
+  craneMat: THREE.MeshStandardMaterial;
+  roads: THREE.Mesh;
+  private L: Record<string, Layer>;
+  private ghosts: Layer;
+  private pads: Layer;
+  private craneMast: Layer;
+  private craneJib: Layer;
+  harbour: Harbour;
   get surfaceMats(): THREE.Material[] {
-    return [this.buildingMat, this.roadMat, this.trees.material as THREE.Material, this.craneMast.material as THREE.Material];
+    return [this.wallMat, this.glassMat, this.plainMat, this.treeMat, this.roadMat, this.craneMat];
   }
-  /** per instance: x, base, z, w, h, d, rot */
-  private inst = new Float32Array(0);
   private anims: Anim[] = [];
   private cranes: { x: number; y: number; z: number; h: number; k: number }[] = [];
-  private m = new THREE.Matrix4();
-  private q = new THREE.Quaternion();
-  private v = new THREE.Vector3();
-  private s = new THREE.Vector3();
-  private up = new THREE.Vector3(0, 1, 0);
-  private col = new THREE.Color();
   private lots: LotsMsg | null = null;
   private roadVersion = -1;
-  private treeSig = '';
-  private occ = new Uint8Array(N * 4 * N * 4); // 12.5 m occupancy grid (roads + plots) for tree placement
+  private occ = new Uint8Array(N * 4 * N * 4); // 12.5 m occupancy grid (roads) for wild tree placement
+  private coreEdge = new Set<number>();
 
-  constructor(private water: Uint8Array, private sample: (x: number, z: number) => number) {
-    const cap = 60000;
-    this.buildingMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0, emissive: 0x000000 });
-    patchBuildingMaterial(this.buildingMat);
-    this.buildings = new THREE.InstancedMesh(boxGeo(), this.buildingMat, cap);
-    this.buildings.castShadow = true;
-    this.buildings.receiveShadow = true;
-    this.buildings.count = 0;
-    this.buildings.frustumCulled = false;
-    this.inst = new Float32Array(cap * 7);
-
-    const ghostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.55, depthWrite: false, emissive: 0x404040, emissiveIntensity: 0.4 });
-    this.ghosts = new THREE.InstancedMesh(boxGeo(), ghostMat, 4000);
-    this.ghosts.count = 0;
-    this.ghosts.frustumCulled = false;
-    this.ghosts.renderOrder = 5;
+  constructor(private water: Uint8Array, private flags: Uint8Array, private villages: Village[], private sample: (x: number, z: number) => number) {
+    const g = unitGeos();
+    this.wallMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0 });
+    patchBuildingMaterial(this.wallMat, false);
+    this.glassMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0.25, envMapIntensity: 1 });
+    patchBuildingMaterial(this.glassMat, true);
+    this.plainMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0 });
+    this.treeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true });
+    this.craneMat = new THREE.MeshStandardMaterial({ color: 0xd0643f, roughness: 0.8 });
+    this.ghostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.5, depthWrite: false, emissive: 0x404040, emissiveIntensity: 0.4 });
+    this.L = {
+      wall: new Layer(g.box, this.wallMat, 40000),
+      glass: new Layer(g.box, this.glassMat, 8000),
+      plain: new Layer(g.box, this.plainMat, 40000),
+      gable: new Layer(g.gable, this.plainMat, 30000),
+      saw: new Layer(g.saw, this.plainMat, 4000),
+      pyr: new Layer(g.pyr, this.plainMat, 2000),
+      cyl: new Layer(g.cyl, this.plainMat, 6000),
+      leaf: new Layer(g.sphere, this.treeMat, 40000),
+      pine: new Layer(g.cone, this.treeMat, 12000),
+      trunk: new Layer(g.cyl, this.plainMat, 20000, false),
+    };
+    this.pads = new Layer(g.box, this.plainMat, 12000, false);
+    this.ghosts = new Layer(g.box, this.ghostMat, 6000, false);
+    this.ghosts.mesh.renderOrder = 5;
+    this.craneMast = new Layer(g.box, this.craneMat, 2000);
+    const jib = new THREE.BoxGeometry(1, 1, 1);
+    jib.translate(0.3, 0, 0);
+    this.craneJib = new Layer(jib, this.craneMat, 2000);
 
     this.roadMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, emissive: 0xffb860, emissiveIntensity: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     this.roads = new THREE.Mesh(new THREE.BufferGeometry(), this.roadMat);
     this.roads.receiveShadow = true;
     this.roads.frustumCulled = false;
 
-    const treeMat = new THREE.MeshStandardMaterial({ color: 0xb4c79c, roughness: 1, flatShading: true });
-    this.trees = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), treeMat, 30000);
-    this.trees.castShadow = true;
-    this.trees.receiveShadow = true;
-    this.trees.count = 0;
-    this.trees.frustumCulled = false;
-
-    const craneMat = new THREE.MeshStandardMaterial({ color: 0xd0643f, roughness: 0.8 });
-    this.craneMast = new THREE.InstancedMesh(boxGeo(), craneMat, 2000);
-    const jibGeo = new THREE.BoxGeometry(1, 1, 1);
-    jibGeo.translate(0.3, 0, 0);
-    this.craneJib = new THREE.InstancedMesh(jibGeo, craneMat, 2000);
-    for (const c of [this.craneMast, this.craneJib]) { c.count = 0; c.castShadow = true; c.frustumCulled = false; }
-    this.group.add(this.roads, this.trees, this.buildings, this.ghosts, this.craneMast, this.craneJib);
+    this.harbour = new Harbour(water, flags, sample, this.plainMat);
+    this.group.add(this.roads, this.pads.mesh, ...Object.values(this.L).map((l) => l.mesh), this.ghosts.mesh, this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
   }
 
   private ground(x: number, z: number) {
@@ -128,12 +91,10 @@ export class CityView {
   update(s: StateMsg) {
     this.lots = s.lots;
     if (s.roads.version !== this.roadVersion) { this.roadVersion = s.roads.version; this.rebuildRoads(s.roads); }
-    this.rebuildBuildings(s);
-    const sig = `${s.roads.version}|${s.lots.n}|${s.stats.buildings}`;
-    if (sig !== this.treeSig) { this.treeSig = sig; this.rebuildTrees(s); }
+    this.rebuild(s);
   }
 
-  // ---------------------------------------------------------------- roads: one merged, terrain-following mesh
+  // ---------------------------------------------------------------- roads: asphalt on a pale kerb strip, cobbles in the old cores
   private rebuildRoads(r: RoadsMsg) {
     const pos: number[] = [], col: number[] = [], idx: number[] = [];
     let base = 0;
@@ -150,33 +111,42 @@ export class CityView {
     const yAt = (x: number, z: number) => {
       const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
       const wet = cx >= 0 && cz >= 0 && cx < N && cz < N && this.water[cz * N + cx];
-      return wet ? 6 : this.sample(x, z) + 0.7;
+      return wet ? 6 : this.sample(x, z) + 0.6;
     };
-    const maxW = new Float32Array(r.nodes.length / 2);
+    const nNodes = r.nodes.length / 2;
+    const core = (x: number, y: number) => this.villages.some((v) => Math.hypot(v.x + 0.5 - x, v.y + 0.5 - y) < 6.5);
+    const maxW = new Float32Array(nNodes), nodeCol: THREE.Color[] = new Array(nNodes).fill(null);
+    const widths: number[] = [], colors: THREE.Color[] = [];
+    this.coreEdge.clear();
     for (let k = 0; k < r.ea.length; k++) {
-      const a = r.ea[k], b = r.eb[k], w = ROAD_W[r.cls[k]], c = ROAD_COL[r.cls[k]];
-      maxW[a] = Math.max(maxW[a], w); maxW[b] = Math.max(maxW[b], w);
+      const a = r.ea[k], b = r.eb[k];
+      const mx = (r.nodes[a * 2] + r.nodes[b * 2]) / 2, my = (r.nodes[a * 2 + 1] + r.nodes[b * 2 + 1]) / 2;
+      const isCore = r.cls[k] !== 0 && r.year[k] === 0 && core(mx, my);
+      if (isCore) this.coreEdge.add(r.ids[k]);
+      const w = isCore ? CORE_W : ROAD_W[r.cls[k]], c = isCore ? COBBLE : ASPHALT[r.cls[k]];
+      widths.push(w); colors.push(c);
+      for (const n of [a, b]) if (w > maxW[n]) { maxW[n] = w; nodeCol[n] = c; }
+    }
+    const strip = (k: number, w: number, c: THREE.Color, lift: number) => {
+      const a = r.ea[k], b = r.eb[k];
       const ax = r.nodes[a * 2] * CELL, az = r.nodes[a * 2 + 1] * CELL, bx = r.nodes[b * 2] * CELL, bz = r.nodes[b * 2 + 1] * CELL;
       const L = Math.hypot(bx - ax, bz - az);
-      if (L < 1) continue;
+      if (L < 1) return;
       const nx = (-(bz - az) / L) * w / 2, nz = ((bx - ax) / L) * w / 2;
       const steps = Math.max(1, Math.ceil(L / 25));
       for (let j = 0; j <= steps; j++) {
         const t = j / steps, x = ax + (bx - ax) * t, z = az + (bz - az) * t;
-        const y = yAt(x, z);
+        const y = yAt(x, z) + lift;
         pos.push(x + nx, y, z + nz, x - nx, y, z - nz);
         col.push(c.r, c.g, c.b, c.r, c.g, c.b);
         if (j > 0) { const o = base + (j - 1) * 2; idx.push(o, o + 2, o + 1, o + 1, o + 2, o + 3); }
-        stampOcc(x, z, w / 2 + 4);
+        if (lift === 0) stampOcc(x, z, w / 2 + 2);
       }
       base += (steps + 1) * 2;
-    }
-    // junction discs so corners read cleanly at any angle
-    const SEG = 10;
-    for (let n = 0; n < maxW.length; n++) {
-      if (!maxW[n]) continue;
-      const x = r.nodes[n * 2] * CELL, z = r.nodes[n * 2 + 1] * CELL, y = yAt(x, z) + 0.05, rad = maxW[n] / 2;
-      const c = ROAD_COL[2];
+    };
+    const disc = (n: number, rad: number, c: THREE.Color, lift: number) => {
+      const SEG = 12;
+      const x = r.nodes[n * 2] * CELL, z = r.nodes[n * 2 + 1] * CELL, y = yAt(x, z) + lift;
       pos.push(x, y, z); col.push(c.r, c.g, c.b);
       for (let k = 0; k < SEG; k++) {
         const a = (k / SEG) * Math.PI * 2;
@@ -184,7 +154,12 @@ export class CityView {
         idx.push(base, base + 1 + ((k + 1) % SEG), base + 1 + k);
       }
       base += SEG + 1;
-    }
+    };
+    // kerb / pavement strip first, then the carriageway on top
+    for (let k = 0; k < r.ea.length; k++) strip(k, widths[k] + 5, KERB, 0);
+    for (let n = 0; n < nNodes; n++) if (maxW[n]) disc(n, maxW[n] / 2 + 2.5, KERB, 0.02);
+    for (let k = 0; k < r.ea.length; k++) strip(k, widths[k], colors[k], 0.25);
+    for (let n = 0; n < nNodes; n++) if (maxW[n]) disc(n, maxW[n] / 2, nodeCol[n], 0.27);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
@@ -194,140 +169,123 @@ export class CityView {
     this.roads.geometry = g;
   }
 
-  // ---------------------------------------------------------------- buildings on plots
-  private rebuildBuildings(s: StateMsg) {
+  // ---------------------------------------------------------------- plots: ground, buildings, trees
+  private rebuild(s: StateMsg) {
     const L = s.lots;
-    let n = 0, ng = 0;
-    const inst = this.inst;
+    for (const l of Object.values(this.L)) l.reset();
+    this.pads.reset(); this.ghosts.reset(); this.craneMast.reset(); this.craneJib.reset();
     this.anims = [];
     this.cranes = [];
-    const ghostCol = new THREE.Color();
+    const lotOcc = this.occ.slice(), W4 = N * 4;
     for (let k = 0; k < L.n; k++) {
       const building = L.constr[k] > 0;
       const lvl = building ? L.target[k] : L.level[k];
       const t = L.type[k];
       const x = L.x[k] * CELL, z = L.y[k] * CELL, ang = L.ang[k];
       const ca = Math.cos(ang), sa = Math.sin(ang);
-      const base = this.ground(x, z) - 2;
-      if (t && lvl) {
-        const start = n;
+      const g = this.ground(x, z);
+      const planned = (L.flags[k] & Flag.Planned) !== 0 && !building;
+      const kind: Kind = kindOf(t, lvl, L.flags[k]);
+      const w = L.w[k] * CELL, d = L.d[k] * CELL;
+      // keep wild trees off every plot
+      for (let u = -w / 2; u <= w / 2; u += 8) for (let v = -d / 2; v <= d / 2; v += 8) {
+        const gx = Math.floor((x + u * ca - v * sa) / 12.5), gz = Math.floor((z + u * sa + v * ca) / 12.5);
+        if (gx >= 0 && gz >= 0 && gx < W4 && gz < W4) lotOcc[gz * W4 + gx] = 1;
+      }
+      // ground treatment by land use
+      const padC = building ? SITE : planned ? SITE : kind !== 'none' ? GROUND[kind] : 0;
+      if (padC) this.pads.add(x, g - 5, z, w - 1, 5.35, d - 1, -ang, padC);
+      if (kind !== 'none') {
+        const anim: Anim = { lot: k, parts: [] };
         let top = 0;
-        for (const b of buildingForm(L.id[k], t, lvl)) {
-          if (n >= 60000) break;
-          // local (u along street, v across) -> world (x, z)
-          const wx = x + b.u * ca - b.v * sa, wz = z + b.u * sa + b.v * ca;
-          inst.set([wx, base, wz, b.w, b.h + 2, b.d, ang], n * 7);
-          this.setInst(n, 1);
-          this.buildings.setColorAt(n, this.col.setHex(b.color));
-          top = Math.max(top, b.h);
-          n++;
+        for (const p of partsFor(L.id[k], kind, lvl)) {
+          const wx = x + p.u * ca - p.v * sa, wz = z + p.u * sa + p.v * ca;
+          const rot = -(ang + (p.r ?? 0));
+          if (p.s === 'tree' || p.s === 'pine') { this.tree(wx, g, wz, p.w, p.h, p.s === 'pine', L.id[k] * 31 + Math.round(p.u * 7 + p.v)); continue; }
+          const layer = this.L[p.s];
+          const yb = g - 2;
+          const yoff = p.y === 0 ? 0 : p.y + 2;
+          const h = p.y === 0 ? p.h + 2 : p.h;
+          const i = layer.add(wx, yb, wz, p.w, h, p.d, rot, p.c, yoff);
+          if (i >= 0 && building) anim.parts.push({ layer, i });
+          top = Math.max(top, p.y + p.h);
         }
         if (building) {
-          this.anims.push({ start, count: n - start, lot: k });
-          if (lvl >= 2) this.cranes.push({ x: x + 18 * ca - 16 * sa, y: base, z: z + 18 * sa + 16 * ca, h: top + 14, k: L.id[k] });
+          this.anims.push(anim);
+          if (lvl >= 2 && kind !== 'park' && kind !== 'square') this.cranes.push({ x: x + 16 * ca - 15 * sa, y: g - 2, z: z + 16 * sa + 15 * ca, h: top + 14, k: L.id[k] });
         }
       }
-      if ((L.flags[k] & Flag.Planned) && !building) {
-        for (const b of buildingForm(L.id[k], L.planType[k], L.planLevel[k])) {
-          if (ng >= 4000) break;
-          const wx = x + b.u * ca - b.v * sa, wz = z + b.u * sa + b.v * ca;
-          this.v.set(wx, base + 2, wz); this.s.set(b.w, b.h, b.d); this.q.setFromAxisAngle(this.up, -ang);
-          this.m.compose(this.v, this.q, this.s);
-          ghostCol.setHex((L.flags[k] & Flag.CarLocked) ? 0xd9785a : L.served[k] ? 0x6fb0e8 : 0xf2c46a);
-          this.ghosts.setColorAt(ng, ghostCol);
-          this.ghosts.setMatrixAt(ng++, this.m);
+      if (planned) {
+        const pk = kindOf(L.planType[k], L.planLevel[k], L.flags[k]);
+        const gc = (L.flags[k] & Flag.CarLocked) ? 0xd9785a : L.served[k] ? 0x6fb0e8 : 0xf2c46a;
+        for (const p of partsFor(L.id[k], pk, L.planLevel[k]) as Part[]) {
+          if (p.s !== 'wall' && p.s !== 'glass') continue;
+          const wx = x + p.u * ca - p.v * sa, wz = z + p.u * sa + p.v * ca;
+          this.ghosts.add(wx, g + p.y, wz, p.w, p.h, p.d, -ang, gc);
         }
       }
     }
-    this.buildings.count = n;
-    this.buildings.instanceMatrix.needsUpdate = true;
-    if (this.buildings.instanceColor) this.buildings.instanceColor.needsUpdate = true;
-    this.ghosts.count = ng;
-    this.ghosts.instanceMatrix.needsUpdate = true;
-    if (this.ghosts.instanceColor) this.ghosts.instanceColor.needsUpdate = true;
-    this.craneMast.count = this.cranes.length;
-    this.craneJib.count = this.cranes.length;
+    this.wildTrees(s, lotOcc);
+    for (const l of Object.values(this.L)) l.finish();
+    this.pads.finish(); this.ghosts.finish();
+    for (const c of this.cranes) { this.craneMast.add(c.x, c.y, c.z, 2.2, c.h, 2.2, 0, 0xd0643f); this.craneJib.add(c.x, c.y + c.h, c.z, 42, 1.8, 1.8, 0, 0xd0643f); }
+    this.craneMast.finish(); this.craneJib.finish();
     this.animate(0, 0);
   }
 
-  private setInst(n: number, p: number) {
-    const a = this.inst, o = n * 7;
-    this.v.set(a[o], a[o + 1], a[o + 2]);
-    this.s.set(a[o + 3], Math.max(0.01, a[o + 4] * p), a[o + 5]);
-    this.q.setFromAxisAngle(this.up, -a[o + 6]);
-    this.m.compose(this.v, this.q, this.s);
-    this.buildings.setMatrixAt(n, this.m);
+  private tree(x: number, g: number, z: number, size: number, h: number, pine: boolean, seed: number) {
+    const c = pine ? PAL.pine[Math.floor(vhash(seed, 1) * PAL.pine.length)] : PAL.leaf[Math.floor(vhash(seed, 1) * PAL.leaf.length)];
+    if (pine) { this.L.pine.add(x, g + 1, z, size, h, size, 0, c); this.L.trunk.add(x, g - 0.5, z, 1, 2, 1, 0, PAL.trunk); }
+    else { this.L.trunk.add(x, g - 0.5, z, 1.1, 3.5, 1.1, 0, PAL.trunk); this.L.leaf.add(x, g + 2.4, z, size, h, size, vhash(seed, 2) * 6, c); }
   }
 
-  // ---------------------------------------------------------------- trees: only where no street or plot is
-  private rebuildTrees(s: StateMsg) {
-    const occ = this.occ.slice();
-    const L = s.lots, W = N * 4;
-    for (let k = 0; k < L.n; k++) {
-      if (L.type[k] === BT.Park) continue;
-      const x = L.x[k] * CELL, z = L.y[k] * CELL, ca = Math.cos(L.ang[k]), sa = Math.sin(L.ang[k]);
-      const hw = (L.w[k] * CELL) / 2, hd = (L.d[k] * CELL) / 2;
-      for (let u = -hw; u <= hw; u += 8) for (let v = -hd; v <= hd; v += 8) {
-        const gx = Math.floor((x + u * ca - v * sa) / 12.5), gz = Math.floor((z + u * sa + v * ca) / 12.5);
-        if (gx >= 0 && gz >= 0 && gx < W && gz < W) occ[gz * W + gx] = 1;
-      }
-    }
-    let n = 0;
-    for (let i = 0; i < N * N && n < 29990; i++) {
+  /** Trees on open land, denser woodland on slopes too steep to build. */
+  private wildTrees(s: StateMsg, occ: Uint8Array) {
+    const W = N * 4;
+    for (let i = 0; i < N * N; i++) {
       if (this.water[i]) continue;
+      if (this.flags[i] & Flag.Docks) continue;
       const steep = (s.flags[i] & Flag.Steep) !== 0;
       const r0 = vhash(i, 77);
-      const want = r0 < (steep ? 0.6 : 0.16) ? 1 + Math.floor(vhash(i, 78) * 3) : 0;
+      const want = r0 < (steep ? 0.85 : 0.16) ? (steep ? 3 : 1) + Math.floor(vhash(i, 78) * 3) : 0;
       const cx = (i % N) * CELL, cz = ((i / N) | 0) * CELL;
       for (let k = 0; k < want; k++) {
         const x = cx + vhash(i, 90 + k) * CELL, z = cz + vhash(i, 100 + k) * CELL;
         const gx = Math.floor(x / 12.5), gz = Math.floor(z / 12.5);
         if (occ[gz * W + gx]) continue;
-        const sc = 5 + vhash(i, 80 + k) * 4;
-        this.v.set(x, this.sample(x, z) + sc * 0.9, z);
-        this.s.set(sc, sc * 1.25, sc);
-        this.q.identity();
-        this.m.compose(this.v, this.q, this.s);
-        this.trees.setMatrixAt(n++, this.m);
+        const sc = 6 + vhash(i, 80 + k) * 5;
+        const pine = vhash(i, 110 + k) < (steep ? 0.55 : 0.2);
+        const c = pine ? PAL.pine[Math.floor(vhash(i, 120 + k) * 3)] : PAL.leaf[Math.floor(vhash(i, 120 + k) * 5)];
+        const y = this.sample(x, z);
+        if (pine) this.L.pine.add(x, y - 0.5, z, sc * 0.8, sc * 2, sc * 0.8, 0, c);
+        else this.L.leaf.add(x, y - 0.5, z, sc, sc * 1.1, sc, vhash(i, 130 + k) * 6, c);
       }
     }
-    // park plots get a small grove
-    for (let k = 0; k < L.n && n < 29990; k++) {
-      if (L.type[k] !== BT.Park) continue;
-      const x = L.x[k] * CELL, z = L.y[k] * CELL;
-      for (let j = 0; j < 5; j++) {
-        const px = x + (vhash(L.id[k], 200 + j) - 0.5) * 28, pz = z + (vhash(L.id[k], 300 + j) - 0.5) * 28, sc = 5 + vhash(L.id[k], 400 + j) * 3;
-        this.v.set(px, this.sample(px, pz) + sc * 0.9, pz); this.s.set(sc, sc * 1.25, sc); this.q.identity();
-        this.m.compose(this.v, this.q, this.s);
-        this.trees.setMatrixAt(n++, this.m);
-      }
-    }
-    this.trees.count = n;
-    this.trees.instanceMatrix.needsUpdate = true;
   }
 
   /** Rising buildings + cranes. frac = fraction of the current month elapsed. */
   animate(frac: number, time: number) {
     const L = this.lots;
     if (!L) return;
+    const touched = new Set<Layer>();
     for (const a of this.anims) {
       const tot = Math.max(1, L.constrTotal[a.lot]);
       const done = tot - L.constr[a.lot];
       let p = Math.min(1, (done + frac) / tot);
       p = 1 - Math.pow(1 - p, 2);
-      for (let k = 0; k < a.count; k++) this.setInst(a.start + k, p);
+      for (const q of a.parts) { q.layer.set(q.i, p); touched.add(q.layer); }
     }
-    if (this.anims.length) this.buildings.instanceMatrix.needsUpdate = true;
+    for (const l of touched) l.touch();
+    if (!this.cranes.length) return;
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
     for (let k = 0; k < this.cranes.length; k++) {
       const c = this.cranes[k];
-      this.v.set(c.x, c.y, c.z); this.s.set(2.2, c.h, 2.2); this.q.identity();
-      this.m.compose(this.v, this.q, this.s);
-      this.craneMast.setMatrixAt(k, this.m);
-      this.v.set(c.x, c.y + c.h, c.z); this.s.set(42, 1.8, 1.8);
-      this.q.setFromAxisAngle(this.up, time * 0.25 + c.k);
-      this.m.compose(this.v, this.q, this.s);
-      this.craneJib.setMatrixAt(k, this.m);
+      v.set(c.x, c.y + c.h, c.z); sc.set(42, 1.8, 1.8);
+      q.setFromAxisAngle(up, time * 0.25 + c.k);
+      m.compose(v, q, sc);
+      this.craneJib.mesh.setMatrixAt(k, m);
     }
-    if (this.cranes.length) { this.craneMast.instanceMatrix.needsUpdate = true; this.craneJib.instanceMatrix.needsUpdate = true; }
+    this.craneJib.touch();
   }
 }
+

@@ -4,7 +4,9 @@ export const ZONE = 8;              // cells per zone side
 export const NZ = N / ZONE;         // zones per side (16)
 export const ZONES = NZ * NZ;       // 256
 
-export const BT = { None: 0, Res: 1, Com: 2, Ind: 3, Park: 4 } as const;
+export const BT = { None: 0, Res: 1, Com: 2, Ind: 3, Park: 4, Square: 5, Landmark: 6 } as const;
+/** Amenity plots that hold no homes or jobs and never grow or decline. */
+export const isAmenity = (t: number) => t === BT.Park || t === BT.Square || t === BT.Landmark;
 export const Water = { Land: 0, Sea: 1, River: 2 } as const;
 
 export const Flag = {
@@ -12,6 +14,7 @@ export const Flag = {
   CarLocked: 2,   // residents bought cars: lower transit share for good
   Planned: 4,     // ghost building planned by the docks project
   Steep: 8,       // too steep to build
+  Core: 16,       // lot flag: part of an original village core (old town)
 } as const;
 
 /** Households per residential level (index = level). */

@@ -1,4 +1,4 @@
-import { N, CELL, ZONE, NZ, ZONES, BT, Flag, HOMES, COM_JOBS, IND_JOBS, BUILD_MONTHS, PERSONS_PER_HOME, WORKERS_PER_HOME } from './constants';
+import { N, CELL, ZONE, NZ, ZONES, BT, Flag, Water, isAmenity, HOMES, COM_JOBS, IND_JOBS, BUILD_MONTHS, PERSONS_PER_HOME, WORKERS_PER_HOME } from './constants';
 import { STATION_COST, TRAIN_COST, START_MONEY, TRIPS_PER_HOME, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
 import { generateTerrain, idx, inb, DIR4, type Grid } from './terrain';
@@ -116,7 +116,7 @@ export class Sim {
     this.roads.blockFlags = Flag.Docks;
     this.roads.corridor = {
       blocked: (ax, ay, bx, by) => this.lots.inCorridor(ax, ay, bx, by, ROAD_HALF[RC.Local] + 0.05)
-        .some((l) => (l.flags & (Flag.Docks | Flag.Planned)) || l.constr > 0 || l.type === BT.Ind || l.type === BT.Park || l.level >= 2),
+        .some((l) => (l.flags & (Flag.Docks | Flag.Planned)) || l.constr > 0 || l.type === BT.Ind || isAmenity(l.type) || l.level >= 2),
       clear: (ax, ay, bx, by) => { for (const l of this.lots.inCorridor(ax, ay, bx, by, ROAD_HALF[RC.Local] + 0.05)) this.lots.remove(l); },
     };
     this.aggregate();
@@ -405,7 +405,8 @@ export class Sim {
       const hh = this.lotHomes(l), jj = this.lotJobs(l), z = this.zoneOf(l.cell);
       this.cHomes[l.cell] += hh; this.cJobs[l.cell] += jj;
       if (l.type === BT.Ind) this.cInd[l.cell] += l.level;
-      if (l.type === BT.Park) this.cPark[l.cell] += 1;
+      if (l.type === BT.Park || l.type === BT.Square) this.cPark[l.cell] += 1;
+      else if (l.type === BT.Landmark) this.cPark[l.cell] += 0.5;
       this.zHomes[z] += hh; this.zJobs[z] += jj; h += hh; j += jj;
       if (l.flags & Flag.CarLocked) this.zCarLocked[z] += hh;
       jx += (jj + hh * 0.3) * l.x; jy += (jj + hh * 0.3) * l.y;
@@ -745,7 +746,7 @@ export class Sim {
 
     // decline: buildings whose value falls empty out
     for (const l of lots) {
-      if (!l.type || l.type === BT.Park || l.constr || (l.flags & Flag.Planned)) continue;
+      if (!l.type || isAmenity(l.type) || l.constr || (l.flags & Flag.Planned)) continue;
       const v = this.fieldAt(this.lvS, l.x, l.y);
       if (v < TUNE.downLV[l.level]) l.low = Math.min(255, l.low + 1); else l.low = 0;
       if (l.low >= 6 && this.rng.next() < 0.25) {
@@ -758,6 +759,22 @@ export class Sim {
       for (const l of lots) if (l.type === BT.Res && !l.constr && this.lvS[l.cell] < 0.3 && this.rng.next() < 0.02) { l.type = BT.None; l.level = 0; }
     }
     this.placeParks(lots);
+    this.carveHubSquares();
+  }
+
+  /** The busiest stations get a paved square next to the entrance; it raises value around it, so denser buildings edge it. */
+  private carveHubSquares() {
+    for (const st of this.metro.stations) {
+      if (st.riders < 5000) continue;
+      const near = this.lots.near(st.x, st.y, 2.2);
+      if (near.some((l) => l.type === BT.Square && Math.hypot(l.x - st.x, l.y - st.y) < 2.5)) continue;
+      const pick = near.filter((l) => !l.constr && !(l.flags & (Flag.Docks | Flag.Planned)) && (l.type === BT.None || ((l.type === BT.Res || l.type === BT.Com) && l.level === 1)))
+        .sort((a, b) => Math.hypot(a.x - st.x, a.y - st.y) - Math.hypot(b.x - st.x, b.y - st.y) || a.id - b.id)[0];
+      if (!pick) continue;
+      pick.type = BT.Square; pick.level = 1; pick.target = 0;
+      this.say(`${st.name} square opens by the busy station`);
+      return; // one per month
+    }
   }
 
   startBuild(l: Lot, type: number, level: number) {
@@ -778,9 +795,14 @@ export class Sim {
       else if (!l.type && !l.flags) cands[z].push(l);
     }
     for (let z = 0; z < ZONES; z++) {
-      if (this.zHomes[z] < 900 || hasPark[z] || !cands[z].length) continue;
+      if (this.zHomes[z] < 700 || hasPark[z] || !cands[z].length) continue;
+      // a share of the land is set aside as a park of a few neighbouring plots
       const l = cands[z][Math.floor(this.rng.next() * cands[z].length)];
       l.type = BT.Park; l.level = 1;
+      for (const o of this.lots.near(l.x, l.y, 1.1)) {
+        if (o === l || o.type || o.flags || Math.hypot(o.x - l.x, o.y - l.y) > 1.1) continue;
+        o.type = BT.Park; o.level = 1;
+      }
     }
   }
 
@@ -811,8 +833,19 @@ export class Sim {
     if (densOps) densify(this.town, f, this.roadDist, densOps);
     if (this.roads.version !== v0) {
       this.roads.rasterize(this.g.road);
-      for (const e of this.roads.drainFresh()) this.lots.frontage(e);
+      for (const e of this.roads.drainFresh()) for (const l of this.lots.frontage(e)) this.reserveRiverPark(l);
     }
+  }
+
+  /** Plots on the river bank are kept as a green ribbon of parks (most of them). */
+  private reserveRiverPark(l: Lot) {
+    const cx = Math.floor(l.x), cy = Math.floor(l.y), g = this.g;
+    let river = false;
+    for (let dy = -1; dy <= 1 && !river; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const x = cx + dx, y = cy + dy;
+      if (x >= 0 && y >= 0 && x < N && y < N && g.water[y * N + x] === Water.River) { river = true; break; }
+    }
+    if (river && !l.flags && ((l.id * 2654435761) >>> 0) % 100 < 65) { l.type = BT.Park; l.level = 1; }
   }
 
   /** Streets near busy stations gain importance and are upgraded (local -> collector -> arterial) over time. */
@@ -922,12 +955,12 @@ export class Sim {
 
   // ---------------------------------------------------------------- output
   initMsg(): InitMsg {
-    return { type: 'init', seed: this.seed, height: this.g.height, water: this.g.water, villages: this.g.villages, bay: this.g.bay };
+    return { type: 'init', seed: this.seed, height: this.g.height, water: this.g.water, flags: this.g.flags.slice(), villages: this.g.villages, bay: this.g.bay };
   }
 
   stats(): Stats {
     let b = 0;
-    for (const l of this.lots.lots) if (l.alive && l.type && l.type !== BT.Park && (l.level > 0 || l.constr)) b++;
+    for (const l of this.lots.lots) if (l.alive && l.type && !isAmenity(l.type) && (l.level > 0 || l.constr)) b++;
     return {
       month: this.month, population: Math.round(this.homes * PERSONS_PER_HOME), homes: this.homes, jobs: this.jobs,
       money: this.money, income: this.income, expenses: this.expenses, build: this.buildSpend,

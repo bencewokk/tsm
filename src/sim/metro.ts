@@ -43,7 +43,7 @@ export class Metro {
   onLine(id: number) { return this.lines.some((l) => l.stations.includes(id)); }
 
   addStation(x: number, y: number, water: Uint8Array): Station | null {
-    if (x < 0 || y < 0 || x >= N || y >= N || water[y * N + x]) return null;
+    if (x < 0 || y < 0 || x >= N || y >= N || water[Math.floor(y) * N + Math.floor(x)]) return null;
     if (this.stations.some((s) => Math.hypot(s.x - x, s.y - y) < 3)) return null;
     const id = this.nextStation++;
     const s: Station = { id, x, y, name: NAMES[(id - 1) % NAMES.length] + (id > NAMES.length ? ` ${Math.ceil(id / NAMES.length)}` : ''), riders: 0, underwater: false };

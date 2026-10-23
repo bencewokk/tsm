@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { N, CELL } from '../sim/constants';
+import { N, CELL, Flag } from '../sim/constants';
 import { VS } from './common';
 
 export interface TerrainView {
@@ -16,10 +16,12 @@ export interface TerrainView {
   setCatchment(c: Uint8Array): void;
 }
 
-export function buildTerrain(height: Float32Array, wmask: Uint8Array): TerrainView {
+export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uint8Array): TerrainView {
   const V = N + 1;
   const vh = new Float32Array(V * V);
   const vw = new Float32Array(V * V); // water fraction per vertex
+  const vd = new Float32Array(V * V); // docks (concrete) fraction
+  const vs = new Float32Array(V * V); // steep (woodland) fraction
   for (let vy = 0; vy < V; vy++)
     for (let vx = 0; vx < V; vx++) {
       let s = 0, c = 0, w = 0;
@@ -30,19 +32,25 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array): TerrainVi
           const i = y * N + x;
           s += height[i]; c++;
           if (wmask[i]) w++;
+          if (!wmask[i] && (flags[i] & Flag.Docks)) vd[vy * V + vx] += 1;
+          if (!wmask[i] && (flags[i] & Flag.Steep)) vs[vy * V + vx] += 1;
         }
       vh[vy * V + vx] = (s / c) * VS;
       vw[vy * V + vx] = w / c;
+      vd[vy * V + vx] /= c;
+      vs[vy * V + vx] /= c;
     }
 
   const pos = new Float32Array(V * V * 3);
   const col = new Float32Array(V * V * 3);
   const uv = new Float32Array(V * V * 2);
-  const sand = new THREE.Color('#ebe3cf');
-  const low = new THREE.Color('#d6dfc4');
-  const mid = new THREE.Color('#cbd7b8');
-  const high = new THREE.Color('#e4e6d6');
-  const bed = new THREE.Color('#b9cdd6');
+  const sand = new THREE.Color('#e6dcc2');
+  const low = new THREE.Color('#cdd9b6');
+  const mid = new THREE.Color('#bfcfa6');
+  const high = new THREE.Color('#d3dcc0');
+  const bed = new THREE.Color('#9fbccb');
+  const concrete = new THREE.Color('#c9c6be');
+  const wood = new THREE.Color('#9fb889');
   const c = new THREE.Color();
   for (let vy = 0; vy < V; vy++)
     for (let vx = 0; vx < V; vx++) {
@@ -54,6 +62,8 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array): TerrainVi
       else if (h < 5 * VS || vw[k] > 0) c.copy(sand).lerp(low, Math.max(0, Math.min(1, (h - 2 * VS) / (3 * VS))));
       else if (h < 25 * VS) c.copy(low).lerp(mid, (h - 5 * VS) / (20 * VS));
       else c.copy(mid).lerp(high, Math.min(1, (h - 25 * VS) / (30 * VS)));
+      if (vs[k] > 0) c.lerp(wood, vs[k] * 0.9);
+      if (vd[k] > 0 && vw[k] < 0.6) c.lerp(concrete, Math.min(1, vd[k] * 1.6));
       col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
     }
   const indices: number[] = [];
@@ -75,7 +85,7 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array): TerrainVi
   mesh.name = 'terrain';
 
   // skirt: a pale plinth under the model, like a base board
-  const waterMat = new THREE.MeshStandardMaterial({ color: '#a8c9dc', roughness: 0.35, metalness: 0, transparent: true, opacity: 0.88 });
+  const waterMat = new THREE.MeshStandardMaterial({ color: '#93b9d0', roughness: 0.3, metalness: 0.05, transparent: true, opacity: 0.9 });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(N * CELL, N * CELL), waterMat);
   water.rotation.x = -Math.PI / 2;
   water.position.set((N * CELL) / 2, 0.3, (N * CELL) / 2);

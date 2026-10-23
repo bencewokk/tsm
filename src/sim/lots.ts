@@ -105,7 +105,8 @@ export class LotStore {
       for (let k = 0; k < n; k++) {
         const t = pad + k * (LOT_W + 0.06);
         const cx = ax + ux * t - uy * off * side, cy = ay + uy * t + ux * off * side;
-        const l = this.tryAdd(cx, cy, ang, LOT_W, LOT_D, g.ecls[e]);
+        // orient every plot so its street lies on its local -v side (the renderer builds street fronts there)
+        const l = this.tryAdd(cx, cy, side === 1 ? ang : ang + Math.PI, LOT_W, LOT_D, g.ecls[e]);
         if (l) out.push(l);
       }
     }
