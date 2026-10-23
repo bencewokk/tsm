@@ -5,6 +5,7 @@ import { designLot, massing, pad } from '../src/render/buildings';
 import { kindOf, type Kind } from '../src/render/forms';
 import { vhash } from '../src/render/common';
 
+declare const process: { argv: string[] };
 const sim = new Sim(4821);
 const target = Number(process.argv[2] ?? 48);
 for (let m = 0; m < target; m++) {

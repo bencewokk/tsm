@@ -13,6 +13,7 @@ export interface Ctx {
   lv: number;                    // land value 0..1
   trees: Tree[];
   r: (k: number) => number;
+  style?: string;                // force a tower style (gallery / tests)
 }
 
 export const FOOT = 2.2; // walls start this far below ground so slopes never show a gap
@@ -396,8 +397,9 @@ function designChurch(c: Ctx) {
 
 function designYard(c: Ctx) {
   const { Q, r } = c;
-  pad(c, c.back ? 0xcfc6b0 : GROUND.yard, 0.5, 0.25);
-  const n = 1 + Math.floor(r(1) * 3);
+  // vacant plot in a built-up area: a quiet lawn (back yards are gravelled), a few trees
+  pad(c, c.back ? 0xcfc6b0 : GROUND.yard, 0.5, 0.18);
+  const n = Math.floor(r(1) * 3);
   for (let i = 0; i < n; i++) tree(c, Q.at(0.2 + r(10 + i) * 0.6, 0.2 + r(20 + i) * 0.6), 5 + r(30 + i) * 3, 40 + i);
 }
 

@@ -48,7 +48,7 @@ export const PAL = {
 };
 
 export const GROUND: Record<Kind, number> = {
-  none: 0, yard: 0xb3c99a, house: 0xbcd19f, core: 0xcdbea4, apart: 0xd3cdc1, tower: 0xd5d1c9, shop: 0xc4c2bb, office: 0xd2cfc8, cbd: 0xcfccc6,
+  none: 0, yard: 0xc4d3aa, house: 0xbcd19f, core: 0xcdbea4, apart: 0xd3cdc1, tower: 0xd5d1c9, shop: 0xc4c2bb, office: 0xd2cfc8, cbd: 0xcfccc6,
   ind: 0xb9b8b1, port: 0xbdbbb4, dockNew: 0xd2ccc0, park: 0x9fc07f, square: 0xddd2bf, church: 0xd8ccb6,
 };
 export const SITE = 0xd8c8a6; // construction site / planned ground

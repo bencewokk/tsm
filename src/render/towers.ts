@@ -11,6 +11,7 @@ import { block, FOOT, tree } from './buildings';
 export type TowerStyle = 'deco' | 'intl' | 'brut' | 'post' | 'contemp' | 'super' | 'resi';
 
 export function chooseStyle(c: Ctx, cbd: boolean): TowerStyle {
+  if (c.style) return c.style as TowerStyle;
   const e = c.era, lv = c.lv;
   const w: [TowerStyle, number][] = cbd
     ? [
@@ -97,8 +98,9 @@ function deco(c: Ctx, H: number) {
   // crown: pointed spire, lit
   block(c, scalePoly(topPoly, 0.8), H * 0.04, stone, { roof: 'none' });
   mb.roofHip('plain', scalePoly(topPoly, 0.8), g + 0.93 * H + H * 0.04, H * 0.15, 0.5, accent);
-  mb.prism('lamp', circle((topPoly[0][0] + topPoly[2][0]) / 2, (topPoly[0][1] + topPoly[2][1]) / 2, 0.5, 5), g + 0.93 * H + H * 0.19, g + H * 1.16, 0xffe3a6, 0xffe3a6);
-  lampBand(c, scalePoly(base, 0.58), g + 0.9 * H, 1.4, 0xffd899);
+  mb.prism('lamp', circle((topPoly[0][0] + topPoly[2][0]) / 2, (topPoly[0][1] + topPoly[2][1]) / 2, 0.9, 5), g + 0.93 * H + H * 0.19, g + H * 1.16, 0xffe3a6, 0xffe3a6);
+  lampBand(c, scalePoly(base, 0.58), g + 0.9 * H, 2.4, 0xffd899);
+  lampBand(c, scalePoly(base, 0.78), g + 0.78 * H, 1.4, 0xffd899);
 }
 
 function intl(c: Ctx, H: number, tall = false) {
@@ -107,7 +109,7 @@ function intl(c: Ctx, H: number, tall = false) {
   const fp = shaftFootprint(c, 24, 20, c.dens > 0);
   block(c, fp, H, col, { mat: 'glass', roof: 'flat', roofColor: 0xcfd3d6 });
   plantBox(c, fp, g + H + 0.7, 9);
-  if (r(10) < 0.45) lampBand(c, scalePoly(fp, 0.96), g + H - 2.2, 1.0);
+  if (r(10) < 0.6) lampBand(c, scalePoly(fp, 0.97), g + H - 3.4, 1.8);
   if (tall && r(11) < 0.5) block(c, scalePoly(fp, 0.7), 8, col, { mat: 'glass', roof: 'flat' });
   void mb;
 }
@@ -156,7 +158,7 @@ function contemp(c: Ctx, H: number) {
   mb.frustum('glass', fp, top, g - FOOT, g + H, col, true, 0xcfd6da);
   // sheared, sloped crown + a lit edge
   mb.roofShed('plain', top, g + H, H * 0.1, 0xcfd6da, Math.floor(r(14) * 4));
-  mb.prism('lamp', scalePoly(top, 0.98), g + H - 1.6, g + H, 0xbfe6ff, 0xbfe6ff);
+  mb.prism('lamp', scalePoly(top, 1.01), g + H - 3.2, g + H, 0xbfe6ff, 0xbfe6ff);
 }
 
 function supertall(c: Ctx, H: number) {
@@ -172,8 +174,8 @@ function supertall(c: Ctx, H: number) {
   for (const f of [0.4, 0.72]) mb.prism('plain', scalePoly(fp, f === 0.4 ? 0.84 : 0.64), g + f * H - 2, g + f * H + 2.6, 0xb7bdc2, 0xb7bdc2);
   const m = lerpP(fp[0], fp[2], 0.5);
   mb.frustum('plain', circle(m[0], m[1], 3.2, 8), circle(m[0], m[1], 0.5, 8), g + 0.9 * H, g + 1.06 * H, 0xcfd3d6, false);
-  mb.prism('lamp', circle(m[0], m[1], 0.45, 6), g + 1.05 * H, g + 1.22 * H, 0xff9a8a, 0xff9a8a);
-  lampBand(c, scalePoly(fp, 0.42), g + 0.85 * H, 1.6, 0xfff0c8);
+  mb.prism('lamp', circle(m[0], m[1], 0.9, 6), g + 1.05 * H, g + 1.22 * H, 0xff9a8a, 0xff9a8a);
+  lampBand(c, scalePoly(fp, 0.46), g + 0.84 * H, 3, 0xfff0c8);
 }
 
 function resi(c: Ctx, H: number) {

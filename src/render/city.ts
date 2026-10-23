@@ -325,6 +325,31 @@ export class CityView {
     this.stats.chunksBuilt++;
   }
 
+  /** Dev: a row of every tower style (and a few landmark-sized samples) on an empty spot, for screenshots. */
+  gallery(cx: number, cz: number, styles: string[], heights = 120) {
+    const mb = new MB();
+    const trees: Tree[] = [];
+    styles.forEach((st, i) => {
+      const x = cx + i * 46, g = this.ground(x, cz);
+      const Q = new Quad([x - 21, cz], [x + 21, cz], [x + 21, cz + 40], [x - 21, cz + 40]);
+      mb.baseY = g; mb.seed = i;
+      const seed = 1000 + i * 77;
+      const c: Ctx = { mb, Q, id: i, seed, g, kind: 'cbd', level: 3, dens: 2, sides: 0, back: 0, isCom: true, flags: 0, era: 0.5, lv: 0.9, trees, r: (j: number) => vhash(seed, j), style: st };
+      designLot(c);
+      void heights;
+    });
+    const out = new THREE.Group();
+    for (const m of MATS) {
+      const geo = mb.acc[m].build();
+      if (!geo) continue;
+      const mesh = new THREE.Mesh(geo, this.polyMats[m]);
+      mesh.castShadow = m !== 'lamp'; mesh.receiveShadow = true;
+      out.add(mesh);
+    }
+    this.group.add(out);
+    return out;
+  }
+
   // ---------------------------------------------------------------- plots under demolition / construction
   private rebuildGrows(s: StateMsg, ids: Set<number>) {
     const L = s.lots;
