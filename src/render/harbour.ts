@@ -36,11 +36,15 @@ export class Harbour {
       }
     if (!quay.length) { this.finish(); return; }
     qh = Math.max(3, qh / quay.length - 1);
-    for (const q of quay) this.boxes.add((q.x + 0.5) * CELL, -10, (q.y + 0.5) * CELL, CELL + 0.5, qh + 10, CELL + 0.5, 0, CONCRETE);
-    // bollard strip / quay edge line
+    // a stone apron along each quay edge: reaches 12 m out over the water and 28 m back under the shore, so no gap shows
+    // where the smoothed terrain dips below the waterline before the cell edge
+    const OUT = 12, IN = 28;
     for (const q of quay) {
-      const ex = (q.x + 0.5 + q.dx * 0.5) * CELL, ez = (q.y + 0.5 + q.dy * 0.5) * CELL;
-      this.boxes.add(ex, qh, ez, q.dx ? 1.2 : CELL, 0.8, q.dx ? CELL : 1.2, 0, 0x8d8a84);
+      const edx = (q.x + 0.5 - q.dx * 0.5) * CELL, edz = (q.y + 0.5 - q.dy * 0.5) * CELL; // land/sea edge
+      const cx = edx + q.dx * (OUT - IN) / 2, cz = edz + q.dy * (OUT - IN) / 2;
+      this.boxes.add(cx, -10, cz, q.dx ? OUT + IN : CELL + 0.4, qh + 10, q.dx ? CELL + 0.4 : OUT + IN, 0, CONCRETE);
+      const ex = edx + q.dx * (OUT - 0.8), ez = edz + q.dy * (OUT - 0.8);
+      this.boxes.add(ex, qh, ez, q.dx ? 1.1 : CELL + 0.4, 0.9, q.dx ? CELL + 0.4 : 1.1, 0, 0x8d8a84);
     }
     // piers: up to three, spaced apart, running straight out to sea
     const piers: typeof quay = [];
@@ -52,8 +56,9 @@ export class Harbour {
       while (len < 3 && isSea(q.x + q.dx * (len + 1), q.y + q.dy * (len + 1)) && isSea(q.x + q.dx * (len + 1) + q.dy, q.y + q.dy * (len + 1) + q.dx)) len++;
       if (len < 2) continue;
       piers.push(q);
-      const L = len * CELL - 10, ux = q.dx, uz = q.dy;
-      const cx = (q.x + 0.5) * CELL + ux * (CELL / 2 + L / 2), cz = (q.y + 0.5) * CELL + uz * (CELL / 2 + L / 2);
+      const L = (len + 1) * CELL - 10, ux = q.dx, uz = q.dy;
+      const ex0 = (q.x + 0.5) * CELL - ux * CELL / 2, ez0 = (q.y + 0.5) * CELL - uz * CELL / 2; // land/sea edge
+      const cx = ex0 + ux * (L / 2 - 4), cz = ez0 + uz * (L / 2 - 4);
       const rot = Math.atan2(-uz, ux);
       this.boxes.add(cx, -10, cz, L, qh + 10, 18, rot, CONCRETE);
       // containers stacked on the pier root

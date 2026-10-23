@@ -47,7 +47,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     env.focus((vx + 0.5) * CELL, (vy + 0.5) * CELL, 3600);
   } else if (m.type === 'state') {
     const newMonth = !state || state.stats.month !== m.stats.month;
-    const sig = (s: StateMsg) => JSON.stringify([s.lines.map((l) => [l.id, l.stations, l.trains]), s.stations.length]);
+    const sig = (s: StateMsg) => JSON.stringify([s.lines.map((l) => [l.id, l.stations, l.trains]), s.stations.map((st) => (st.riders < 1200 ? 0 : st.riders < 5000 ? 1 : 2))]);
     const linesChanged = !state || sig(state) !== sig(m);
     state = m;
     if (newMonth) lastStateAt = performance.now();
@@ -270,6 +270,10 @@ async function demo(deal = 0, lineAt = 10) {
 }
 /** Dev helper: save the canvas at full size to screenshots/<name>.png (served by the dev server only). */
 async function shot(name: string) {
+  env.timeOfDay = phaseToTime(dayPhase);
+  env.applyTime();
+  lookUniforms.uNight.value = env.night;
+  if (city) city.roadMat.emissiveIntensity = env.night * 0.05;
   env.render();
   const url = env.renderer.domElement.toDataURL('image/png');
   await fetch(`/__shot?name=${encodeURIComponent(name)}`, { method: 'POST', body: url });
@@ -282,4 +286,6 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
   env.camera.position.set(tx + Math.sin(az) * Math.sin(pol) * dist, Math.cos(pol) * dist, tz + Math.cos(az) * Math.sin(pol) * dist);
   env.controls.update();
 }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, shot, view, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
+/** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
+function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, shot, view, phase, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };

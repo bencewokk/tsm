@@ -42,6 +42,7 @@ export class CityView {
   private roadVersion = -1;
   private occ = new Uint8Array(N * 4 * N * 4); // 12.5 m occupancy grid (roads) for wild tree placement
   private coreEdge = new Set<number>();
+  private streetTrees: { x: number; z: number; s: number; seed: number }[] = [];
 
   constructor(private water: Uint8Array, private flags: Uint8Array, private villages: Village[], private sample: (x: number, z: number) => number) {
     const g = unitGeos();
@@ -51,7 +52,7 @@ export class CityView {
     patchBuildingMaterial(this.glassMat, true);
     this.plainMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0 });
     this.treeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true });
-    this.craneMat = new THREE.MeshStandardMaterial({ color: 0xd0643f, roughness: 0.8 });
+    this.craneMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
     this.ghostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.5, depthWrite: false, emissive: 0x404040, emissiveIntensity: 0.4 });
     this.L = {
       wall: new Layer(g.box, this.wallMat, 40000),
@@ -155,6 +156,28 @@ export class CityView {
       }
       base += SEG + 1;
     };
+    // street trees: one row on each side of every ordinary street, none in the cobbled cores or on the docks
+    this.streetTrees = [];
+    for (let k = 0; k < r.ea.length; k++) {
+      if (this.coreEdge.has(r.ids[k])) continue;
+      const a = r.ea[k], b = r.eb[k];
+      const ax = r.nodes[a * 2] * CELL, az = r.nodes[a * 2 + 1] * CELL, bx = r.nodes[b * 2] * CELL, bz = r.nodes[b * 2 + 1] * CELL;
+      const L = Math.hypot(bx - ax, bz - az);
+      if (L < 70) continue;
+      const ux = (bx - ax) / L, uz = (bz - az) / L, off = widths[k] / 2 + 3.6;
+      const n = Math.floor((L - 40) / 30);
+      for (let j = 0; j <= n; j++) {
+        const t = 20 + j * ((L - 40) / Math.max(1, n));
+        for (const side of [1, -1]) {
+          const seed = r.ids[k] * 97 + j * 2 + (side > 0 ? 1 : 0);
+          if (vhash(seed, 5) < 0.28) continue;
+          const x = ax + ux * t - uz * off * side, z = az + uz * t + ux * off * side;
+          const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+          if (cx < 0 || cz < 0 || cx >= N || cz >= N || this.water[cz * N + cx] || (this.flags[cz * N + cx] & Flag.Docks)) continue;
+          this.streetTrees.push({ x, z, s: 5 + vhash(seed, 6) * 2.5, seed });
+        }
+      }
+    }
     // kerb / pavement strip first, then the carriageway on top
     for (let k = 0; k < r.ea.length; k++) strip(k, widths[k] + 5, KERB, 0);
     for (let n = 0; n < nNodes; n++) if (maxW[n]) disc(n, maxW[n] / 2 + 2.5, KERB, 0.02);
@@ -212,7 +235,7 @@ export class CityView {
         }
         if (building) {
           this.anims.push(anim);
-          if (lvl >= 2 && kind !== 'park' && kind !== 'square') this.cranes.push({ x: x + 16 * ca - 15 * sa, y: g - 2, z: z + 16 * sa + 15 * ca, h: top + 14, k: L.id[k] });
+          if (lvl >= 2 && kind !== 'park' && kind !== 'square') this.cranes.push({ x: x + 16 * ca - 15 * sa, y: g - 2, z: z + 16 * sa + 15 * ca, h: Math.min(top + 10, 80), k: L.id[k] });
         }
       }
       if (planned) {
@@ -225,10 +248,11 @@ export class CityView {
         }
       }
     }
+    for (const t of this.streetTrees) this.tree(t.x, this.sample(t.x, t.z), t.z, t.s, t.s * 1.15, vhash(t.seed, 7) < 0.12, t.seed);
     this.wildTrees(s, lotOcc);
     for (const l of Object.values(this.L)) l.finish();
     this.pads.finish(); this.ghosts.finish();
-    for (const c of this.cranes) { this.craneMast.add(c.x, c.y, c.z, 2.2, c.h, 2.2, 0, 0xd0643f); this.craneJib.add(c.x, c.y + c.h, c.z, 42, 1.8, 1.8, 0, 0xd0643f); }
+    for (const c of this.cranes) { this.craneMast.add(c.x, c.y, c.z, 1.6, c.h, 1.6, 0, 0xc9a24a); this.craneJib.add(c.x, c.y + c.h, c.z, 30, 1.4, 1.4, 0, 0xc9a24a); }
     this.craneMast.finish(); this.craneJib.finish();
     this.animate(0, 0);
   }
@@ -280,7 +304,7 @@ export class CityView {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
     for (let k = 0; k < this.cranes.length; k++) {
       const c = this.cranes[k];
-      v.set(c.x, c.y + c.h, c.z); sc.set(42, 1.8, 1.8);
+      v.set(c.x, c.y + c.h, c.z); sc.set(30, 1.4, 1.4);
       q.setFromAxisAngle(up, time * 0.25 + c.k);
       m.compose(v, q, sc);
       this.craneJib.mesh.setMatrixAt(k, m);

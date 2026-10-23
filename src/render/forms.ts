@@ -160,13 +160,23 @@ export function partsFor(id: number, kind: Kind, level: number): Part[] {
       break;
     }
     case 'ind': {
-      const c = pick(PAL.ind, r(1)), h = level >= 2 ? 10 + r(2) * 3 : 7.5 + r(2) * 2;
-      const w = 32 + r(3) * 4, d = 22 + r(4) * 4, v = FRONT + 4 + d / 2;
+      // big grey shed with a sawtooth or low roof, a chimney, tanks and a stock yard with pallets and containers
+      const c = pick(PAL.ind, r(1)), h = level >= 2 ? 11 + r(2) * 3 : 8 + r(2) * 2;
+      const w = 34 + r(3) * 3, d = 18 + r(4) * 3, v = FRONT + 3 + d / 2;
       P('plain', 0, v, w, d, h, 0, c);
-      if (level >= 2 || r(5) < 0.4) P('saw', 0, v, w, d, 3.2, h, pick(PAL.indRoof, r(6)));
-      else P('plain', 0, v, w - 1, d - 1, 0.8, h, pick(PAL.indRoof, r(6)));
-      if (level >= 2 && r(7) < 0.7) P('cyl', w / 2 - 3, v + d / 2 - 3, 3.2, 3.2, 24 + r(8) * 12, 0, pick(PAL.brick, r(9)));
-      if (r(10) < 0.5) { P('cyl', -13, 13.5, 7.5, 7.5, 8 + r(11) * 3, 0, 0xd5d6d2); P('cyl', -4.5, 13.5, 7.5, 7.5, 8 + r(11) * 3, 0, 0xd5d6d2); }
+      if (level >= 2 || r(5) < 0.55) P('saw', 0, v, w, d, 3.6, h, pick(PAL.indRoof, r(6)));
+      else P('plain', 0, v, w - 1, d - 1, 0.9, h, pick(PAL.indRoof, r(6)));
+      P('plain', 0, FRONT + 3 - 0.2, w * 0.7, 0.6, 5, 0, 0x54595c); // loading dock doors
+      const yardV = FRONT + 3 + d + 5.5;
+      // chimney by the shed
+      if (level >= 2 || r(7) < 0.55) { P('cyl', w / 2 - 3.5, v + d / 2 - 4, 3.6, 3.6, 26 + r(8) * 14, 0, pick(PAL.brick, r(9))); P('cyl', w / 2 - 3.5, v + d / 2 - 4, 4.2, 4.2, 1.6, 24 + r(8) * 14, 0xe8e4dc); }
+      // yard: fenced strip with tanks or stock
+      if (r(10) < 0.5) {
+        for (let k = 0; k < 3; k++) P('cyl', -12 + k * 9.5, yardV, 7.5, 7.5, 7 + r(11 + k) * 3, 0, 0xd8d9d4);
+      } else {
+        for (let k = 0; k < 3; k++) for (let s = 0; s < 1 + Math.floor(r(14 + k) * 2.4); s++) P('plain', -12 + k * 12, yardV, 10.5, 4.2, 2.55, s * 2.6, pick(PAL.container, r(20 + k * 3 + s)));
+      }
+      P('plain', 0, yardV + 4.6, W - 3, 0.35, 1.7, 0, 0x6b7076); // yard fence
       break;
     }
     case 'port': {
@@ -183,7 +193,7 @@ export function partsFor(id: number, kind: Kind, level: number): Part[] {
         // long low warehouse with gabled or sawtooth roof
         const h = 9 + r(2) * 3, c = pick(PAL.brick, r(3));
         P('plain', 0, 0, 37, 23, h, 0, c);
-        if (level >= 2 || r(4) < 0.35) P('saw', 0, 0, 37, 23, 3.5, h, pick(PAL.slate, r(5)));
+        if (level >= 2 || r(4) < 0.6) P('saw', 0, 0, 37, 23, 3.5, h, pick(PAL.slate, r(5)));
         else P('gable', 0, 0, 37.6, 24, 5, h, pick(PAL.slate, r(5)));
         for (let k = -1; k <= 1; k++) P('plain', k * 11, FRONT + 5.4, 5, 0.6, 5, 0, 0x5d5f60); // loading doors
       }

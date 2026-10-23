@@ -765,10 +765,10 @@ export class Sim {
   /** The busiest stations get a paved square next to the entrance; it raises value around it, so denser buildings edge it. */
   private carveHubSquares() {
     for (const st of this.metro.stations) {
-      if (st.riders < 5000) continue;
-      const near = this.lots.near(st.x, st.y, 2.2);
-      if (near.some((l) => l.type === BT.Square && Math.hypot(l.x - st.x, l.y - st.y) < 2.5)) continue;
-      const pick = near.filter((l) => !l.constr && !(l.flags & (Flag.Docks | Flag.Planned)) && (l.type === BT.None || ((l.type === BT.Res || l.type === BT.Com) && l.level === 1)))
+      if (st.riders < 3000) continue;
+      const near = this.lots.near(st.x, st.y, 2.8);
+      if (near.some((l) => l.type === BT.Square && Math.hypot(l.x - st.x, l.y - st.y) < 3)) continue;
+      const pick = near.filter((l) => !l.constr && !(l.flags & (Flag.Docks | Flag.Planned)) && (l.type === BT.None || ((l.type === BT.Res || l.type === BT.Com) && l.level <= 2)))
         .sort((a, b) => Math.hypot(a.x - st.x, a.y - st.y) - Math.hypot(b.x - st.x, b.y - st.y) || a.id - b.id)[0];
       if (!pick) continue;
       pick.type = BT.Square; pick.level = 1; pick.target = 0;
@@ -785,23 +785,29 @@ export class Sim {
     l.constrTotal = BUILD_MONTHS[level];
   }
 
+  /** As a zone fills with homes, a share of its plots is set aside as parks (small clusters of neighbouring plots next to the housing). */
   private placeParks(lots: Lot[]) {
-    const hasPark = new Uint8Array(ZONES);
+    const have = new Uint16Array(ZONES);
     const cands: Lot[][] = [];
     for (let z = 0; z < ZONES; z++) cands.push([]);
     for (const l of lots) {
       const z = this.zoneOf(l.cell);
-      if (l.type === BT.Park) hasPark[z] = 1;
+      if (l.type === BT.Park) have[z]++;
       else if (!l.type && !l.flags) cands[z].push(l);
     }
     for (let z = 0; z < ZONES; z++) {
-      if (this.zHomes[z] < 700 || hasPark[z] || !cands[z].length) continue;
-      // a share of the land is set aside as a park of a few neighbouring plots
-      const l = cands[z][Math.floor(this.rng.next() * cands[z].length)];
+      const want = Math.min(16, Math.floor(this.zHomes[z] / 320));
+      if (want < 2 || have[z] >= want || !cands[z].length) continue;
+      // prefer plots that already have built neighbours: parks belong to neighbourhoods, not open fields
+      const near = cands[z].filter((l) => this.lots.near(l.x, l.y, 1.9).some((o) => o.level > 0 && !isAmenity(o.type)));
+      const pool = near.length ? near : cands[z];
+      const l = pool[Math.floor(this.rng.next() * pool.length)];
       l.type = BT.Park; l.level = 1;
+      let extra = 1 + Math.floor(this.rng.next() * 3);
       for (const o of this.lots.near(l.x, l.y, 1.1)) {
+        if (extra <= 0) break;
         if (o === l || o.type || o.flags || Math.hypot(o.x - l.x, o.y - l.y) > 1.1) continue;
-        o.type = BT.Park; o.level = 1;
+        o.type = BT.Park; o.level = 1; extra--;
       }
     }
   }

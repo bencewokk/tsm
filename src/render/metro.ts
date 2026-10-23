@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { StateMsg, StationInfo } from '../sim/protocol';
 import { CELL } from '../sim/constants';
+import { unitGeos } from './layers';
 
 export const TUNNEL_Y = -42;
 
@@ -15,6 +16,19 @@ export class MetroView {
   private cursor: THREE.Mesh;
   private ribbonMats: THREE.MeshBasicMaterial[] = [];
   private discMats: THREE.Material[] = [];
+  private innerDiscs: THREE.MeshBasicMaterial[] = [];
+  private plazaGeo = new THREE.CylinderGeometry(34, 34, 1, 28);
+  private barrelGeo = unitGeos().barrel;
+  private ribGeo = (() => { const g = new THREE.TorusGeometry(0.5, 0.02, 5, 18, Math.PI); g.rotateY(Math.PI / 2); g.scale(1, 2, 1); return g; })();
+  private signGeo = new THREE.CylinderGeometry(3.4, 3.4, 1, 20);
+  private ringGeo = new THREE.RingGeometry(1.5, 2.6, 20);
+  private stationMats = {
+    stone: new THREE.MeshStandardMaterial({ color: 0xe3dbc9, roughness: 1 }),
+    wall: new THREE.MeshStandardMaterial({ color: 0xe6e2d8, roughness: 0.85 }),
+    dark: new THREE.MeshStandardMaterial({ color: 0x4d5257, roughness: 0.8 }),
+    white: new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }),
+    glass: new THREE.MeshStandardMaterial({ color: 0xa9c8d8, roughness: 0.15, metalness: 0.35, transparent: true, opacity: 0.72, side: THREE.DoubleSide, emissive: 0x7fa8bf, emissiveIntensity: 0.12 }),
+  };
   private paths: { color: THREE.Color; pts: THREE.Vector3[]; len: number[]; total: number; trains: number }[] = [];
   private m = new THREE.Matrix4();
   private q = new THREE.Quaternion();
@@ -93,9 +107,11 @@ export class MetroView {
     }
     this.ribbonMats = [];
     this.discMats = [];
+    this.innerDiscs = [];
     this.paths = [];
     const byId = new Map(s.stations.map((st) => [st.id, st]));
     const stationColor = new Map<number, string>();
+    const stationDir = new Map<number, number>();
     s.lines.forEach((l, li) => {
       const pts = this.smooth(l.stations.map((id) => this.stationXZ(byId.get(id)!)));
       // offset parallel lines a little so shared corridors read as bundles
@@ -119,34 +135,81 @@ export class MetroView {
       for (let k = 1; k < pts.length; k++) { const d = pts[k].distanceTo(pts[k - 1]); lens.push(d); total += d; }
       this.paths.push({ color: new THREE.Color('#ffffff').lerp(new THREE.Color(l.color), 0.35), pts: shifted, len: lens, total, trains: l.trains });
       for (const id of l.stations) if (!stationColor.has(id)) stationColor.set(id, l.color);
+      l.stations.forEach((id, k) => {
+        if (stationDir.has(id)) return;
+        const a = byId.get(l.stations[Math.max(0, k - 1)])!, b = byId.get(l.stations[Math.min(l.stations.length - 1, k + 1)])!;
+        stationDir.set(id, Math.atan2(-(b.y - a.y), b.x - a.x));
+      });
     });
     // stations
     const pav = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 });
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-    for (const st of s.stations) this.addStation(st, stationColor.get(st.id) ?? '#8a8f96', pav, boxGeo);
+    for (const st of s.stations) this.addStation(st, stationColor.get(st.id) ?? '#8a8f96', pav, boxGeo, stationDir.get(st.id) ?? 0);
     this.setPlan(this.plan);
   }
 
-  private addStation(st: StationInfo, color: string, pav: THREE.Material, boxGeo: THREE.BufferGeometry) {
+  private addStation(st: StationInfo, color: string, pav: THREE.Material, boxGeo: THREE.BufferGeometry, dir: number) {
     const p = this.stationXZ(st);
     const y = this.surf(p.x, p.z);
-    const pv = new THREE.Mesh(boxGeo, pav);
-    pv.scale.set(20, 7, 20);
-    pv.position.set(p.x, y + 3.5, p.z);
-    pv.castShadow = true;
-    this.stations.add(pv);
+    const grp = new THREE.Group();
+    grp.position.set(p.x, y, p.z);
+    grp.rotation.y = dir; // local +x runs along the line
+    this.stations.add(grp);
+    const box = (mat: THREE.Material, sx: number, sy: number, sz: number, x: number, yy: number, z: number, shadow = true) => {
+      const m = new THREE.Mesh(boxGeo, mat);
+      m.scale.set(sx, sy, sz); m.position.set(x, yy + sy / 2, z); m.castShadow = shadow; m.receiveShadow = true;
+      grp.add(m); return m;
+    };
+    const stone = this.stationMats.stone, wall = this.stationMats.wall;
+    const lineMat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+    // paved forecourt
+    const plaza = new THREE.Mesh(this.plazaGeo, stone);
+    plaza.position.y = 0.5; plaza.receiveShadow = true;
+    grp.add(plaza);
+    const busy = st.riders;
+    if (busy < 1200) {
+      // small entrance pavilion with a canopy in the line colour
+      box(wall, 24, 8, 12, 0, 0.9, -8);
+      box(lineMat, 30, 0.9, 20, 0, 8.9, -6);
+      box(this.stationMats.glass, 14, 5, 0.6, 0, 1.2, -1.6, false);
+    } else if (busy < 5000) {
+      // glass hall
+      box(this.stationMats.glass, 38, 13, 22, 0, 0.9, -6);
+      box(wall, 40, 1.2, 24, 0, 13.9, -6);
+      box(lineMat, 40.4, 2.2, 1.6, 0, 13.4, 5.6);
+      box(wall, 14, 7, 10, -10, 0.9, 12);
+    } else {
+      // great arched glass hall with wings
+      const barrel = new THREE.Mesh(this.barrelGeo, this.stationMats.glass);
+      barrel.scale.set(64, 20, 34); barrel.position.set(0, 0.9, -6); barrel.castShadow = true;
+      grp.add(barrel);
+      for (let k = -3; k <= 3; k++) { const rib = new THREE.Mesh(this.ribGeo, lineMat); rib.scale.set(30, 20, 34); rib.position.set(k * 10, 0.9, -6); grp.add(rib); }
+      box(wall, 14, 8, 30, -38, 0.9, -6);
+      box(wall, 14, 8, 30, 38, 0.9, -6);
+      box(lineMat, 66, 1, 2, 0, 20.9, -6);
+    }
+    // station sign: a pole with a line-coloured roundel
+    box(this.stationMats.dark, 1.2, 18, 1.2, -20, 0.9, 16);
+    const sign = new THREE.Mesh(this.signGeo, lineMat);
+    sign.position.set(-20, 19.5, 16); sign.rotation.x = Math.PI / 2;
+    grp.add(sign);
+    const ring = new THREE.Mesh(this.ringGeo, this.stationMats.white);
+    ring.position.set(-20, 19.5, 16.8);
+    grp.add(ring);
+    // plan-mode map marker (drawn over everything)
     const discMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false });
     this.discMats.push(discMat);
-    const disc = new THREE.Mesh(new THREE.RingGeometry(26, 40, 32), discMat);
+    const disc = new THREE.Mesh(new THREE.RingGeometry(37, 44, 40), discMat);
     disc.rotation.x = -Math.PI / 2;
     disc.position.set(p.x, y + 4, p.z);
     disc.renderOrder = 11;
     this.stations.add(disc);
-    const inner = new THREE.Mesh(new THREE.CircleGeometry(26, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false }));
+    const inner = new THREE.Mesh(new THREE.CircleGeometry(36, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.0, depthWrite: false }));
     inner.rotation.x = -Math.PI / 2;
     inner.position.set(p.x, y + 4.2, p.z);
     inner.renderOrder = 11;
     this.discMats.push(inner.material as THREE.Material);
+    this.innerDiscs.push(inner.material as THREE.MeshBasicMaterial);
     this.stations.add(inner);
     // underground hall + shaft (x-ray)
     const hall = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: 0xf4efe4, emissive: color, emissiveIntensity: 0.15 }));
@@ -163,6 +226,7 @@ export class MetroView {
   setPlan(on: boolean) {
     this.plan = on;
     for (const m of [...this.ribbonMats, ...this.discMats]) { m.depthTest = !on; m.needsUpdate = true; }
+    for (const m of this.innerDiscs) m.opacity = on ? 0.95 : 0;
     this.setXray(this.xray);
   }
 
