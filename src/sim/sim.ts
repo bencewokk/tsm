@@ -2,6 +2,8 @@ import { N, CELL, ZONE, NZ, ZONES, BT, Flag, HOMES, COM_JOBS, IND_JOBS, BUILD_MO
 import { Rng } from './rng';
 import { generateTerrain, idx, inb, adjRoad, DIR4, type Grid } from './terrain';
 import type { Command, InitMsg, StateMsg, Stats } from './protocol';
+import { Metro } from './metro';
+import { STATION_COST, TRAIN_COST, START_MONEY } from './constants';
 
 /** Tunable knobs for the growth model. Exposed so the headless runner / UI can poke them. */
 export const TUNE = {
@@ -19,6 +21,9 @@ export const TUNE = {
   wPark: 0.05,
   wInd: 0.06,
   wCentre: 0.55,
+  walkDecay: 7,          // minutes: how fast station value fades with walking time
+  stationPrem: 0.3,      // walkable-station premium on land value
+  premRadius: 700,       // metres
   spawnLV: 0.24,
   upLV: [0, 0.6, 0.82],    // LV to upgrade from level k -> k+1 (index = current level)
   comUpLV: [0, 0.55, 0.88],
@@ -66,7 +71,11 @@ export class Sim {
   pressure = 0;
   driveSpeed = 45;
   centre = { x: N / 2, y: N / 2 };
-  money = 150e6;
+  money = START_MONEY;
+  metro = new Metro();
+  stAccess = new Float64Array(0);
+  zoneNear: { s: number; w: number }[][] = [];
+  egress = new Float64Array(0);
   income = 0;
   expenses = 0;
   buildSpend = 0;
@@ -90,15 +99,69 @@ export class Sim {
     }
   }
 
-  /** Hook for game commands (metro, events); extended in later milestones. */
-  protected applyGame(_cmd: Command) {}
+  protected applyGame(cmd: Command) {
+    const m = this.metro, w = this.g.water;
+    switch (cmd.type) {
+      case 'placeStation': {
+        if (this.money < STATION_COST) { this.say('Not enough money for a station'); return; }
+        const st = m.addStation(cmd.x, cmd.y, w);
+        if (!st) return;
+        this.money -= STATION_COST; this.buildSpend += STATION_COST;
+        this.say(`${st.name} station dug`);
+        break;
+      }
+      case 'removeStation': {
+        if (m.removeStation(cmd.id)) { this.money += STATION_COST * 0.5; }
+        break;
+      }
+      case 'buildLine': {
+        const q = m.quote(cmd.stations, w);
+        const est = q.cost + 2 * TRAIN_COST;
+        if (this.money < est) { this.say(`Line needs ${(est / 1e6).toFixed(0)}M, not enough money`); return; }
+        const l = m.addLine(cmd.stations, w);
+        if (!l) return;
+        const cost = q.cost + l.trains * TRAIN_COST;
+        this.money -= cost; this.buildSpend += cost;
+        this.say(`Line ${l.id} opened: ${l.stations.length} stations, ${l.lengthKm.toFixed(1)} km${q.wkm > 0.05 ? ` (${q.wkm.toFixed(1)} km under water)` : ''}`);
+        this.refreshTransit();
+        break;
+      }
+      case 'setTrains': {
+        const l = m.line(cmd.line);
+        if (!l) return;
+        const n = Math.max(1, Math.min(40, Math.round(cmd.trains)));
+        const d = n - l.trains;
+        if (d > 0 && this.money < d * TRAIN_COST) return;
+        this.money -= d > 0 ? d * TRAIN_COST : d * TRAIN_COST * 0.4;
+        l.trains = n;
+        m.updateLine(l);
+        this.refreshTransit();
+        break;
+      }
+      case 'deleteLine': {
+        m.lines = m.lines.filter((l) => l.id !== cmd.line);
+        this.refreshTransit();
+        break;
+      }
+      default: this.applyEvent(cmd);
+    }
+  }
+
+  /** Recompute transit-driven land value right away so the overlay reacts to a new line. */
+  refreshTransit() {
+    this.computeTransit();
+    this.computeLandValue();
+  }
+
+  protected applyEvent(_cmd: Command) {}
 
   paused(): boolean {
     return false;
   }
 
-  quoteLine(_stations: number[]) {
-    return { cost: 0, km: 0, underwaterKm: 0 };
+  quoteLine(stations: number[]) {
+    const q = this.metro.quote(stations, this.g.water);
+    return { cost: q.cost, km: q.km, underwaterKm: q.wkm };
   }
 
   say(s: string) {
@@ -228,8 +291,57 @@ export class Sim {
     J = 0;
   }
 
-  /** Transit accessibility: filled in by the metro milestone. */
-  protected computeTransit() {}
+  /** Transit accessibility: station graph, egress times, per-cell access + walkable premium. */
+  computeTransit() {
+    const m = this.metro;
+    m.rebuildGraph();
+    this.transitCell.fill(0);
+    this.stationPrem.fill(0);
+    const S = m.sIndex.size;
+    this.stAccess = new Float64Array(S);
+    this.zoneNear = [];
+    for (let z = 0; z < ZONES; z++) this.zoneNear.push([]);
+    this.egress = new Float64Array(S * ZONES).fill(Infinity);
+    if (S === 0) return;
+    const used = m.stations.filter((st) => m.sIndex.has(st.id)).sort((a, b) => m.sIndex.get(a.id)! - m.sIndex.get(b.id)!);
+    for (let z = 0; z < ZONES; z++) {
+      const cx = (z % NZ + 0.5) * ZONE, cy = (((z / NZ) | 0) + 0.5) * ZONE;
+      for (let k = 0; k < S; k++) {
+        const d = Math.hypot(used[k].x - cx, used[k].y - cy) * CELL * 1.25;
+        if (d < 1000) this.zoneNear[z].push({ s: k, w: d / 80 + 1 });
+      }
+    }
+    const T = m.T, eg = this.egress;
+    for (let b = 0; b < ZONES; b++)
+      for (const { s: t, w } of this.zoneNear[b])
+        for (let s = 0; s < S; s++) {
+          if (s === t) continue;
+          const v = T[s * S + t] + w;
+          if (v < eg[s * ZONES + b]) eg[s * ZONES + b] = v;
+        }
+    const J = Math.max(1, this.jobs);
+    for (let s = 0; s < S; s++) {
+      let a = 0;
+      for (let b = 0; b < ZONES; b++) if (this.zJobs[b] > 0 && eg[s * ZONES + b] < 90) a += this.zJobs[b] * Math.exp(-eg[s * ZONES + b] / TUNE.tau);
+      this.stAccess[s] = a / J;
+    }
+    const R = 16;
+    for (let s = 0; s < S; s++) {
+      const st = used[s], A = this.stAccess[s];
+      const premK = TUNE.stationPrem * Math.min(1, A / 0.1);
+      for (let dy = -R; dy <= R; dy++)
+        for (let dx = -R; dx <= R; dx++) {
+          const x = st.x + dx, y = st.y + dy;
+          if (!inb(x, y)) continue;
+          const i = idx(x, y);
+          const d = Math.hypot(dx, dy) * CELL * 1.2;
+          const val = A * Math.exp(-(d / 80) / TUNE.walkDecay);
+          if (val > this.transitCell[i]) this.transitCell[i] = val;
+          const p = premK * Math.max(0, 1 - d / TUNE.premRadius);
+          if (p > this.stationPrem[i]) this.stationPrem[i] = p;
+        }
+    }
+  }
 
   /** Bilinear sample of a zone field at a cell. */
   zoneSample(f: Float64Array, i: number): number {
@@ -513,7 +625,10 @@ export class Sim {
       road: g.road.slice(), btype: g.btype.slice(), level: g.level.slice(), target: this.target.slice(),
       constr: this.constr.slice(), constrTotal: this.constrTotal.slice(), lv: this.lv.slice(), flags: g.flags.slice(),
       planType: this.planType.slice(), planLevel: this.planLevel.slice(),
-      stations: [], lines: [], event: null,
+      stations: this.metro.stations.map((st) => ({ ...st })),
+      lines: this.metro.lines.map((l) => ({ id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders,
+        capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice() })),
+      event: null,
       docks: { state: 'none', deal: '', dealName: '', brief: '', deadline: 0, served: 0, planned: 0, carLocked: 0, built: 0, centre: { x: 0, y: 0 } },
       desire: [], log: this.log.slice(-8), speed: this.speed,
     };

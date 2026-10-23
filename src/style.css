@@ -54,3 +54,22 @@ button { white-space: nowrap; }
   .side { top: 64px; width: 190px; font-size: 11px; }
   .lines { top: 64px; width: 240px; }
 }
+.line { border-top: 1px solid var(--line); padding: 7px 0; }
+.line:first-of-type { border-top: 0; }
+.lh { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.sw { width: 14px; height: 6px; border-radius: 3px; display: inline-block; }
+.lg { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 2px 8px; font-size: 11px; }
+.lg span { color: var(--muted); }
+.lg b { text-align: right; font-variant-numeric: tabular-nums; }
+.warn { color: #c98a1a; }
+b.neg { color: var(--bad); }
+button.mini { padding: 0 6px; font-size: 11px; line-height: 16px; }
+.topbar { flex-wrap: nowrap; overflow: hidden; right: auto; max-width: calc(100% - 24px); }
+.toolbar { flex-wrap: nowrap; max-width: calc(100% - 24px); overflow-x: auto; }
+.ticker { bottom: 64px; }
+@media (max-width: 900px) {
+  .toolbar button { padding: 4px 7px; font-size: 12px; }
+  .side { width: 168px; padding: 8px 10px; }
+  .lines { width: 228px; }
+  .row { font-size: 11px; }
+}

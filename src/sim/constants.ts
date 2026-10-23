@@ -25,3 +25,32 @@ export const BUILD_MONTHS = [0, 1, 2, 4];
 
 export const PERSONS_PER_HOME = 2.3;
 export const WORKERS_PER_HOME = 1.15;
+
+// ---- metro economics ----
+export const STATION_COST = 9e6;
+export const TUNNEL_KM = 20e6;
+export const WATER_KM = 55e6;          // tunnelling under water costs much more
+export const TRAIN_COST = 4e6;         // buying a train
+export const TRAIN_MONTH = 0.11e6;     // running cost per train per month
+export const STATION_UPKEEP = 0.04e6;  // per station per month
+export const TRACK_UPKEEP_KM = 0.03e6; // per km per month
+export const FARE = 2.6;               // per boarding... per trip
+export const TRAIN_CAP = 900;          // passengers per train
+export const METRO_SPEED = 36;         // km/h including dwell
+export const START_MONEY = 160e6;
+export const LINE_COLORS = ['#d9534f', '#2f7fc1', '#3a9d5d', '#e0a526', '#8e5bb5', '#e06fa0', '#1fa3a3', '#7a6a58'];
+
+/** Cost to tunnel between two cell positions; fraction under water sampled along the segment. */
+export function segmentCost(ax: number, ay: number, bx: number, by: number, water: Uint8Array) {
+  const d = Math.hypot(bx - ax, by - ay);
+  const steps = Math.max(1, Math.ceil(d * 2));
+  let wet = 0;
+  for (let k = 0; k <= steps; k++) {
+    const t = k / steps;
+    const x = Math.round(ax + (bx - ax) * t), y = Math.round(ay + (by - ay) * t);
+    if (x >= 0 && y >= 0 && x < N && y < N && water[y * N + x]) wet++;
+  }
+  const km = (d * CELL) / 1000;
+  const wkm = km * (wet / (steps + 1));
+  return { km, wkm, cost: (km - wkm) * TUNNEL_KM + wkm * WATER_KM };
+}

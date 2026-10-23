@@ -36,13 +36,6 @@ export class Hud {
         <div class="stat"><span class="k">Expenses / mo</span><span class="v neg" data-k="exp">-</span></div>
         <div class="stat"><span class="k">Transit share</span><span class="v" data-k="share">-</span></div>
         <div class="stat"><span class="k">Rating</span><span class="v" data-k="rating">-</span></div>
-        <div class="spacer"></div>
-        <div class="speed">
-          <button data-speed="0" title="Pause (Space)">❚❚</button>
-          <button data-speed="1" title="1x (1)">1x</button>
-          <button data-speed="3" title="3x (2)">3x</button>
-          <button data-speed="10" title="10x, test speed (3)">10x</button>
-        </div>
       </div>
       <div class="side panel">
         <div class="h">City</div>
@@ -63,6 +56,13 @@ export class Hud {
         <div data-k="lines"><div class="muted small">No lines yet. Open <b>Plan metro</b> (P), click the map to place stations, then click stations in order and press Enter.</div></div>
       </div>
       <div class="toolbar panel">
+        <div class="speed">
+          <button data-speed="0" title="Pause (Space)">❚❚</button>
+          <button data-speed="1" title="1x (1)">1x</button>
+          <button data-speed="3" title="3x (2)">3x</button>
+          <button data-speed="10" title="10x test speed (3)">10x</button>
+        </div>
+        <span class="sep"></span>
         <button data-tool="view" class="on" title="Orbit view (V)">View</button>
         <button data-tool="plan" title="Top-down metro planning (P)">Plan metro</button>
         <span class="sep"></span>
@@ -83,6 +83,43 @@ export class Hud {
     this.root.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((b) => b.addEventListener('click', () => this.setTool(b.dataset.tool!)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-toggle]').forEach((b) => b.addEventListener('click', () => this.toggle(b.dataset.toggle!)));
     this.el.hint.style.display = 'none';
+    this.el.lines.addEventListener('click', (ev) => {
+      const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-line]');
+      if (!b || !this.last) return;
+      const id = Number(b.dataset.line), l = this.last.lines.find((q) => q.id === id);
+      if (!l) return;
+      if (b.dataset.act === 'add') this.send({ type: 'setTrains', line: id, trains: l.trains + 1 });
+      if (b.dataset.act === 'sub') this.send({ type: 'setTrains', line: id, trains: l.trains - 1 });
+      if (b.dataset.act === 'del' && confirm(`Close line ${id}? Tunnels are written off.`)) this.send({ type: 'deleteLine', line: id });
+    });
+  }
+
+  private last: StateMsg | null = null;
+  private linesSig = '';
+
+  private renderLines(s: StateMsg) {
+    const sig = JSON.stringify(s.lines.map((l) => [l.id, l.trains, Math.round(l.riders / 50), Math.round(l.rating), Math.round(l.peakLoad / 50)]));
+    if (sig === this.linesSig) return;
+    this.linesSig = sig;
+    if (!s.lines.length) {
+      this.el.lines.innerHTML = `<div class="muted small">No lines yet. Open <b>Plan metro</b> (P), click the map to dig stations, click stations in order, then press <b>Enter</b>.</div>`;
+      return;
+    }
+    this.el.lines.innerHTML = s.lines.map((l) => {
+      const load = l.capacity > 0 ? l.peakLoad / l.capacity : 0;
+      const cls = load > 1 ? 'neg' : load > 0.8 ? 'warn' : '';
+      return `<div class="line">
+        <div class="lh"><i class="sw" style="background:${l.color}"></i><b>Line ${l.id}</b><span class="muted">${l.stations.length} st · ${l.lengthKm.toFixed(1)} km</span>
+          <span class="spacer"></span><button class="mini" data-line="${l.id}" data-act="del" title="Close line">✕</button></div>
+        <div class="lg">
+          <span>Riders/day</span><b>${num(l.riders)}</b>
+          <span>Peak load</span><b class="${cls}">${Math.round(load * 100)}%</b>
+          <span>Rating</span><b>${Math.round(l.rating)}</b>
+          <span>Trains</span><b><button class="mini" data-line="${l.id}" data-act="sub">−</button> ${l.trains} <button class="mini" data-line="${l.id}" data-act="add">+</button></b>
+          <span>Headway</span><b>${l.headway.toFixed(1)} min</b>
+          <span>Capacity</span><b>${num(l.capacity)}/h</b>
+        </div></div>`;
+    }).join('');
   }
 
   setTool(t: string) {
@@ -111,6 +148,8 @@ export class Hud {
   }
 
   update(s: StateMsg) {
+    this.last = s;
+    this.renderLines(s);
     const st = s.stats, e = this.el;
     e.date.textContent = dateStr(st.month);
     e.pop.textContent = num(st.population);
