@@ -6,6 +6,7 @@ import { angDiff, lineDiff } from './geom';
 import type { Grid, QuarterStyle } from './terrain';
 import { PROFILE_INDEX } from './profiles';
 import type { CityProfile } from './cityprofile';
+import { LANDMARKS, LANDMARK_INDEX } from './landmarks';
 import type { DistrictProfile } from './profiles';
 
 /** Each village/district has its own street orientation and profile set; noise bends it, and districts meet irregularly. */
@@ -287,9 +288,23 @@ export function layoutTown(c: TownCtx) {
     sq.type = BT.Square; sq.level = 1;
     // the church faces the square: the closest other plot
     const ch = byDist.slice(1).find((l) => Math.hypot(l.x - sq.x, l.y - sq.y) < 1.6) ?? byDist[1];
-    if (ch) { ch.type = BT.Landmark; ch.level = 1; if (d.kind === 'planned' || (d.kind === 'origin' && cp.origin === 'planned-capital')) ch.flags |= Flag.Civic; }
+    const civicQuarter = d.kind === 'planned' || (d.kind === 'origin' && cp.origin === 'planned-capital');
+    const grow = (l: ReturnType<LotStore['near']>[number], id: string) => {
+      l.type = BT.Landmark; l.level = 1; l.lm = LANDMARK_INDEX[id]; l.age = 60;
+      const def = LANDMARKS[l.lm - 1];
+      lots.ensureSize(l, def.size[0], def.size[1], (o) => !o.lm && !o.back === !l.back && (!o.type || o.type === BT.Res || o.type === BT.Com) && !(o.flags & Flag.Docks));
+      if (def.id === 'cityhall') l.flags |= Flag.Civic;
+    };
+    if (ch) grow(ch, civicQuarter ? 'cityhall' : 'cathedral');
+    // the origin town also gets a city hall and a market hall near its square
+    if (d.kind === 'origin' && sq) {
+      const used = new Set([sq, ch]);
+      const pickNear = () => byDist.find((l) => l.alive && !used.has(l) && !l.lm && !l.type && Math.hypot(l.x - sq.x, l.y - sq.y) < 2.2 && Math.hypot(l.x - sq.x, l.y - sq.y) > 0.9);
+      if (!civicQuarter) { const h = pickNear(); if (h) { used.add(h); grow(h, 'cityhall'); } }
+      const m = pickNear(); if (m) { used.add(m); grow(m, 'markethall'); }
+    }
     // a second paved plot opposite makes the square read as a plaza across the street
-    const opp = byDist.slice(1).find((l) => l !== ch && Math.hypot(l.x - sq.x, l.y - sq.y) < 1.3 && l.type !== BT.Landmark);
+    const opp = byDist.slice(1).find((l) => l.alive && l !== ch && Math.hypot(l.x - sq.x, l.y - sq.y) < 1.3 && l.type !== BT.Landmark);
     if (opp && rng.next() < (d.kind === 'planned' ? 1 : 0.7)) { opp.type = BT.Square; opp.level = 1; }
   }
 }

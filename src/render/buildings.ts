@@ -3,6 +3,7 @@ import { PAL, GROUND, pick, type Kind } from './forms';
 import { vhash } from './common';
 import type { DistrictProfile, Palette } from '../sim/profiles';
 import { designTower } from './towers';
+import { designLandmark } from './landmarks';
 
 export interface Tree { x: number; z: number; size: number; h: number; pine: boolean; seed: number }
 
@@ -20,6 +21,7 @@ export interface Ctx {
   site: 'harbour' | 'railyard' | 'mine';   // what the old industrial district is in this city
   mine: [number, number] | null; // pithead position (world metres)
   style?: string;                // force a tower style (gallery / tests)
+  lmForm?: string;               // landmark form id (landmarks.ts)
 }
 
 export const FOOT = 2.2; // walls start this far below ground so slopes never show a gap
@@ -529,6 +531,7 @@ export function designLot(c: Ctx) {
     case 'park': designPark(c); break;
     case 'square': designSquare(c); break;
     case 'church': designChurch(c); break;
+    case 'landmark': designLandmark(c, c.lmForm ?? ((c.flags & 32) ? 'cityhall' : 'cathedral')); break;
     case 'yard': designYard(c); break;
   }
 }

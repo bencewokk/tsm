@@ -29,6 +29,7 @@ export interface Lot {
   seed: number;               // visual seed: stable per plot
   built: number;              // month the current building was completed (0 = original)
   ntype: number;              // type the plot becomes once the old building is demolished
+  lm: number;                 // landmark id + 1 (landmarks.ts), 0 = none
 }
 
 const HB = 2; // hash bucket (cells)
@@ -90,37 +91,47 @@ export class LotStore {
   }
 
   /** Try to place a convex quad plot; checks water/steep, overlap with plots (spatial hash + SAT) and with roads. */
-  tryAddQuad(q: number[], cls: number, prof: number, sides: number, back = 0): Lot | null {
-    if (!isConvex(q)) return null;
+  /** Water / steep / carriageway checks for a convex quad (no overlap test). */
+  quadClear(q: number[]): boolean {
+    if (!isConvex(q)) return false;
     const area = Math.abs(polyArea(q));
-    if (area < 0.12) return null;
+    if (area < 0.12) return false;
     const cx = (q[0] + q[2] + q[4] + q[6]) / 4, cy = (q[1] + q[3] + q[5] + q[7]) / 4;
     for (let k = -1; k < 4; k++) {
       const px = k < 0 ? cx : q[k * 2], py = k < 0 ? cy : q[k * 2 + 1];
       const gx = Math.floor(px), gy = Math.floor(py);
-      if (gx < 1 || gy < 1 || gx >= N - 1 || gy >= N - 1) return null;
+      if (gx < 1 || gy < 1 || gx >= N - 1 || gy >= N - 1) return false;
       const i = gy * N + gx;
-      if (this.water[i] || (this.flags[i] & Flag.Steep)) return null;
+      if (this.water[i] || (this.flags[i] & (Flag.Steep | Flag.Rail))) return false;
     }
-    for (const o of this.near(cx, cy, 1)) if (quadsOverlap(q, o.poly)) return null;
     // keep clear of every carriageway
     const g = this.roads;
-    for (const e of g.edgesNear(cx, cy, 1.2)) {
+    const reach = 0.6 + Math.hypot(q[2] - q[0], q[3] - q[1]) / 2 + Math.hypot(q[6] - q[0], q[7] - q[1]) / 2;
+    for (const e of g.edgesNear(cx, cy, reach)) {
       const ax = g.nx[g.ea[e]], ay = g.ny[g.ea[e]], bx = g.nx[g.eb[e]], by = g.ny[g.eb[e]];
       const clear = ROAD_HALF[g.ecls[e]] + 0.03;
       for (let k = -1; k < 4; k++) {
         const px = k < 0 ? cx : q[k * 2], py = k < 0 ? cy : q[k * 2 + 1];
-        if (pointSeg(px, py, ax, ay, bx, by).d < clear) return null;
+        if (pointSeg(px, py, ax, ay, bx, by).d < clear) return false;
       }
-      // an edge passing through the middle of the plot
-      for (const t of [0.25, 0.5, 0.75]) {
-        const px = (q[0] + q[2]) / 2 * (1 - t) + (q[6] + q[4]) / 2 * t, py = (q[1] + q[3]) / 2 * (1 - t) + (q[7] + q[5]) / 2 * t;
-        if (pointSeg(px, py, ax, ay, bx, by).d < clear) return null;
+      // an edge passing through the plot
+      for (let a = 0; a <= 4; a++) for (let b = 0; b <= 4; b++) {
+        const s0 = a / 4, t0 = b / 4;
+        const px = (q[0] * (1 - s0) + q[2] * s0) * (1 - t0) + (q[6] * (1 - s0) + q[4] * s0) * t0;
+        const py = (q[1] * (1 - s0) + q[3] * s0) * (1 - t0) + (q[7] * (1 - s0) + q[5] * s0) * t0;
+        if (pointSeg(px, py, ax, ay, bx, by).d < clear) return false;
       }
     }
+    return true;
+  }
+
+  tryAddQuad(q: number[], cls: number, prof: number, sides: number, back = 0): Lot | null {
+    if (!this.quadClear(q)) return null;
+    const cx = (q[0] + q[2] + q[4] + q[6]) / 4, cy = (q[1] + q[3] + q[5] + q[7]) / 4;
+    for (const o of this.near(cx, cy, 1)) if (quadsOverlap(q, o.poly)) return null;
     const l: Lot = {
       id: this.lots.length, x: 0, y: 0, ang: 0, w: 0, d: 0, cell: 0, cls, type: BT.None, level: 0, target: 0, constr: 0, constrTotal: 0, age: 0, low: 0,
-      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(this.profiles[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0,
+      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(this.profiles[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0, lm: 0,
     };
     this.setGeom(l, q);
     l.flags = this.flags[l.cell] & Flag.Docks;
@@ -282,6 +293,57 @@ export class LotStore {
     this.setGeom(a, q);
     this.buckets(a, (k) => { let arr = this.hash.get(k); if (!arr) this.hash.set(k, (arr = [])); arr.push(a.id); });
     return true;
+  }
+
+  /** Merge the back-row plot behind `a` into it (deeper plot). */
+  mergeDepth(a: Lot, only?: (o: Lot) => boolean): boolean {
+    const qa = a.poly;
+    const close = (x1: number, y1: number, x2: number, y2: number) => Math.hypot(x1 - x2, y1 - y2) < 0.06;
+    for (const b of this.near(a.x, a.y, 1.2)) {
+      if (b === a || !b.back || (only && !only(b))) continue;
+      const qb = b.poly;
+      if (close(qb[0], qb[1], qa[6], qa[7]) && close(qb[2], qb[3], qa[4], qa[5])) {
+        const q = [qa[0], qa[1], qa[2], qa[3], qb[4], qb[5], qb[6], qb[7]];
+        if (!isConvex(q)) continue;
+        this.remove(b);
+        this.buckets(a, (k) => { const arr = this.hash.get(k); if (arr) { const i = arr.indexOf(a.id); if (i >= 0) arr.splice(i, 1); } });
+        this.setGeom(a, q);
+        this.buckets(a, (k) => { let arr = this.hash.get(k); if (!arr) this.hash.set(k, (arr = [])); arr.push(a.id); });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Grow a plot toward a target size (cells) by absorbing row neighbours and back-row plots that pass `only`. */
+  ensureSize(l: Lot, wCells: number, dCells: number, only: (o: Lot) => boolean = () => true) {
+    for (let k = 0; k < 6 && l.w < wCells; k++) {
+      const nb = this.near(l.x, l.y, 1.4).filter((o) => o !== l && o.back === l.back && o.cls === l.cls && only(o) && Math.hypot(o.x - l.x, o.y - l.y) < l.w + 0.5);
+      let done = false;
+      for (const o of nb) if (this.merge(l, o)) { done = true; break; }
+      if (!done) break;
+    }
+    for (let k = 0; k < 3 && l.d < dCells; k++) if (!this.mergeDepth(l, only)) break;
+  }
+
+  /** Clear a rectangle (cells) of whatever plots overlap it and add one big plot there; null if it hits roads / water. */
+  carve(cx: number, cy: number, ang: number, w: number, d: number, prof: number): { lot: Lot; cleared: Lot[] } | null {
+    const c = Math.cos(ang), s = Math.sin(ang);
+    // front edge on the -v side: local (u, v) -> world
+    const P = (u: number, v: number): [number, number] => [cx + u * c - v * s, cy + u * s + v * c];
+    const [f0x, f0y] = P(-w / 2, -d / 2), [f1x, f1y] = P(w / 2, -d / 2), [b1x, b1y] = P(w / 2, d / 2), [b0x, b0y] = P(-w / 2, d / 2);
+    const q = [f0x, f0y, f1x, f1y, b1x, b1y, b0x, b0y];
+    if (!this.quadClear(q)) return null;
+    const cleared: Lot[] = [];
+    for (const o of this.near(cx, cy, Math.max(w, d) + 0.8)) {
+      if (!quadsOverlap(q, o.poly)) continue;
+      if (o.lm || (o.flags & (Flag.Docks | Flag.Planned))) return null;
+      cleared.push(o);
+    }
+    for (const o of cleared) this.remove(o);
+    const l = this.tryAddQuad(q, 2, prof, 0, 0);
+    if (!l) return null;
+    return { lot: l, cleared };
   }
 
   /** Plots touching a road corridor. */

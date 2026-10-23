@@ -11,6 +11,7 @@ import { MB, Quad, type Pt, type Mat } from './poly';
 import { PALETTES, type DistrictProfile } from '../sim/profiles';
 import type { CityProfile } from '../sim/cityprofile';
 import type { InitMsg } from '../sim/protocol';
+import { landmarkAt, LANDMARKS } from '../sim/landmarks';
 import { designLot, massing, pad, tree as ctxTree, FOOT, type Ctx, type Tree } from './buildings';
 
 // road widths (m) by class, and the narrow cobbled lanes of the old cores
@@ -287,7 +288,7 @@ export class CityView {
   }
 
   private sigOf(L: LotsMsg, k: number): number {
-    let h = imul(L.id[k] + 1, 2654435761) ^ imul(L.prof[k] + 5, 7919);
+    let h = imul(L.id[k] + 1, 2654435761) ^ imul(L.prof[k] + 5, 7919) ^ imul(L.lm[k] + 3, 104729);
     h ^= imul(L.type[k] * 31 + L.level[k] * 7 + L.dens[k] * 977 + L.sides[k] * 53 + L.back[k] * 13, 40503);
     h ^= imul((L.flags[k] & 23) * 131 + L.planType[k] * 17 + L.planLevel[k] * 19 + L.served[k] * 23 + L.built[k] * 3, 69069);
     for (let i = 0; i < 8; i++) h = imul(h ^ Math.round(L.poly[k * 8 + i] * 200), 16777619);
@@ -302,7 +303,7 @@ export class CityView {
     const dens = L.dens[k];
     return {
       mb, Q, id: L.id[k], seed, g, kind, level, dens, sides: L.sides[k], back: L.back[k], isCom: L.type[k] === BT.Com, flags: L.flags[k],
-      prof: this.profiles[L.prof[k]], pal: PALETTES[this.profiles[L.prof[k]].palette], wave: Math.floor(L.built[k] / 24), site: this.city.site, mine: this.mine ? [this.mine.x * CELL, this.mine.y * CELL] : null,
+      prof: this.profiles[L.prof[k]], pal: PALETTES[this.profiles[L.prof[k]].palette], wave: Math.floor(L.built[k] / 24), site: this.city.site, mine: this.mine ? [this.mine.x * CELL, this.mine.y * CELL] : null, lmForm: landmarkAt(L.lm[k])?.form,
       era: Math.min(1, this.profiles[L.prof[k]].era * 0.3 + (L.built[k] / 96) * 0.8), lv: dens === 2 ? 0.8 : dens === 1 ? 0.5 : 0.3, trees,
       r: (j: number) => vhash(seed >>> 3, j),
     };
@@ -421,6 +422,37 @@ export class CityView {
     }
     this.group.add(out);
     return out;
+  }
+
+  /** Dev: every landmark form in a row (plots sized as in the catalogue), for screenshots. */
+  galleryLandmarks(cx: number, cz: number, ids: string[]) {
+    const mb = new MB();
+    const trees: Tree[] = [];
+    let x = cx;
+    ids.forEach((id, i) => {
+      const def = LANDMARKS.find((l) => l.id === id)!;
+      const w = def.size[0] * CELL, d = def.size[1] * CELL;
+      const px = x + w / 2, g = this.ground(px, cz);
+      const Q = new Quad([px - w / 2, cz], [px + w / 2, cz], [px + w / 2, cz + d], [px - w / 2, cz + d]);
+      mb.baseY = g; mb.seed = i;
+      const seed = 5000 + i * 91;
+      const prof = this.profiles[2];
+      const c: Ctx = { mb, Q, id: i, seed, g, kind: 'landmark', level: 1, dens: 2, sides: 0, back: 0, isCom: false, flags: 0, era: 0.5, lv: 0.9, trees, r: (j: number) => vhash(seed, j), prof, pal: PALETTES[prof.palette], wave: 1, site: this.city.site, mine: null, lmForm: def.form };
+      designLot(c);
+      x += w + 30;
+    });
+    const out = new THREE.Group();
+    for (const m of MATS) {
+      const geo = mb.acc[m].build();
+      if (!geo) continue;
+      const mesh = new THREE.Mesh(geo, this.polyMats[m]);
+      mesh.castShadow = m !== 'lamp'; mesh.receiveShadow = true;
+      out.add(mesh);
+    }
+    this.group.add(out);
+    for (const t of trees) this.treeAt(t.x, this.ground(t.x, t.z), t.z, t.size, t.h, t.pine, t.seed);
+    for (const l of Object.values(this.L)) l.finish();
+    return { group: out, width: x - cx };
   }
 
   // ---------------------------------------------------------------- plots under demolition / construction

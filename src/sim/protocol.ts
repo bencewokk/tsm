@@ -98,6 +98,7 @@ export interface LotsMsg {
   seed: Uint32Array;     // visual seed
   built: Uint16Array;    // month the building was completed
   ntype: Uint8Array;     // type after demolition (while demo > 0)
+  lm: Uint8Array;        // landmark id + 1 (0 = none)
 }
 
 export interface StateMsg {

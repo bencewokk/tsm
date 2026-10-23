@@ -6,13 +6,13 @@ import { vhash } from './common';
  * Local plot frame (metres): u along the street, v across it; the street is on the -v side (v = -D/2).
  */
 
-export type Kind = 'none' | 'house' | 'core' | 'apart' | 'tower' | 'shop' | 'office' | 'cbd' | 'ind' | 'port' | 'dockNew' | 'park' | 'square' | 'church' | 'yard';
+export type Kind = 'none' | 'house' | 'core' | 'apart' | 'tower' | 'shop' | 'office' | 'cbd' | 'ind' | 'port' | 'dockNew' | 'park' | 'square' | 'church' | 'yard' | 'landmark';
 
 export function kindOf(type: number, level: number, flags: number): Kind {
   if (!type || !level) return 'none';
   if (type === BT.Park) return 'park';
   if (type === BT.Square) return 'square';
-  if (type === BT.Landmark) return 'church';
+  if (type === BT.Landmark) return 'landmark';
   if (flags & Flag.Docks) {
     if (type === BT.Ind) return 'port';
     return level >= 3 ? 'tower' : 'dockNew';
@@ -49,7 +49,7 @@ export const PAL = {
 
 export const GROUND: Record<Kind, number> = {
   none: 0, yard: 0xc4d3aa, house: 0xbcd19f, core: 0xcdbea4, apart: 0xd3cdc1, tower: 0xd5d1c9, shop: 0xc4c2bb, office: 0xd2cfc8, cbd: 0xcfccc6,
-  ind: 0xb9b8b1, port: 0xbdbbb4, dockNew: 0xd2ccc0, park: 0x9fc07f, square: 0xddd2bf, church: 0xd8ccb6,
+  ind: 0xb9b8b1, port: 0xbdbbb4, dockNew: 0xd2ccc0, park: 0x9fc07f, square: 0xddd2bf, church: 0xd8ccb6, landmark: 0xddd6c4,
 };
 export const SITE = 0xd8c8a6; // construction site / planned ground
 

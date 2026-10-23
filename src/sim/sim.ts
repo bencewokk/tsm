@@ -1045,9 +1045,9 @@ export class Sim {
     const n = ls.length;
     const f = () => new Float32Array(n), u = () => new Uint8Array(n);
     const m: LotsMsg = { n, id: new Int32Array(n), x: f(), y: f(), ang: f(), w: f(), d: f(), type: u(), level: u(), target: u(), constr: u(), constrTotal: u(), flags: u(), planType: u(), planLevel: u(), served: u(),
-      poly: new Float32Array(n * 8), dens: u(), prof: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u() };
+      poly: new Float32Array(n * 8), dens: u(), prof: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u(), lm: u() };
     ls.forEach((l, k) => {
-      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.prof[k] = l.prof; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype;
+      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.prof[k] = l.prof; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype; m.lm[k] = l.lm;
       m.id[k] = l.id; m.x[k] = l.x; m.y[k] = l.y; m.ang[k] = l.ang; m.w[k] = l.w; m.d[k] = l.d;
       m.type[k] = l.type; m.level[k] = l.level; m.target[k] = l.target; m.constr[k] = l.constr; m.constrTotal[k] = l.constrTotal;
       m.flags[k] = l.flags; m.planType[k] = l.planType; m.planLevel[k] = l.planLevel;

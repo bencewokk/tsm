@@ -73,6 +73,15 @@ export function circle(cx: number, cz: number, r: number, seg = 12, rot = 0): Pt
   return out;
 }
 
+export function ellipse(cx: number, cz: number, rx: number, rz: number, ang: number, seg = 18): Pt[] {
+  const c = Math.cos(ang), s = Math.sin(ang), out: Pt[] = [];
+  for (let k = 0; k < seg; k++) {
+    const a = (k / seg) * Math.PI * 2, u = Math.cos(a) * rx, v = Math.sin(a) * rz;
+    out.push([cx + u * c - v * s, cz + u * s + v * c]);
+  }
+  return out;
+}
+
 /** Oriented rectangle about (cx, cz). */
 export function rect(cx: number, cz: number, w: number, d: number, ang: number): Pt[] {
   const c = Math.cos(ang), s = Math.sin(ang), hw = w / 2, hd = d / 2;
@@ -133,13 +142,14 @@ export class MB {
   }
 
   /** Walls (and top cap) between a base polygon and a top polygon with the same vertex count. */
-  frustum(m: Mat, base: Pt[], top: Pt[], y0: number, y1: number, color: number, cap = true, capColor = color) {
+  frustum(m: Mat, base: Pt[], top: Pt[], y0: number, y1: number, color: number, cap = true, capColor = color, inward = false) {
     const n = base.length;
     const cb = centroid(base);
+    const sg = inward ? -1 : 1;
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
-      const mx = (base[i][0] + base[j][0]) / 2 - cb[0], mz = (base[i][1] + base[j][1]) / 2 - cb[1];
-      this.quad(m, [base[i][0], y0, base[i][1]], [base[j][0], y0, base[j][1]], [top[j][0], y1, top[j][1]], [top[i][0], y1, top[i][1]], [mx, 0.05, mz], color);
+      const mx = ((base[i][0] + base[j][0]) / 2 - cb[0]) * sg, mz = ((base[i][1] + base[j][1]) / 2 - cb[1]) * sg;
+      this.quad(m, [base[i][0], y0, base[i][1]], [base[j][0], y0, base[j][1]], [top[j][0], y1, top[j][1]], [top[i][0], y1, top[i][1]], [mx, inward ? 0.6 : 0.05, mz], color);
     }
     if (cap) {
       const c: Pt = centroid(top);
