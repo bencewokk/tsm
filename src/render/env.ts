@@ -6,7 +6,8 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { HorizontalTiltShiftShader } from 'three/examples/jsm/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/examples/jsm/shaders/VerticalTiltShiftShader.js';
-import { MAP } from './common';
+import { MAP, VS } from './common';
+import { strataTexture } from './terrain';
 
 export class Env {
   renderer: THREE.WebGLRenderer;
@@ -67,7 +68,12 @@ export class Env {
     this.scene.add(this.sun, this.sun.target);
 
     // base board under the model
-    const board = new THREE.Mesh(new THREE.BoxGeometry(MAP + 400, 60, MAP + 400), new THREE.MeshStandardMaterial({ color: 0xece8de, roughness: 1 }));
+    // the model sits on a board whose edge shows the same cork / wood layers as the terrain's skirt
+    const strata = strataTexture();
+    strata.repeat.set(12, 60 / (20 * VS));
+    const side = new THREE.MeshStandardMaterial({ map: strata, roughness: 1 });
+    const faceMat = new THREE.MeshStandardMaterial({ color: 0xece8de, roughness: 1 });
+    const board = new THREE.Mesh(new THREE.BoxGeometry(MAP + 400, 60, MAP + 400), [side, side, faceMat, faceMat, side, side]);
     board.position.set(MAP / 2, -70, MAP / 2);
     board.receiveShadow = true;
     board.name = 'board';

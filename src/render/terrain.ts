@@ -9,7 +9,11 @@ export interface TerrainView {
   heat: THREE.Mesh;
   heatTex: THREE.DataTexture;
   material: THREE.MeshStandardMaterial;
-  waterMat: THREE.MeshStandardMaterial;
+  waterMat: THREE.MeshPhysicalMaterial;
+  /** map-paper overlay for plan mode and far zoom (opacity 0..1) and the cork-strata skirt round the model */
+  paper: THREE.Mesh;
+  skirt: THREE.Mesh;
+  setPaper(a: number): void;
   /** height lookup at world x,z (bilinear on the vertex grid) */
   sample(x: number, z: number): number;
   setHeat(lv: Float32Array, water: Uint8Array): void;
@@ -110,12 +114,31 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   geo.computeVertexNormals();
 
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, transparent: false });
+  // layered cork: alternating 10 m layers with a thin darker edge where each layer ends (the contour of a cardboard / cork model)
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float vTsmWY;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTsmWY = (modelMatrix * vec4(transformed, 1.0)).y;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vTsmWY;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          float band = vTsmWY / ${(10 * VS).toFixed(2)};
+          float on = smoothstep(2.0, 4.5, vTsmWY / ${VS.toFixed(2)});
+          float f = fract(band), id = floor(band);
+          float w = max(fwidth(band), 0.002);
+          float line = 1.0 - smoothstep(0.0, w * 1.6, f);
+          diffuseColor.rgb *= 1.0 - on * (0.03 * mod(id, 2.0) + 0.1 * line);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.03, 0.995, 0.93), on * 0.55);
+        }`);
+  };
+  material.customProgramCacheKey = () => 'tsm-cork';
   const mesh = new THREE.Mesh(geo, material);
   mesh.receiveShadow = true;
   mesh.name = 'terrain';
 
   // skirt: a pale plinth under the model, like a base board
-  const waterMat = new THREE.MeshStandardMaterial({ color: '#93b9d0', roughness: 0.3, metalness: 0.05, transparent: true, opacity: 0.9 });
+  const waterMat = new THREE.MeshPhysicalMaterial({ map: waterTexture(wmask), color: '#ffffff', roughness: 0.07, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.05, transparent: true, opacity: 0.93 });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(N * CELL, N * CELL), waterMat);
   water.rotation.x = -Math.PI / 2;
   water.position.set((N * CELL) / 2, 0.3, (N * CELL) / 2);
@@ -189,6 +212,18 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   zones.renderOrder = 2;
   zones.position.y = 1.6;
 
+  // map paper: a cream sheet with grain, slope hatching, a kilometre grid and a pale wash on the water; its opacity follows the zoom
+  const paperMat = new THREE.MeshBasicMaterial({ map: paperTexture(height, wmask), transparent: true, opacity: 0, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const paper = new THREE.Mesh(geo, paperMat);
+  paper.visible = false;
+  paper.renderOrder = 1;
+  paper.position.y = 1.0;
+
+  // the skirt: the edge of the model shows its layers, like a core sample (10 m cork layers down to the board)
+  const skirt = new THREE.Mesh(skirtGeometry(vh, V), new THREE.MeshStandardMaterial({ map: strataTexture(), roughness: 1, side: THREE.DoubleSide }));
+  skirt.name = 'skirt';
+  skirt.receiveShadow = true;
+
   const ramp = [
     [0.0, [70, 95, 160]],
     [0.3, [110, 170, 190]],
@@ -209,7 +244,8 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   };
 
   return {
-    mesh, water, heat, heatTex, material, waterMat, catchment, contours, zones,
+    mesh, water, heat, heatTex, material, waterMat, catchment, contours, zones, paper, skirt,
+    setPaper(a: number) { paper.visible = a > 0.01; paperMat.opacity = a; waterMat.color.set('#ffffff').lerp(new THREE.Color('#e6eef0'), a * 0.7); },
     setZones(terr: Uint8Array, w: Uint8Array) {
       for (let i = 0; i < N * N; i++) {
         const t = terr[i], c = T_COLORS[t] ?? [0, 0, 0];
@@ -240,4 +276,148 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
       heatTex.needsUpdate = true;
     },
   };
+}
+
+
+// ------------------------------------------------------------------ textures
+const noise2 = (x: number, y: number) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
+const smooth = (t: number) => t * t * (3 - 2 * t);
+function vnoise(x: number, y: number) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = smooth(x - xi), yf = smooth(y - yi);
+  return noise2(xi, yi) * (1 - xf) * (1 - yf) + noise2(xi + 1, yi) * xf * (1 - yf) + noise2(xi, yi + 1) * (1 - xf) * yf + noise2(xi + 1, yi + 1) * xf * yf;
+}
+
+/** Water colour map: darker with distance from the shore, a foam line along the coast, faint ripples. Land texels are transparent. */
+function waterTexture(wmask: Uint8Array): THREE.CanvasTexture {
+  const S = N * 8;
+  // distance to land (cells) for water cells, by a two-pass chamfer
+  const dl = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) dl[i] = wmask[i] ? 99 : 0;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const i = y * N + x;
+      if (x > 0) dl[i] = Math.min(dl[i], dl[i - 1] + 1);
+      if (y > 0) dl[i] = Math.min(dl[i], dl[i - N] + 1);
+    }
+    for (let y = N - 1; y >= 0; y--) for (let x = N - 1; x >= 0; x--) {
+      const i = y * N + x;
+      if (x < N - 1) dl[i] = Math.min(dl[i], dl[i + 1] + 1);
+      if (y < N - 1) dl[i] = Math.min(dl[i], dl[i + N] + 1);
+    }
+  }
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const g = cv.getContext('2d')!;
+  const img = g.createImageData(S, S);
+  const deep = [74, 128, 160], shallow = [150, 205, 222];
+  for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
+    const fx = Math.min(N - 1.001, Math.max(0, px / 8 - 0.5)), fy = Math.min(N - 1.001, Math.max(0, py / 8 - 0.5));
+    const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+    const d = (dl[y0 * N + x0] * (1 - tx) + dl[y0 * N + x0 + 1] * tx) * (1 - ty) + (dl[(y0 + 1) * N + x0] * (1 - tx) + dl[(y0 + 1) * N + x0 + 1] * tx) * ty;
+    const o = (py * S + px) * 4;
+    if (d < 0.5) { img.data[o + 3] = 0; continue; }   // land
+    const t = Math.min(1, (d - 0.5) / 9);
+    let r = shallow[0] + (deep[0] - shallow[0]) * t, gg = shallow[1] + (deep[1] - shallow[1]) * t, b = shallow[2] + (deep[2] - shallow[2]) * t;
+    // ripples: long soft stripes
+    const rip = vnoise(px * 0.05 + py * 0.02, py * 0.11) * 0.5 + vnoise(px * 0.13, py * 0.04 + px * 0.03) * 0.5;
+    const k = 1 + (rip - 0.5) * 0.07;
+    r *= k; gg *= k; b *= k;
+    // foam along the shore, broken up by noise
+    const fz = Math.max(0, 1 - (d - 0.5) / 1.1) * (0.55 + 0.6 * vnoise(px * 0.22, py * 0.22));
+    const foam = Math.min(1, Math.max(0, (fz - 0.28) * 2.2));
+    r += (244 - r) * foam; gg += (248 - gg) * foam; b += (248 - b) * foam;
+    img.data[o] = r; img.data[o + 1] = gg; img.data[o + 2] = b; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/** Cream paper: grain, diagonal hatching where the ground is steep, a 1 km grid, a pale blue wash on the water. */
+function paperTexture(height: Float32Array, wmask: Uint8Array): THREE.CanvasTexture {
+  const S = N * 8;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const g = cv.getContext('2d')!;
+  const img = g.createImageData(S, S);
+  for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
+    const o = (py * S + px) * 4;
+    const cx = Math.min(N - 1, px >> 3), cy = Math.min(N - 1, py >> 3);
+    const wet = wmask[cy * N + cx];
+    const grain = (vnoise(px * 0.9, py * 0.9) - 0.5) * 9 + (vnoise(px * 0.08, py * 0.08) - 0.5) * 10;
+    let r = 239 + grain, gg = 232 + grain, b = 213 + grain;
+    if (wet) { r = 206 + grain * 0.5; gg = 224 + grain * 0.5; b = 232 + grain * 0.5; }
+    img.data[o] = r; img.data[o + 1] = gg; img.data[o + 2] = b; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  // 1 km grid (20 cells)
+  g.strokeStyle = 'rgba(120,130,140,0.22)'; g.lineWidth = 1;
+  for (let k = 0; k <= N; k += 20) { g.beginPath(); g.moveTo(k * 8, 0); g.lineTo(k * 8, S); g.stroke(); g.beginPath(); g.moveTo(0, k * 8); g.lineTo(S, k * 8); g.stroke(); }
+  // hatching on slopes (strokes perpendicular to the fall line, closer together where it is steeper)
+  g.strokeStyle = 'rgba(110,86,60,0.3)'; g.lineWidth = 1;
+  for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) {
+    if (wmask[y * N + x]) continue;
+    const gx = (height[y * N + x + 1] - height[y * N + x - 1]) / (2 * CELL), gy = (height[(y + 1) * N + x] - height[(y - 1) * N + x]) / (2 * CELL);
+    const sl = Math.hypot(gx, gy);
+    if (sl < 0.16) continue;
+    const n = sl > 0.32 ? 4 : sl > 0.2 ? 3 : 2;
+    const ang = Math.atan2(gy, gx) + Math.PI / 2;
+    for (let k = 0; k < n; k++) {
+      const cx = x * 8 + 4 + ((k + 0.5) / n - 0.5) * 8, cy = y * 8 + 4 + (noise2(x, y + k) - 0.5) * 3;
+      const len = 3 + sl * 14;
+      g.beginPath(); g.moveTo(cx - Math.cos(ang) * len / 2, cy - Math.sin(ang) * len / 2); g.lineTo(cx + Math.cos(ang) * len / 2, cy + Math.sin(ang) * len / 2); g.stroke();
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/** Core-sample strata: alternating cork and wood layers (one pair = 20 m of ground height). */
+export function strataTexture(): THREE.CanvasTexture {
+  const cv = document.createElement('canvas');
+  cv.width = 8; cv.height = 64;
+  const g = cv.getContext('2d')!;
+  g.fillStyle = '#d6bc92'; g.fillRect(0, 0, 8, 32);
+  g.fillStyle = '#c4a47a'; g.fillRect(0, 32, 8, 32);
+  g.fillStyle = 'rgba(80,58,34,0.55)'; g.fillRect(0, 0, 8, 2); g.fillRect(0, 32, 8, 2);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.NearestFilter;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** A wall round the perimeter of the terrain from the ground surface down to the board. */
+function skirtGeometry(vh: Float32Array, V: number): THREE.BufferGeometry {
+  const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+  const bottom = -40;
+  const layer = 20 * VS;
+  const edge = (pts: [number, number, number][]) => {
+    const base = pos.length / 3;
+    let u = 0;
+    pts.forEach((p, k) => {
+      if (k) u += Math.hypot(p[0] - pts[k - 1][0], p[2] - pts[k - 1][2]);
+      pos.push(p[0], Math.max(p[1], bottom + 1), p[2], p[0], bottom, p[2]);
+      uv.push(u / 600, Math.max(p[1], bottom + 1) / layer, u / 600, bottom / layer);
+      if (k) { const o = base + (k - 1) * 2; idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2); }
+    });
+  };
+  const top: [number, number, number][][] = [[], [], [], []];
+  for (let k = 0; k <= N; k++) {
+    top[0].push([k * CELL, vh[0 * V + k], 0]);
+    top[1].push([k * CELL, vh[N * V + k], N * CELL]);
+    top[2].push([0, vh[k * V + 0], k * CELL]);
+    top[3].push([N * CELL, vh[k * V + N], k * CELL]);
+  }
+  for (const e of top) edge(e);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
 }

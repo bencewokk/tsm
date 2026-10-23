@@ -5,6 +5,8 @@ import { buildTerrain, type TerrainView } from './render/terrain';
 import { CityView } from './render/city';
 import { MetroView } from './render/metro';
 import { DesireView } from './render/desire';
+import { Labels } from './render/labels';
+import { Life } from './render/life';
 import { lookUniforms } from './render/look';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
 import { Hud } from './ui/hud';
@@ -23,6 +25,8 @@ let init: InitMsg | null = null;
 let terrain: TerrainView | null = null;
 let city: CityView | null = null;
 let metro: MetroView | null = null;
+let labels: Labels | null = null;
+let life: Life | null = null;
 let planner: Planner | null = null;
 let state: StateMsg | null = null;
 const desire = new DesireView();
@@ -36,9 +40,11 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   if (m.type === 'init') {
     init = m;
     terrain = buildTerrain(m.height, m.water, m.flags);
-    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours, terrain.zones);
+    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours, terrain.zones, terrain.paper, terrain.skirt);
     city = new CityView(m.water, m.flags, m.villages, (x, z) => terrain!.sample(x, z), m);
     env.scene.add(city.group);
+    life = new Life((x, z) => terrain!.sample(x, z), m.water);
+    env.scene.add(life.group);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
     env.scene.add(metro.group);
     planner = new Planner(send, { height: m.height, water: m.water });
@@ -52,6 +58,12 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     const sig = (s: StateMsg) => JSON.stringify([s.lines.map((l) => [l.id, l.stations, l.trains]), s.stations.map((st) => (st.riders < 1200 ? 0 : st.riders < 5000 ? 1 : 2))]);
     const linesChanged = !state || sig(state) !== sig(m);
     state = m;
+    if (!labels && init && terrain) {
+      labels = new Labels(init.villages, init.city.site, m.docks.centre, (x, z) => terrain!.sample(x, z));
+      env.scene.add(labels.group);
+    }
+    life?.setRoads(m.roads);
+    if (newMonth) life?.setCity(m.stats.homes, m.stations);
     if (newMonth) lastStateAt = performance.now();
     city?.update(m);
     if (linesChanged) metro?.update(m);
@@ -72,6 +84,7 @@ send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin:
 let savedView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
 hud.handlers.onTool = (t) => {
   const c = env.controls;
+  env.tilt = hud.toggles.tilt && t !== 'plan';
   if (t === 'plan') {
     savedView = { pos: env.camera.position.clone(), target: c.target.clone() };
     const dist = Math.max(2500, env.camera.position.distanceTo(c.target));
@@ -100,8 +113,10 @@ hud.handlers.onToggle = (name, on) => {
   if (name === 'xray') xrayTarget = on ? 1 : 0;
   if (name === 'night') { nightTarget = on ? 1 : 0; fastDawn = !on; }
   if (name === 'desire') { desire.group.visible = on; if (on && state) desire.update(state.desire); }
-  if (name === 'tilt') env.tilt = on;
+  if (name === 'tilt') env.tilt = on && hud.tool !== 'plan';
 };
+
+if (params.get('notilt') !== '1') hud.toggle('tilt', true);
 
 hud.onFocusLandmark = (x, y) => { env.focus((x + 0.5) * CELL, (y + 0.5) * CELL, 800); };
 hud.onFocusDocks = () => {
@@ -193,6 +208,15 @@ function phaseToTime(p: number) {
   const day = 0.72;
   return p < day ? -0.2 + (p / day) * 0.4 : 0.2 + ((p - day) / (1 - day)) * 0.6;
 }
+/** Zoom-dependent map layers: the paper sheet and the settlement tags. */
+function paperAndLabels() {
+  const dist = env.camera.position.distanceTo(env.controls.target);
+  const plan = hud.tool === 'plan';
+  const k = plan ? 0.8 : 0.55 * THREE.MathUtils.smoothstep(dist, 3200, 5600);
+  terrain?.setPaper(k * (1 - 0.92 * env.night));
+  labels?.update(dist, plan, env.night);
+  if (life) life.group.visible = dist < 6500 && !plan;
+}
 let lastXray = -1;
 function applyXray(v: number) {
   if (v === lastXray || !terrain || !city) return;
@@ -206,7 +230,7 @@ function applyXray(v: number) {
   for (const m of city.surfaceMats) fade(m, 0.1);
   terrain.waterMat.opacity = 0.88 * (1 - 0.8 * v);
   const board = env.scene.getObjectByName('board') as THREE.Mesh | undefined;
-  if (board) fade(board.material as THREE.Material, 0.05);
+  if (board) for (const m of board.material as THREE.Material[]) fade(m, 0.05);
 }
 let t0 = performance.now();
 function frame(now: number) {
@@ -222,6 +246,8 @@ function frame(now: number) {
   env.controls.update();
   const frac = state ? Math.min(1, (now - lastStateAt) / (MS[state.speed] ?? 1500)) : 0;
   city?.animate(frac, now / 1000);
+  paperAndLabels();
+  life?.animate(dt * (state && state.speed > 0 ? 1 : 0.4), now / 1000, env.night);
   xray += (xrayTarget - xray) * Math.min(1, dt * 5);
   if (Math.abs(xray - xrayTarget) < 0.002) xray = xrayTarget;
   applyXray(xray);
@@ -301,6 +327,8 @@ async function shot(name: string) {
   env.applyTime();
   lookUniforms.uNight.value = env.night;
   if (city) city.roadMat.emissiveIntensity = env.night * 0.05;
+  paperAndLabels();
+  life?.animate(0, performance.now() / 1000, env.night);
   env.render();
   const url = env.renderer.domElement.toDataURL('image/png');
   await fetch(`/__shot?name=${encodeURIComponent(name)}`, { method: 'POST', body: url });
@@ -315,4 +343,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
