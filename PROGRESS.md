@@ -132,6 +132,9 @@ Code: `src/render/terrain.ts` (cork layers, acrylic water, paper sheet, strata s
 - Captures (seed 4821, month 60, before = step 7 commit, after = this commit): screenshots/step8-before-overview-seed4821.jpg / step8-after-overview-seed4821.jpg, step8-before-closeup / step8-after-closeup, step8-before-coast / step8-after-coast, step8-before-plan / step8-after-plan, plus step8-after-night-seed4821.jpg and step8-after-street-life-seed4821.jpg (cars, a test crowd by the town hall).
 - Not done: moving trains and ships (the existing boats stay static), haze beyond the existing fog, cork bands are barely visible on the flat 4821 coast (they show on hills seeds), the paper hatching reads a little noisy on gentle slopes in plan mode, labels do not avoid each other (The Docks sits close to the old town tag), the station crowd was only checked with a stand-in station (the test line could not be built by the browser demo in this run).
 
+## Camera controls (done)
+WASD and the arrow keys pan over the ground plane relative to the facing direction (speed scales with camera distance, Shift is 2.8x, smooth per frame, ignored while typing in a field); holding the middle mouse button and dragging orbits (horizontal = yaw, vertical = pitch clamped to 0.12 .. 0.46 pi); in plan mode the same drag only turns the map (yaw), the view stays top-down. Desire lines moved from D to L because D now pans right.
+
 ## Dev notes
 - Showcase captures live in `screenshots/` (jpg); dev `tsm.shot()` writes png there, which is git-ignored.
 - Run: `npm run dev` (http://127.0.0.1:5173), `npm run build`, `npm run headless -- <seed> <months> <deal> [--line] [--map]`.

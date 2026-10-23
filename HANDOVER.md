@@ -26,7 +26,7 @@ Key decisions:
 - Hidden Browser pane throttles timers: keep one JS call under about 40 s and use `tsm.ff` in small steps.
 
 ## Controls (from src/main.ts)
-Space pause; 1/2/3 speed (1x/3x/10x); P toggles plan mode (V back to view). In plan mode: click stations in order, Enter builds, Backspace undoes, Esc cancels. H heatmap, X x-ray, N night, D desire lines, T tilt-shift. Mouse: orbit/pan/zoom. Left HUD panel lists landmarks (click to fly there).
+Space pause; 1/2/3 speed (1x/3x/10x); P toggles plan mode (V back to view). WASD or arrow keys pan (Shift faster); middle-drag orbits (yaw + pitch; yaw only in plan mode); wheel zooms; left-drag orbits, right-drag pans. In plan mode: click stations in order, Enter builds, Backspace undoes, Esc cancels. H heatmap, X x-ray, Z zones, N night, L desire lines (moved from D), T tilt-shift. Left HUD panel lists landmarks (click to fly there).
 
 ## Code map
 - `src/sim/` (runs in `worker.ts`; messages typed in `protocol.ts`)

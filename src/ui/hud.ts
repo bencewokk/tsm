@@ -73,7 +73,7 @@ export class Hud {
         <button data-toggle="zones" title="Land-use territories (Z)">Zones</button>
         <button data-toggle="xray" title="X-ray underground (X)">X-ray</button>
         <button data-toggle="night" title="Night (N)">Night</button>
-        <button data-toggle="desire" title="Desire lines (D)">Desire lines</button>
+        <button data-toggle="desire" title="Desire lines (L)">Desire lines</button>
         <button data-toggle="tilt" title="Tilt-shift (T)">Tilt-shift</button>
       </div>
       <div class="hint panel" data-k="hint"></div>

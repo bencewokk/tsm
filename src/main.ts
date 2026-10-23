@@ -90,14 +90,14 @@ hud.handlers.onTool = (t) => {
     const dist = Math.max(2500, env.camera.position.distanceTo(c.target));
     flyTo(new THREE.Vector3(c.target.x, dist, c.target.z + 1), c.target.clone());
     c.enableRotate = false;
-    c.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    c.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: -1 as unknown as THREE.MOUSE, RIGHT: THREE.MOUSE.PAN };
     c.screenSpacePanning = true;
     metro?.setPlan(true);
     if (terrain && state) { terrain.setCatchment(state.catchment); terrain.catchment.visible = true; }
     if (terrain) terrain.contours.visible = true;
   } else {
     c.enableRotate = true;
-    c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: -1 as unknown as THREE.MOUSE, RIGHT: THREE.MOUSE.PAN };
     c.screenSpacePanning = false;
     if (savedView) flyTo(savedView.pos, savedView.target);
     metro?.setPlan(false);
@@ -175,8 +175,63 @@ canvas.addEventListener('pointermove', (e) => {
   if (planner.draft.length) refreshPlan();
 });
 
+// ------------------------------------------------------------------ camera: WASD / arrows pan, middle-drag orbits
+const held = new Set<string>();
+let shiftDown = false;
+const PAN_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+const typing = (t: EventTarget | null) => { const el = t as HTMLElement | null; return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable); };
 window.addEventListener('keydown', (e) => {
-  if ((e.target as HTMLElement).tagName === 'INPUT') return;
+  shiftDown = e.shiftKey;
+  if (typing(e.target) || e.ctrlKey || e.metaKey || e.altKey || !PAN_KEYS.has(e.code)) return;
+  held.add(e.code); fly = null; e.preventDefault();
+});
+window.addEventListener('keyup', (e) => { held.delete(e.code); shiftDown = e.shiftKey; });
+window.addEventListener('blur', () => { held.clear(); shiftDown = false; });
+/** Move camera and target together over the ground plane, relative to where the camera faces. Speed scales with the camera distance. */
+function panByKeys(dt: number, fast: boolean) {
+  if (!held.size) return;
+  const cam = env.camera.position, tgt = env.controls.target;
+  let fx = tgt.x - cam.x, fz = tgt.z - cam.z;
+  const fl = Math.hypot(fx, fz);
+  if (fl < 1e-3) { fx = 0; fz = -1; } else { fx /= fl; fz /= fl; }
+  const rx = -fz, rz = fx; // right of the facing direction
+  const f = (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
+  const r = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
+  if (!f && !r) return;
+  const len = Math.hypot(f, r), dist = cam.distanceTo(tgt);
+  const step = Math.max(150, dist) * 0.8 * (fast ? 2.8 : 1) * dt / len;
+  let dx = (fx * f + rx * r) * step, dz = (fz * f + rz * r) * step;
+  const lim = N * CELL;
+  dx = Math.max(-tgt.x, Math.min(lim - tgt.x, dx)); dz = Math.max(-tgt.z, Math.min(lim - tgt.z, dz));
+  cam.x += dx; cam.z += dz; tgt.x += dx; tgt.z += dz;
+}
+let spin: { x: number; y: number; id: number } | null = null;
+canvas.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+canvas.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.button !== 1) return;
+  e.preventDefault(); fly = null;
+  spin = { x: e.clientX, y: e.clientY, id: e.pointerId };
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!spin || e.pointerId !== spin.id) return;
+  const dx = e.clientX - spin.x, dy = e.clientY - spin.y;
+  spin.x = e.clientX; spin.y = e.clientY;
+  const off = env.camera.position.clone().sub(env.controls.target);
+  const sph = new THREE.Spherical().setFromVector3(off);
+  sph.theta -= dx * 0.006; // yaw
+  // pitch: dragging down lifts the camera towards a top view, dragging up lowers it towards the horizon (clamped); plan mode stays top-down and only turns (yaw)
+  if (hud.tool !== 'plan') sph.phi = Math.max(0.12, Math.min(Math.PI * 0.46, sph.phi - dy * 0.005));
+  env.camera.position.copy(env.controls.target).add(off.setFromSpherical(sph));
+  env.camera.lookAt(env.controls.target);
+});
+const endSpin = (e: PointerEvent) => { if (spin && e.pointerId === spin.id) { spin = null; if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId); } };
+canvas.addEventListener('pointerup', endSpin);
+canvas.addEventListener('pointercancel', endSpin);
+
+window.addEventListener('keydown', (e) => {
+  if (typing(e.target)) return;
   if (e.code === 'Space') { send({ type: 'speed', speed: state && state.speed > 0 ? 0 : 1 }); e.preventDefault(); }
   else if (e.key === '1') send({ type: 'speed', speed: 1 });
   else if (e.key === '2') send({ type: 'speed', speed: 3 });
@@ -187,7 +242,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'x' || e.key === 'X') hud.toggle('xray');
   else if (e.key === 'z' || e.key === 'Z') hud.toggle('zones');
   else if (e.key === 'n' || e.key === 'N') hud.toggle('night');
-  else if (e.key === 'd' || e.key === 'D') hud.toggle('desire');
+  else if (e.key === 'l' || e.key === 'L') hud.toggle('desire');
   else if (e.key === 't' || e.key === 'T') hud.toggle('tilt');
   else if (hud.tool === 'plan' && planner) {
     if (e.key === 'Enter') planner.commit();
@@ -243,6 +298,7 @@ function frame(now: number) {
     env.controls.target.lerpVectors(fly.tf, fly.tt, k);
     if (fly.t >= 1) fly = null;
   }
+  panByKeys(dt, shiftDown);
   env.controls.update();
   const frac = state ? Math.min(1, (now - lastStateAt) / (MS[state.speed] ?? 1500)) : 0;
   city?.animate(frac, now / 1000);
@@ -343,4 +399,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
