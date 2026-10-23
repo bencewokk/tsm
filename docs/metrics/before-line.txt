@@ -1,0 +1,80 @@
+== seed 4821 coast/port month 96 pop 59009 (test line from month 24) centre 67,99
+-- by distance from the centre (cells of 50 m)
+0-4       plots   73 built   69 vacant    0 (0%)  mean  47.5 m  max 122  >=30m  30  >=60m  14
+4-8       plots  201 built  153 vacant   48 (24%)  mean  21.0 m  max 122  >=30m  31  >=60m   5
+8-12      plots  196 built   88 vacant  108 (55%)  mean  14.7 m  max 122  >=30m  15  >=60m   1
+12-18     plots  345 built  113 vacant  229 (66%)  mean  10.8 m  max  54  >=30m   5  >=60m   0
+18-28     plots  442 built  110 vacant  331 (75%)  mean  16.3 m  max 122  >=30m  16  >=60m   3
+28-+      plots  967 built  386 vacant  579 (60%)  mean   8.5 m  max  10  >=30m   0  >=60m   0
+-- by station walk time
+0-4 min   plots  574 built  450 vacant  117 (20%)  mean  18.0 m  max 122  >=30m  62  >=60m  18
+4-8 min   plots 1158 built  403 vacant  754 (65%)  mean  13.0 m  max 122  >=30m  33  >=60m   5
+8-12 min  plots  319 built   62 vacant  256 (80%)  mean  11.6 m  max  30  >=30m   2  >=60m   0
+12-+ min  plots  173 built    4 vacant  168 (97%)  mean  10.0 m  max  10  >=30m   0  >=60m   0
+-- towers (>= 60 m): 23
+-- roads at start   all: edges  118 ( 18 km) art/col/loc 22/19/77  diagonals   1  dead ends  19 (short 18)  faces 19 triangles 6 slivers 2
+                  core: edges   86 ( 11 km) art/col/loc 8/18/60  diagonals   0  dead ends  14 (short 14)  faces 19 triangles 6 slivers 2
+               outside: edges   32 (  7 km) art/col/loc 14/1/17  diagonals   1  dead ends   5 (short 4)  faces 0 triangles 0 slivers 0
+-- roads at month 96  all: edges  272 ( 37 km) art/col/loc 26/46/200  diagonals  27  dead ends  52 (short 29)  faces 47 triangles 8 slivers 8
+                  core: edges   99 ( 12 km) art/col/loc 9/37/53  diagonals   2  dead ends  11 (short 11)  faces 21 triangles 6 slivers 4
+               outside: edges  173 ( 25 km) art/col/loc 17/9/147  diagonals  25  dead ends  41 (short 18)  faces 26 triangles 2 slivers 4
+== seed 187 hills/rail-junction month 96 pop 77165 (test line from month 24) centre 62,63
+-- by distance from the centre (cells of 50 m)
+0-4       plots   56 built   51 vacant    2 (4%)  mean  33.5 m  max 122  >=30m  17  >=60m   5
+4-8       plots  199 built  194 vacant    5 (3%)  mean  20.6 m  max 122  >=30m  39  >=60m  10
+8-12      plots  349 built  249 vacant  100 (29%)  mean  13.3 m  max 122  >=30m  25  >=60m   3
+12-18     plots  446 built  209 vacant  234 (52%)  mean  21.7 m  max 122  >=30m  51  >=60m   8
+18-28     plots  637 built  281 vacant  355 (56%)  mean  10.8 m  max  54  >=30m  12  >=60m   0
+28-+      plots 1579 built  594 vacant  982 (62%)  mean   9.1 m  max 122  >=30m   2  >=60m   2
+-- by station walk time
+0-4 min   plots  836 built  578 vacant  251 (30%)  mean  15.7 m  max 122  >=30m  70  >=60m  11
+4-8 min   plots 1663 built  802 vacant  860 (52%)  mean  13.5 m  max 122  >=30m  66  >=60m  17
+8-12 min  plots  597 built  185 vacant  410 (69%)  mean  10.7 m  max  30  >=30m  10  >=60m   0
+12-+ min  plots  170 built   13 vacant  157 (92%)  mean   9.8 m  max  10  >=30m   0  >=60m   0
+-- towers (>= 60 m): 28
+-- roads at start   all: edges  248 ( 38 km) art/col/loc 35/36/177  diagonals   1  dead ends  26 (short 25)  faces 45 triangles 0 slivers 0
+                  core: edges   73 ( 10 km) art/col/loc 5/21/47  diagonals   1  dead ends   8 (short 8)  faces 18 triangles 0 slivers 0
+               outside: edges  175 ( 28 km) art/col/loc 30/15/130  diagonals   0  dead ends  18 (short 17)  faces 27 triangles 0 slivers 0
+-- roads at month 96  all: edges  438 ( 58 km) art/col/loc 36/92/310  diagonals  20  dead ends  57 (short 30)  faces 81 triangles 1 slivers 10
+                  core: edges   99 ( 12 km) art/col/loc 5/39/55  diagonals   2  dead ends   7 (short 6)  faces 25 triangles 0 slivers 1
+               outside: edges  339 ( 47 km) art/col/loc 31/53/255  diagonals  18  dead ends  50 (short 24)  faces 56 triangles 1 slivers 9
+== seed 304 coast/planned-capital month 96 pop 71942 (test line from month 24) centre 59,65
+-- by distance from the centre (cells of 50 m)
+0-4       plots   34 built   31 vacant    0 (0%)  mean  34.3 m  max 122  >=30m  10  >=60m   2
+4-8       plots  145 built  138 vacant    7 (5%)  mean  31.0 m  max 122  >=30m  52  >=60m   7
+8-12      plots  117 built  114 vacant    2 (2%)  mean  22.0 m  max 122  >=30m  30  >=60m   4
+12-18     plots  166 built  117 vacant   47 (28%)  mean  11.1 m  max 122  >=30m   5  >=60m   1
+18-28     plots  314 built  212 vacant  102 (32%)  mean  20.0 m  max 122  >=30m  26  >=60m  19
+28-+      plots  532 built  394 vacant  137 (26%)  mean   9.2 m  max  19  >=30m   0  >=60m   0
+-- by station walk time
+0-4 min   plots  362 built  349 vacant    9 (2%)  mean  21.7 m  max 122  >=30m  63  >=60m  24
+4-8 min   plots  631 built  507 vacant  122 (19%)  mean  15.8 m  max 122  >=30m  59  >=60m   9
+8-12 min  plots  217 built  138 vacant   78 (36%)  mean   9.8 m  max  30  >=30m   1  >=60m   0
+12-+ min  plots   98 built   12 vacant   86 (88%)  mean   8.2 m  max  10  >=30m   0  >=60m   0
+-- towers (>= 60 m): 33
+-- roads at start   all: edges   97 ( 15 km) art/col/loc 19/13/65  diagonals   3  dead ends  11 (short 9)  faces 24 triangles 7 slivers 2
+                  core: edges   54 (  8 km) art/col/loc 9/11/34  diagonals   1  dead ends   4 (short 4)  faces 17 triangles 6 slivers 1
+               outside: edges   43 (  8 km) art/col/loc 10/2/31  diagonals   2  dead ends   7 (short 5)  faces 7 triangles 1 slivers 1
+-- roads at month 96  all: edges  290 ( 32 km) art/col/loc 32/87/171  diagonals  15  dead ends  39 (short 24)  faces 61 triangles 8 slivers 19
+                  core: edges  105 ( 10 km) art/col/loc 17/54/34  diagonals   6  dead ends   4 (short 4)  faces 32 triangles 4 slivers 11
+               outside: edges  185 ( 22 km) art/col/loc 15/33/137  diagonals   9  dead ends  35 (short 20)  faces 29 triangles 4 slivers 8
+== seed 83 coast/mining month 96 pop 59853 (test line from month 24) centre 35,67
+-- by distance from the centre (cells of 50 m)
+0-4       plots  124 built  119 vacant    2 (2%)  mean  13.6 m  max 122  >=30m   3  >=60m   1
+4-8       plots  268 built  207 vacant   61 (23%)  mean  12.9 m  max 122  >=30m  18  >=60m   3
+8-12      plots  265 built  140 vacant  125 (47%)  mean  11.7 m  max 122  >=30m   9  >=60m   1
+12-18     plots  378 built  161 vacant  214 (57%)  mean  16.0 m  max  54  >=30m  29  >=60m   0
+18-28     plots  703 built  231 vacant  471 (67%)  mean  13.7 m  max  54  >=30m  28  >=60m   0
+28-+      plots 1530 built  529 vacant  998 (65%)  mean   8.9 m  max  19  >=30m   0  >=60m   0
+-- by station walk time
+0-4 min   plots 1092 built  754 vacant  330 (30%)  mean  13.5 m  max 122  >=30m  66  >=60m   3
+4-8 min   plots 1556 built  551 vacant 1005 (65%)  mean  10.0 m  max 122  >=30m  21  >=60m   2
+8-12 min  plots  575 built   80 vacant  494 (86%)  mean   8.9 m  max  18  >=30m   0  >=60m   0
+12-+ min  plots   45 built    2 vacant   42 (93%)  mean   9.5 m  max  10  >=30m   0  >=60m   0
+-- towers (>= 60 m): 5
+-- roads at start   all: edges  183 ( 27 km) art/col/loc 30/32/121  diagonals  16  dead ends  26 (short 25)  faces 31 triangles 2 slivers 2
+                  core: edges   73 (  9 km) art/col/loc 6/19/48  diagonals  15  dead ends  13 (short 13)  faces 13 triangles 2 slivers 2
+               outside: edges  110 ( 18 km) art/col/loc 24/13/73  diagonals   1  dead ends  13 (short 12)  faces 18 triangles 0 slivers 0
+-- roads at month 96  all: edges  403 ( 53 km) art/col/loc 46/122/235  diagonals  65  dead ends  74 (short 39)  faces 68 triangles 6 slivers 7
+                  core: edges  108 ( 11 km) art/col/loc 8/40/60  diagonals  26  dead ends  12 (short 9)  faces 19 triangles 2 slivers 3
+               outside: edges  295 ( 41 km) art/col/loc 38/82/175  diagonals  39  dead ends  62 (short 30)  faces 49 triangles 4 slivers 4

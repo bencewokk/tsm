@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "headless": "tsx scripts/headless.ts",
-    "seeds": "tsx scripts/seeds.ts"
+    "seeds": "tsx scripts/seeds.ts",
+    "metrics": "tsx scripts/metrics.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

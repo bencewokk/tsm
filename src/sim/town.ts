@@ -281,7 +281,7 @@ export function layoutTown(c: TownCtx) {
   for (const d of c.districts) {
     if (d.kind === 'garden') continue;
     const near = lots.near(d.x, d.y, 8).filter((l) => !(l.flags & Flag.Docks));
-    for (const l of near) if (Math.hypot(l.x - d.x, l.y - d.y) < 6.2) l.flags |= Flag.Core;
+    for (const l of near) if (Math.hypot(l.x - d.x, l.y - d.y) < 4.4) l.flags |= Flag.Core;
     const byDist = near.filter((l) => !l.back).sort((a, b) => Math.hypot(a.x - d.x, a.y - d.y) - Math.hypot(b.x - d.x, b.y - d.y) || a.id - b.id);
     const sq = byDist[0];
     if (!sq) continue;

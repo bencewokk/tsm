@@ -210,11 +210,10 @@ export const profileById = (id: string) => PROFILES[PROFILE_INDEX[id]];
 /** Zoning rules: which profile a new street gets (distances in cells). Stage B replaces these with per-city generated layers. */
 export const ZONING = {
   coreRadius: 7.5,    // around an original village centre: old town
-  stationCore: 3.2,   // next to a station: downtown
-  valueCore: 0.66,    // land value above this: downtown
-  midRadius: 13,
-  stationMid: 6.5,
-  valueMid: 0.46,
+  midRadius: 12,      // within this of a quarter centre (and F above innerF): terraced mid ring
+  cbdF: 0.62,         // density field above this: downtown fabric (dense blocks, towers allowed by the height field)
+  midF: 0.34,         // density field above this: mid-density fabric anywhere
+  innerF: 0.2,
 };
 
 /** Cheap deterministic per-key variation in 0..1 (street / construction wave). */

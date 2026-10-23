@@ -289,20 +289,20 @@ export class CityView {
 
   private sigOf(L: LotsMsg, k: number): number {
     let h = imul(L.id[k] + 1, 2654435761) ^ imul(L.prof[k] + 5, 7919) ^ imul(L.lm[k] + 3, 104729);
-    h ^= imul(L.type[k] * 31 + L.level[k] * 7 + L.dens[k] * 977 + L.sides[k] * 53 + L.back[k] * 13, 40503);
+    h ^= imul(L.hgt[k] * 3571 + L.type[k] * 31 + L.level[k] * 7 + L.dens[k] * 977 + L.sides[k] * 53 + L.back[k] * 13, 40503);
     h ^= imul((L.flags[k] & 23) * 131 + L.planType[k] * 17 + L.planLevel[k] * 19 + L.served[k] * 23 + L.built[k] * 3, 69069);
     for (let i = 0; i < 8; i++) h = imul(h ^ Math.round(L.poly[k * 8 + i] * 200), 16777619);
     return h;
   }
 
-  private ctxFor(L: LotsMsg, k: number, Q: Quad, mb: MB, kind: Kind, level: number, trees: Tree[]): Ctx {
+  private ctxFor(L: LotsMsg, k: number, Q: Quad, mb: MB, kind: Kind, level: number, trees: Tree[], hgt = L.hgt[k]): Ctx {
     const cx = L.x[k] * CELL, cz = L.y[k] * CELL;
     const g = this.ground(cx, cz);
     const seed = L.seed[k];
     mb.baseY = g; mb.seed = L.id[k] % 4096;
     const dens = L.dens[k];
     return {
-      mb, Q, id: L.id[k], seed, g, kind, level, dens, sides: L.sides[k], back: L.back[k], isCom: L.type[k] === BT.Com, flags: L.flags[k],
+      mb, Q, id: L.id[k], seed, g, kind, level, dens, hgt, sides: L.sides[k], back: L.back[k], isCom: L.type[k] === BT.Com, flags: L.flags[k],
       prof: this.profiles[L.prof[k]], pal: PALETTES[this.profiles[L.prof[k]].palette], wave: Math.floor(L.built[k] / 24), site: this.city.site, mine: this.mine ? [this.mine.x * CELL, this.mine.y * CELL] : null, lmForm: landmarkAt(L.lm[k])?.form,
       era: Math.min(1, this.profiles[L.prof[k]].era * 0.3 + (L.built[k] / 96) * 0.8), lv: dens === 2 ? 0.8 : dens === 1 ? 0.5 : 0.3, trees,
       r: (j: number) => vhash(seed >>> 3, j),
@@ -399,7 +399,7 @@ export class CityView {
   }
 
   /** Dev: a row of every tower style (and a few landmark-sized samples) on an empty spot, for screenshots. */
-  gallery(cx: number, cz: number, styles: string[], heights = 120) {
+  gallery(cx: number, cz: number, styles: string[], heights = 0) {
     const mb = new MB();
     const trees: Tree[] = [];
     styles.forEach((st, i) => {
@@ -408,9 +408,8 @@ export class CityView {
       mb.baseY = g; mb.seed = i;
       const seed = 1000 + i * 77;
       const prof = this.profiles[3];
-      const c: Ctx = { mb, Q, id: i, seed, g, kind: 'cbd', level: 3, dens: 2, sides: 0, back: 0, isCom: true, flags: 0, era: 0.5, lv: 0.9, trees, r: (j: number) => vhash(seed, j), style: st, prof, pal: PALETTES[prof.palette], wave: 2, site: this.city.site, mine: null };
+      const c: Ctx = { mb, Q, id: i, seed, g, kind: 'cbd', level: 3, dens: 2, sides: 0, back: 0, isCom: true, flags: 0, era: 0.5, lv: 0.9, trees, r: (j: number) => vhash(seed, j), style: st, prof, pal: PALETTES[prof.palette], wave: 2, site: this.city.site, mine: null, hgt: heights };
       designLot(c);
-      void heights;
     });
     const out = new THREE.Group();
     for (const m of MATS) {
@@ -437,7 +436,7 @@ export class CityView {
       mb.baseY = g; mb.seed = i;
       const seed = 5000 + i * 91;
       const prof = this.profiles[2];
-      const c: Ctx = { mb, Q, id: i, seed, g, kind: 'landmark', level: 1, dens: 2, sides: 0, back: 0, isCom: false, flags: 0, era: 0.5, lv: 0.9, trees, r: (j: number) => vhash(seed, j), prof, pal: PALETTES[prof.palette], wave: 1, site: this.city.site, mine: null, lmForm: def.form };
+      const c: Ctx = { mb, Q, id: i, seed, g, kind: 'landmark', level: 1, dens: 2, sides: 0, back: 0, isCom: false, flags: 0, era: 0.5, lv: 0.9, trees, r: (j: number) => vhash(seed, j), prof, pal: PALETTES[prof.palette], wave: 1, site: this.city.site, mine: null, lmForm: def.form, hgt: 0 };
       designLot(c);
       x += w + 30;
     });
@@ -492,7 +491,7 @@ export class CityView {
     const mbBody = new MB();
     mbBody.ox = cx; mbBody.oy = g; mbBody.oz = cz;
     const trees: Tree[] = [];
-    const c = this.ctxFor(L, k, Q, mbBody, kind === 'none' ? 'yard' : kind, level, trees);
+    const c = this.ctxFor(L, k, Q, mbBody, kind === 'none' ? 'yard' : kind, level, trees, mode === 'build' ? L.nhgt[k] : L.hgt[k]);
     // site / rubble ground, not scaled
     const mbSite = new MB();
     mbSite.ox = cx; mbSite.oy = g; mbSite.oz = cz; mbSite.baseY = g;

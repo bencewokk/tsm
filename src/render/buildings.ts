@@ -22,6 +22,7 @@ export interface Ctx {
   mine: [number, number] | null; // pithead position (world metres)
   style?: string;                // force a tower style (gallery / tests)
   lmForm?: string;               // landmark form id (landmarks.ts)
+  hgt: number;                   // height (m) set by the density field, 0 = the kind's default
 }
 
 export const FOOT = 2.2; // walls start this far below ground so slopes never show a gap
@@ -218,7 +219,7 @@ function designApart(c: Ctx) {
   const { Q, r } = c;
   pad(c, GROUND.apart, 0.3, 0.3);
   const col = pick(c.pal.mid, r(1));
-  const floors = 4 + Math.floor(r(2) * 4) + (c.dens === 2 ? 1 : 0);
+  const floors = c.hgt > 0 ? Math.max(3, Math.round(c.hgt / 3.3)) : 4 + Math.floor(r(2) * 4) + (c.dens === 2 ? 1 : 0);
   const H = floors * 3.3;
   if (c.dens === 0) {
     // detached mid-rise slab with a green setback
@@ -287,7 +288,7 @@ function designOffice(c: Ctx) {
   const { Q, r } = c;
   pad(c, GROUND.office, 0.1, 0.3);
   const col = pick(c.pal.office, r(1));
-  const h = 22 + r(2) * 16 + (c.dens === 2 ? 4 : 0);
+  const h = c.hgt > 0 ? c.hgt : 22 + r(2) * 16 + (c.dens === 2 ? 4 : 0);
   const full = c.dens > 0;
   const poly = full ? Q.strip(0, 1, 0, 0.78) : Q.strip(0.08, 0.92, 0.1, 0.75);
   const p2 = (cornerStart(c) && full) ? chamfer(poly, 0, 4) : (cornerEnd(c) && full) ? chamfer(poly, 1, 4) : poly;
@@ -541,7 +542,7 @@ export function massing(c: Ctx): { poly: Pt[]; h: number } {
   const { Q } = c;
   if (c.kind === 'landmark') return { poly: Q.strip(0.15, 0.85, 0.15, 0.85), h: LM_HEIGHT[c.lmForm ?? 'cathedral'] ?? 30 };
   const poly = c.dens > 0 ? Q.strip(0.02, 0.98, 0, 0.7) : Q.strip(0.15, 0.85, 0.15, 0.7);
-  const h = c.kind === 'tower' || c.kind === 'cbd' ? 40 + c.r(7) * 40 : c.kind === 'apart' ? 20 : c.kind === 'office' ? 30 : c.kind === 'core' ? 14 : c.kind === 'house' ? 8 : 12;
+  const h = c.hgt > 0 ? c.hgt : c.kind === 'tower' || c.kind === 'cbd' ? 40 + c.r(7) * 40 : c.kind === 'apart' ? 20 : c.kind === 'office' ? 30 : c.kind === 'core' ? 14 : c.kind === 'house' ? 8 : 12;
   return { poly, h };
 }
 

@@ -7,7 +7,8 @@ import { Metro } from './metro';
 import { EVENTS, SITE_TEXT, fill, type EventDef, type Variant, type Effect, type DocksDeal } from './events';
 import { RoadGraph, RC, ROAD_HALF } from './roads';
 import { LotStore, LOT_W, type Lot } from './lots';
-import { PROFILE_INDEX, ZONING, deriveProfiles, type DistrictProfile } from './profiles';
+import { PROFILE_INDEX, ZONING, deriveProfiles, densClass, hash01, type DistrictProfile } from './profiles';
+import { DensityField, FIELD } from './field';
 import { LandmarkSystem } from './landmarkSys';
 import { LANDMARKS, landmarkAt } from './landmarks';
 import { makeCityProfile, type CityProfile } from './cityprofile';
@@ -73,6 +74,9 @@ export class Sim {
   cJobs = new Float32Array(N * N);
   cInd = new Float32Array(N * N);
   cPark = new Float32Array(N * N);
+  cBuilt = new Float32Array(N * N);         // built (non-amenity) plots per cell
+  accCell = new Float32Array(N * N);        // station access 0..1 (walk x reach)
+  field = new DensityField();
   // zones (8x8 cells)
   zHomes = new Float64Array(ZONES);
   zJobs = new Float64Array(ZONES);
@@ -137,6 +141,7 @@ export class Sim {
     this.aggregate();
     this.computeLandValue();
     this.lvS.set(this.lv);
+    this.field.update(this);
   }
 
   get liveLots(): Lot[] { return this.lots.lots.filter((l) => l.alive); }
@@ -410,7 +415,9 @@ export class Sim {
     this.computeRiders();
     this.computeLandValue();
     for (let i = 0; i < N * N; i++) this.lvS[i] += (this.lv[i] - this.lvS[i]) * TUNE.lvLag;
+    this.field.update(this);
     this.grow();
+    this.resubdivide();
     this.docksTick();
     this.extendRoads();
     this.upgradeRoads();
@@ -423,14 +430,32 @@ export class Sim {
       if (!l.alive) continue;
       l.age = Math.min(65000, l.age + 1);
       if (l.demo > 0 && --l.demo === 0) { if (l.ntype) l.type = l.ntype; l.ntype = 0; l.level = 0; }
-      if (l.constr > 0 && --l.constr === 0) { l.level = l.target; l.target = 0; l.age = 0; l.built = this.month; }
+      if (l.constr > 0 && --l.constr === 0) { l.level = l.target; l.hgt = l.nhgt; l.nhgt = 0; l.target = 0; l.age = 0; l.built = this.month; }
     }
   }
 
   /** Capacity of a plot relative to a standard detached one: follows frontage width, denser tiers stack a bit more. */
   capOf(l: Lot) { return (l.w / LOT_W) * (1 + 0.15 * l.dens); }
-  lotHomes(l: Lot) { return l.type === BT.Res ? Math.round(HOMES[l.level] * this.capOf(l)) : 0; }
-  lotJobs(l: Lot) { return l.type === BT.Com ? Math.round(COM_JOBS[l.level] * this.capOf(l)) : l.type === BT.Ind ? Math.round(IND_JOBS[l.level] * this.capOf(l)) : 0; }
+  /** Homes (Res) or jobs (Com / Ind) a building of this kind, level and height holds on the plot: storeys x a per-storey figure for mid and high rise. */
+  capacity(l: Lot, kind: number, level: number, h: number): number {
+    if (level <= 0) return 0;
+    const cap = this.capOf(l), floors = Math.max(2, Math.round(h / 3.3));
+    if (kind === BT.Res) return (level === 1 || !h ? HOMES[level] : floors * (level === 3 ? 17 : 11)) * cap;
+    if (kind === BT.Com) return (level === 1 || !h ? COM_JOBS[level] : floors * 17) * cap;
+    if (kind === BT.Ind) return IND_JOBS[level] * cap;
+    return 0;
+  }
+  lotHomes(l: Lot) { return l.type === BT.Res ? Math.round(this.capacity(l, BT.Res, l.level, l.hgt)) : 0; }
+  lotJobs(l: Lot) { return l.type === BT.Com || l.type === BT.Ind ? Math.round(this.capacity(l, l.type, l.level, l.hgt)) : 0; }
+
+  /** Height of a new mid / high-rise building on this plot: capped by the field's allowed height and by the plot's width (tall needs a wide plot). */
+  pickHeight(l: Lot, level: number): number {
+    if (level < 2) return 0;
+    const hm = this.field.hmaxAt(l.x, l.y), r = hash01(l.id, this.month);
+    if (level === 2) return Math.round(Math.min(24, Math.max(13, hm)) * (0.72 + 0.28 * r));
+    const wcap = 24 + 70 * Math.max(0, l.w - 0.4);
+    return Math.round(Math.max(FIELD.level3, Math.min(hm, wcap) * (0.62 + 0.38 * r)));
+  }
 
   /** District profile for new street frontage: the old industrial site, the nearest quarter's core / mid / outer profile, downtown near stations or at high value. */
   profileAt(x: number, y: number): number {
@@ -438,14 +463,12 @@ export class Sim {
     if (gx >= 0 && gy >= 0 && gx < N && gy < N && (this.g.flags[gy * N + gx] & Flag.Docks)) return PROFILE_INDEX[this.cp.site === 'harbour' ? 'docks' : 'railside'];
     let dq = this.town.districts[0], dc = Infinity;
     for (const d of this.town.districts) { const dd = Math.hypot(d.x - x, d.y - y); if (dd < dc) { dc = dd; dq = d; } }
-    let ds = Infinity;
-    for (const st of this.metro.stations) ds = Math.min(ds, Math.hypot(st.x - x, st.y - y));
-    const lv = this.lvS ? this.fieldAt(this.lvS, x, y) : 0;
+    const F = this.field.fAt(x, y);
     const Z = ZONING;
     const q = dq ?? { core: PROFILE_INDEX.oldTown, mid: PROFILE_INDEX.terraces, outer: PROFILE_INDEX.suburb, coreR: Z.coreRadius, midR: Z.midRadius };
     if (dc < (q.coreR ?? Z.coreRadius)) return q.core ?? PROFILE_INDEX.oldTown;
-    if (ds < Z.stationCore || lv > Z.valueCore) return PROFILE_INDEX.downtown;
-    if (dc < (q.midR ?? Z.midRadius) || ds < Z.stationMid || lv > Z.valueMid) return q.mid ?? PROFILE_INDEX.terraces;
+    if (F > Z.cbdF) return PROFILE_INDEX.downtown;
+    if (dc < (q.midR ?? Z.midRadius) && F > Z.innerF || F > Z.midF) return q.mid ?? PROFILE_INDEX.terraces;
     return q.outer ?? PROFILE_INDEX.suburb;
   }
 
@@ -455,13 +478,14 @@ export class Sim {
 
   aggregate() {
     const g = this.g;
-    this.cHomes.fill(0); this.cJobs.fill(0); this.cInd.fill(0); this.cPark.fill(0);
+    this.cHomes.fill(0); this.cJobs.fill(0); this.cInd.fill(0); this.cPark.fill(0); this.cBuilt.fill(0);
     this.zHomes.fill(0); this.zJobs.fill(0); this.zRoads.fill(0); this.zCarLocked.fill(0);
     let h = 0, j = 0, jx = 0, jy = 0;
     for (const l of this.lots.lots) {
       if (!l.alive || !l.type) continue;
       const hh = this.lotHomes(l), jj = this.lotJobs(l), z = this.zoneOf(l.cell);
       this.cHomes[l.cell] += hh; this.cJobs[l.cell] += jj;
+      if (!isAmenity(l.type) && l.level > 0) this.cBuilt[l.cell]++;
       if (l.type === BT.Ind) this.cInd[l.cell] += l.level;
       if (l.type === BT.Park || l.type === BT.Square) this.cPark[l.cell] += 1;
       else if (l.type === BT.Landmark) this.cPark[l.cell] += l.level > 0 ? (landmarkAt(l.lm)?.value ?? 0.5) * 3 : 0;
@@ -611,6 +635,7 @@ export class Sim {
     m.rebuildGraph();
     this.transitCell.fill(0);
     this.stationPrem.fill(0);
+    this.accCell.fill(0);
     const S = m.sIndex.size;
     this.stAccess = new Float64Array(S);
     this.zoneNear = [];
@@ -661,6 +686,8 @@ export class Sim {
         if (val > this.transitCell[i]) this.transitCell[i] = val;
         const p = premK * Math.max(0, 1 - wt / TUNE.premWalk);
         if (p > this.stationPrem[i]) this.stationPrem[i] = p;
+        const av = Math.min(1, A / FIELD.accRef) * clamp((FIELD.walkZero - wt) / (FIELD.walkZero - FIELD.walkFull), 0, 1);
+        if (av > this.accCell[i]) this.accCell[i] = av;
       }
     }
   }
@@ -752,27 +779,45 @@ export class Sim {
     this.pressure = (pR + pC) / 2;
     const spawnR = TUNE.spawnLV - 0.14 * pR, spawnC = TUNE.spawnLV - 0.14 * pC;
 
-    type Cand = { l: Lot; s: number; kind: number; to: number };
+    type Cand = { l: Lot; s: number; kind: number; to: number; h: number };
     const res: Cand[] = [], com: Cand[] = [], ind: Cand[] = [];
+    const F = this.field;
+    const built3 = (cell: number) => {
+      const cx = cell % N, cy = (cell / N) | 0;
+      let b = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const x = cx + dx, y = cy + dy; if (x >= 0 && y >= 0 && x < N && y < N) b += this.cBuilt[y * N + x]; }
+      return b;
+    };
     for (const l of lots) {
       if (l.constr || (l.flags & (Flag.Planned | Flag.Docks)) && !l.type) continue;
       if (l.flags & Flag.Planned) continue;
       const v = this.fieldAt(this.lvS, l.x, l.y), t = l.type, lv = l.level;
       const jit = this.rng.next() * 0.12;
       const pf = this.profiles[l.prof], fr = (0.5 + pf.landUseMix.res) * pf.growthRate, fc = (0.5 + pf.landUseMix.com) * pf.growthRate, fi = (0.5 + pf.landUseMix.ind) * pf.growthRate;
+      const maxL = F.maxLevel(l.x, l.y);
       if (t === BT.None) {
         if (v < Math.min(spawnR, spawnC)) continue;
         const pull = this.stationPull(l.cell);
         const front = l.cls === RC.Arterial ? 0.1 : l.cls === RC.Collector ? 0.05 : 0;
-        if (v >= spawnR) res.push({ l, s: (v + jit) * fr, kind: BT.Res, to: 1 });
-        if (v >= spawnC) com.push({ l, s: (v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12) * fc, kind: BT.Com, to: 1 });
-        ind.push({ l, s: (0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit) * fi, kind: BT.Ind, to: 1 });
+        // fill the built-up area first: neighbours and the field's density class pull growth inward
+        const fill = 0.1 * Math.min(1, built3(l.cell) / 5) + 0.2 * F.fAt(l.x, l.y);
+        if (v >= spawnR) res.push({ l, s: (v + jit + fill) * fr, kind: BT.Res, to: 1, h: 0 });
+        if (v >= spawnC) com.push({ l, s: (v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12 + fill) * fc, kind: BT.Com, to: 1, h: 0 });
+        ind.push({ l, s: (0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit) * fi, kind: BT.Ind, to: 1, h: 0 });
       } else if (t === BT.Res && lv < 3) {
         const cap = l.flags & Flag.CarLocked ? 2 : 3;
-        if (lv + 1 > cap) continue;
-        if (v > TUNE.upLV[lv] - 0.1 * pR && l.age >= (lv === 1 ? 10 : 8)) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: lv + 1 });
+        if (lv + 1 > cap || lv + 1 > maxL) continue;
+        if (v > TUNE.upLV[lv] - 0.1 * pR && l.age >= (lv === 1 ? 10 : 8)) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: lv + 1, h: this.pickHeight(l, lv + 1) });
       } else if (t === BT.Com && lv < 3) {
-        if (v > TUNE.comUpLV[lv] - 0.1 * pC && l.age >= (lv === 1 ? 5 : 10)) com.push({ l, s: v + 0.1 + jit, kind: BT.Com, to: lv + 1 });
+        if (lv + 1 > maxL) continue;
+        if (v > TUNE.comUpLV[lv] - 0.1 * pC && l.age >= (lv === 1 ? 5 : 10)) com.push({ l, s: v + 0.1 + jit, kind: BT.Com, to: lv + 1, h: this.pickHeight(l, lv + 1) });
+      } else if ((t === BT.Res || t === BT.Com) && lv === 3 && l.hgt > 0 && l.age >= 36 && !(l.flags & Flag.CarLocked)) {
+        // a better-connected centre rebuilds its towers taller
+        const hm = F.hmaxAt(l.x, l.y);
+        if (hm >= 45 && hm > l.hgt * 1.4 && v > 0.7) {
+          const h = this.pickHeight(l, 3);
+          if (h > l.hgt * 1.25) (t === BT.Res ? res : com).push({ l, s: v + 0.02 + jit, kind: t, to: 3, h });
+        }
       }
     }
     const order = (a: Cand, b: Cand) => b.s - a.s || a.l.id - b.l.id;
@@ -780,7 +825,7 @@ export class Sim {
     const zoneOps = new Uint8Array(ZONES);
     const taken = new Set<number>();
     let towers = 0, mids = 0;
-    const place = (list: Cand[], poolKey: 'resPool' | 'comPool' | 'indPool', per: number[], maxOps: number) => {
+    const place = (list: Cand[], poolKey: 'resPool' | 'comPool' | 'indPool', maxOps: number) => {
       let ops = 0;
       for (const c of list) {
         if (this[poolKey] <= 0 || ops >= maxOps) break;
@@ -790,8 +835,7 @@ export class Sim {
         if (c.to === 2 && mids >= TUNE.maxMidStarts) continue;
         const z = this.zoneOf(c.l.cell);
         if (zoneOps[z] >= 6) continue;
-        const cur = c.l.type === c.kind ? c.l.level : 0;
-        const add = (per[c.to] - per[cur]) * this.capOf(c.l);
+        const add = this.capacity(c.l, c.kind, c.to, c.h) - (c.l.type === c.kind ? this.capacity(c.l, c.kind, c.l.level, c.l.hgt) : 0);
         if (add > this[poolKey] * 2.5 + 10) continue;
         this[poolKey] -= add;
         taken.add(c.l.id); zoneOps[z]++; ops++;
@@ -800,9 +844,9 @@ export class Sim {
         this.startBuild(c.l, c.kind, c.to);
       }
     };
-    if (this.comDemand > this.resDemand) { place(com, 'comPool', COM_JOBS, 120); place(res, 'resPool', HOMES, 300); }
-    else { place(res, 'resPool', HOMES, 300); place(com, 'comPool', COM_JOBS, 120); }
-    place(ind, 'indPool', IND_JOBS, 30);
+    if (this.comDemand > this.resDemand) { place(com, 'comPool', 120); place(res, 'resPool', 300); }
+    else { place(res, 'resPool', 300); place(com, 'comPool', 120); }
+    place(ind, 'indPool', 30);
 
     // decline: buildings whose value falls empty out
     for (const l of lots) {
@@ -811,7 +855,7 @@ export class Sim {
       if (v < TUNE.downLV[l.level]) l.low = Math.min(255, l.low + 1); else l.low = 0;
       if (l.low >= 6 && this.rng.next() < 0.25) {
         l.low = 0;
-        l.level--;
+        l.level--; l.hgt = 0;
         if (l.level === 0) l.type = BT.None;
       }
     }
@@ -820,6 +864,48 @@ export class Sim {
     }
     this.placeParks(lots);
     this.carveHubSquares();
+  }
+
+  private edgeCursor = 0;
+  resubdivided = 0;
+  /**
+   * Re-subdivision: when the field says a street now belongs to a denser class than the one its plots were cut for
+   * (a station opened, jobs concentrated), its vacant plots and old low houses are cleared and the frontage is cut again
+   * with the new class's widths, depths and back rows. Occupied plots stay, so the street fills in around them.
+   */
+  private resubdivide() {
+    const R = this.roads, total = R.ea.length;
+    if (!total) return;
+    let checked = 0, done = 0, k = 0;
+    for (; k < total && checked < 80 && done < 4; k++) {
+      const e = (this.edgeCursor + k) % total;
+      if (!R.alive[e]) continue;
+      checked++;
+      const old = this.lots.cachedProf(e);
+      if (old === undefined) continue;
+      const mx = (R.nx[R.ea[e]] + R.nx[R.eb[e]]) / 2, my = (R.ny[R.ea[e]] + R.ny[R.eb[e]]) / 2;
+      const np = this.profileAt(mx, my);
+      if (np === old) continue;
+      const A = this.profiles[old], B = this.profiles[np];
+      if (!(B.density > A.density + 0.2 || densClass(B) > densClass(A))) continue;
+      if (this.reprofile(e)) done++;
+    }
+    this.edgeCursor = (this.edgeCursor + k) % total;
+  }
+
+  private reprofile(e: number): boolean {
+    const ls = (this.lots.byEdge.get(e) ?? []).filter((l) => l.alive);
+    if (ls.some((l) => (l.flags & (Flag.Core | Flag.Docks | Flag.Planned)) || l.lm || l.constr || l.demo || l.type === BT.Landmark)) return false;
+    for (const l of ls) {
+      const vacant = l.type === BT.None;
+      const old = (l.type === BT.Res || l.type === BT.Com) && l.level <= 1 && l.age >= 24 && !(l.flags & Flag.CarLocked) && hash01(l.id, 7) < 0.7;
+      if (vacant || old) this.lots.remove(l);
+    }
+    this.lots.forgetEdge(e);
+    const fresh = this.lots.frontageAll([e]);
+    for (const l of fresh) this.reserveRiverPark(l);
+    this.resubdivided++;
+    return true;
   }
 
   /** The busiest stations get a paved square next to the entrance; it raises value around it, so denser buildings edge it. */
@@ -838,7 +924,8 @@ export class Sim {
   }
 
   /** Redevelopment: an existing building is demolished first (one month of rubble), then the new one rises floor by floor. */
-  startBuild(l: Lot, type: number, level: number) {
+  startBuild(l: Lot, type: number, level: number, h?: number) {
+    l.nhgt = type === BT.Ind ? 0 : h ?? this.pickHeight(l, level);
     const had = l.level > 0 && l.type !== BT.None;
     if (had) { l.demo = 1; l.ntype = type; } else { l.type = type; l.level = 0; l.demo = 0; l.ntype = 0; }
     l.target = level;
@@ -1093,9 +1180,9 @@ export class Sim {
     const n = ls.length;
     const f = () => new Float32Array(n), u = () => new Uint8Array(n);
     const m: LotsMsg = { n, id: new Int32Array(n), x: f(), y: f(), ang: f(), w: f(), d: f(), type: u(), level: u(), target: u(), constr: u(), constrTotal: u(), flags: u(), planType: u(), planLevel: u(), served: u(),
-      poly: new Float32Array(n * 8), dens: u(), prof: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u(), lm: u() };
+      hgt: u(), nhgt: u(), poly: new Float32Array(n * 8), dens: u(), prof: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u(), lm: u() };
     ls.forEach((l, k) => {
-      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.prof[k] = l.prof; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype; m.lm[k] = l.lm;
+      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.prof[k] = l.prof; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype; m.lm[k] = l.lm; m.hgt[k] = Math.min(255, l.hgt); m.nhgt[k] = Math.min(255, l.nhgt);
       m.id[k] = l.id; m.x[k] = l.x; m.y[k] = l.y; m.ang[k] = l.ang; m.w[k] = l.w; m.d[k] = l.d;
       m.type[k] = l.type; m.level[k] = l.level; m.target[k] = l.target; m.constr[k] = l.constr; m.constrTotal[k] = l.constrTotal;
       m.flags[k] = l.flags; m.planType[k] = l.planType; m.planLevel[k] = l.planLevel;

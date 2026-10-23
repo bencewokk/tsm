@@ -11,9 +11,11 @@ import { block, FOOT, tree } from './buildings';
  */
 export type TowerStyle = 'deco' | 'intl' | 'brut' | 'post' | 'contemp' | 'super' | 'resi';
 
-export function chooseStyle(c: Ctx, cbd: boolean): TowerStyle {
+export function chooseStyle(c: Ctx, cbd: boolean, H = 100): TowerStyle {
   if (c.style) return c.style as TowerStyle;
   const e = c.era, lv = c.lv;
+  // the field's height decides what is possible: needles only above ~110 m, spired / tapered crowns need ~45 m
+  if (H < 40) return c.r(1234) < 0.55 ? 'resi' : c.r(1235) < 0.5 ? 'brut' : 'intl';
   const w: [TowerStyle, number][] = cbd
     ? [
         ['deco', 1.6 * Math.max(0, 1 - e * 1.6) + 0.05],
@@ -21,7 +23,7 @@ export function chooseStyle(c: Ctx, cbd: boolean): TowerStyle {
         ['brut', 0.65 * Math.max(0, 1 - Math.abs(e - 0.35) * 2.2)],
         ['post', 0.8 * Math.max(0, 1 - Math.abs(e - 0.5) * 2)],
         ['contemp', 0.15 + 1.5 * e],
-        ['super', lv > 0.6 && e > 0.3 ? 0.35 + 0.6 * e : 0],
+        ['super', H >= 110 && lv > 0.6 && e > 0.3 ? 0.35 + 0.6 * e : 0],
       ]
     : [
         ['resi', 1.2],
@@ -203,9 +205,9 @@ function resi(c: Ctx, H: number) {
 
 export function designTower(c: Ctx, cbd: boolean) {
   const { Q, r } = c;
-  let H = cbd ? 80 + r(4) * 85 : 34 + r(4) * 40;
-  H *= lerpRange(c.prof.buildingHeightRange, hash01(c.id, c.wave)); // each construction wave varies a little
-  const style = chooseStyle(c, cbd);
+  let H = c.hgt > 0 ? c.hgt : cbd ? 80 + r(4) * 85 : 34 + r(4) * 40;
+  if (!(c.hgt > 0)) H *= lerpRange(c.prof.buildingHeightRange, hash01(c.id, c.wave)); // each construction wave varies a little
+  const style = chooseStyle(c, cbd, H);
   // street-wall podium for dense plots (the tower sits back above it)
   const pw = style === 'deco' || style === 'brut' || style === 'post' || style === 'super';
   if (c.dens > 0) podium(c, style === 'resi' ? 9 : 11 + r(3) * 6, style === 'brut' ? 0x9a9892 : pick([0xd8c9ad, 0xc9ccd0, 0xcdb9a2, 0xdcd2c0], r(3)), !pw);

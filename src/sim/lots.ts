@@ -30,6 +30,9 @@ export interface Lot {
   built: number;              // month the current building was completed (0 = original)
   ntype: number;              // type the plot becomes once the old building is demolished
   lm: number;                 // landmark id + 1 (landmarks.ts), 0 = none
+  edge: number;               // road edge whose frontage created the plot (-1 = carved); back rows inherit it
+  hgt: number;                // height in metres of the current building (0 = default for its level)
+  nhgt: number;               // height of the building under construction
 }
 
 const HB = 2; // hash bucket (cells)
@@ -47,6 +50,8 @@ export class LotStore {
   lots: Lot[] = [];
   private hash = new Map<number, number[]>();
   private epCache = new Map<number, { prof: number; tier: number; w: number; d: number; sb: number; gap: number; rows: number }>();
+  /** plots by the road edge that created them (including back rows) */
+  byEdge = new Map<number, Lot[]>();
   /** district profile at a point (set by the sim: zoning around old centres, stations, land value, docks) */
   profileAt: (x: number, y: number) => number = () => 0;
 
@@ -139,19 +144,20 @@ export class LotStore {
     return true;
   }
 
-  tryAddQuad(q: number[], cls: number, prof: number, sides: number, back = 0): Lot | null {
+  tryAddQuad(q: number[], cls: number, prof: number, sides: number, back = 0, edge = -1): Lot | null {
     if (!this.quadClear(q)) return null;
     const cx = (q[0] + q[2] + q[4] + q[6]) / 4, cy = (q[1] + q[3] + q[5] + q[7]) / 4;
     for (const o of this.near(cx, cy, 1)) if (quadsOverlap(q, o.poly)) return null;
     const l: Lot = {
       id: this.lots.length, x: 0, y: 0, ang: 0, w: 0, d: 0, cell: 0, cls, type: BT.None, level: 0, target: 0, constr: 0, constrTotal: 0, age: 0, low: 0,
-      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(this.profiles[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0, lm: 0,
+      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(this.profiles[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0, lm: 0, edge, hgt: 0, nhgt: 0,
     };
     this.setGeom(l, q);
     l.flags = this.flags[l.cell] & Flag.Docks;
     l.seed = (l.id * 2654435761) >>> 0;
     this.lots.push(l);
     this.buckets(l, (k) => { let a = this.hash.get(k); if (!a) this.hash.set(k, (a = [])); a.push(l.id); });
+    if (edge >= 0) { let a = this.byEdge.get(edge); if (!a) this.byEdge.set(edge, (a = [])); a.push(l); }
     return l;
   }
 
@@ -172,6 +178,10 @@ export class LotStore {
     this.epCache.set(e, p);
     return p;
   }
+
+  /** profile index the street's plots were cut with (undefined until its frontage exists) */
+  cachedProf(e: number): number | undefined { return this.epCache.get(e)?.prof; }
+  forgetEdge(e: number) { this.epCache.delete(e); const a = this.byEdge.get(e); if (a) this.byEdge.set(e, a.filter((l) => l.alive)); }
 
   private owns(e: number, f: number) {
     const g = this.roads;
@@ -254,7 +264,7 @@ export class LotStore {
         const lerp = (p: [number, number], q: [number, number], t: number) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
         const f0 = lerp(F0, F1, s0), f1 = lerp(F0, F1, s1), b1 = lerp(B0, B1, s1), b0 = lerp(B0, B1, s0);
         const sides = (k === 0 && c0.street ? 1 : 0) | (k === n - 1 && c1.street ? 2 : 0);
-        const l = this.tryAddQuad([f0[0], f0[1], f1[0], f1[1], b1[0], b1[1], b0[0], b0[1]], g.ecls[e], P.prof, sides);
+        const l = this.tryAddQuad([f0[0], f0[1], f1[0], f1[1], b1[0], b1[1], b0[0], b0[1]], g.ecls[e], P.prof, sides, 0, e);
         if (l) out.push(l);
       }
     }
@@ -274,7 +284,7 @@ export class LotStore {
         const b0x = q[6], b0y = q[7], b1x = q[4], b1y = q[5];
         const r0x = b0x + (b0x - q[0]), r0y = b0y + (b0y - q[1]);
         const r1x = b1x + (b1x - q[2]), r1y = b1y + (b1y - q[3]);
-        const l = this.tryAddQuad([b0x, b0y, b1x, b1y, r1x, r1y, r0x, r0y], p.cls, p.prof, 0, 1);
+        const l = this.tryAddQuad([b0x, b0y, b1x, b1y, r1x, r1y, r0x, r0y], p.cls, p.prof, 0, 1, p.edge);
         if (l) { l.flags |= p.flags & Flag.Docks; next.push(l); out.push(l); }
       }
       cur = next;
