@@ -88,7 +88,7 @@ export class Planner {
   }
 
   hint(s: StateMsg): string {
-    if (!this.draft.length) return `Click land to dig a station (${money(STATION_COST)}), or click existing stations in order. Drag to pan, wheel to zoom.`;
+    if (!this.draft.length) return `Click anywhere on land to dig a station (${money(STATION_COST)}), or click existing stations in order. Blue = within an 8-minute walk over the streets. Drag to pan, wheel to zoom.`;
     const q = this.quote(s);
     const water = q.wkm > 0.05 ? `, <b>${q.wkm.toFixed(1)} km under water</b>` : '';
     const ok = q.cost <= s.stats.money;

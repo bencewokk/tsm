@@ -36,7 +36,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   if (m.type === 'init') {
     init = m;
     terrain = buildTerrain(m.height, m.water);
-    env.scene.add(terrain.mesh, terrain.water, terrain.heat);
+    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment);
     city = new CityView(m.water, (x, z) => terrain!.sample(x, z));
     env.scene.add(city.group);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
@@ -56,6 +56,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     planner?.onState(m);
     if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
     if (hud.toggles.desire) desire.update(m.desire);
+    if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
     hud.update(m);
     refreshPlan();
   } else if (m.type === 'error') {
@@ -76,12 +77,14 @@ hud.handlers.onTool = (t) => {
     c.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     c.screenSpacePanning = true;
     metro?.setPlan(true);
+    if (terrain && state) { terrain.setCatchment(state.catchment); terrain.catchment.visible = true; }
   } else {
     c.enableRotate = true;
     c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     c.screenSpacePanning = false;
     if (savedView) flyTo(savedView.pos, savedView.target);
     metro?.setPlan(false);
+    if (terrain) terrain.catchment.visible = false;
     planner?.cancel();
     metro?.setCursor(null);
   }

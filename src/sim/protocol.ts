@@ -92,6 +92,8 @@ export interface StateMsg {
   road: Uint8Array;
   lv: Float32Array;
   flags: Uint8Array;
+  /** walk minutes x10 to the nearest station on a line, over streets (255 = out of reach) */
+  catchment: Uint8Array;
   stations: StationInfo[];
   lines: LineInfo[];
   event: EventInfo | null;

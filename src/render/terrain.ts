@@ -12,6 +12,8 @@ export interface TerrainView {
   /** height lookup at world x,z (bilinear on the vertex grid) */
   sample(x: number, z: number): number;
   setHeat(lv: Float32Array, water: Uint8Array): void;
+  catchment: THREE.Mesh;
+  setCatchment(c: Uint8Array): void;
 }
 
 export function buildTerrain(height: Float32Array, wmask: Uint8Array): TerrainView {
@@ -92,6 +94,18 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array): TerrainVi
   heat.renderOrder = 2;
   heat.position.y = 1.5;
 
+  // street-network walk catchment of stations (plan mode)
+  const cdata = new Uint8Array(N * N * 4);
+  const catchTex = new THREE.DataTexture(cdata, N, N, THREE.RGBAFormat);
+  catchTex.magFilter = THREE.LinearFilter;
+  catchTex.minFilter = THREE.LinearFilter;
+  catchTex.needsUpdate = true;
+  const catchMat = new THREE.MeshBasicMaterial({ map: catchTex, transparent: true, depthWrite: false, depthTest: false });
+  const catchment = new THREE.Mesh(geo, catchMat);
+  catchment.visible = false;
+  catchment.renderOrder = 8;
+  catchment.position.y = 2;
+
   const ramp = [
     [0.0, [70, 95, 160]],
     [0.3, [110, 170, 190]],
@@ -112,7 +126,16 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array): TerrainVi
   };
 
   return {
-    mesh, water, heat, heatTex, material, waterMat,
+    mesh, water, heat, heatTex, material, waterMat, catchment,
+    setCatchment(c: Uint8Array) {
+      for (let i = 0; i < N * N; i++) {
+        const m = c[i] / 10; // minutes
+        const a = m >= 12 ? 0 : m <= 8 ? 95 : Math.round(45 * (1 - (m - 8) / 4));
+        const edge = m > 7.2 && m <= 8.2 ? 90 : 0; // 8-minute contour
+        cdata[i * 4] = 60; cdata[i * 4 + 1] = 130; cdata[i * 4 + 2] = 210; cdata[i * 4 + 3] = Math.min(255, a + edge);
+      }
+      catchTex.needsUpdate = true;
+    },
     sample(x: number, z: number) {
       const fx = Math.max(0, Math.min(N - 0.001, x / CELL)), fz = Math.max(0, Math.min(N - 0.001, z / CELL));
       const ix = Math.floor(fx), iz = Math.floor(fz), tx = fx - ix, tz = fz - iz;

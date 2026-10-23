@@ -937,6 +937,12 @@ export class Sim {
     };
   }
 
+  catchmentRaster(): Uint8Array {
+    const out = new Uint8Array(N * N).fill(255);
+    for (const f of this.walk) for (let i = 0; i < N * N; i++) { const v = Math.min(255, Math.round(f[i] * 10)); if (v < out[i]) out[i] = v; }
+    return out;
+  }
+
   roadsMsg(): RoadsMsg {
     const R = this.roads;
     const es = R.aliveEdges();
@@ -966,7 +972,7 @@ export class Sim {
     return {
       type: 'state', stats: this.stats(),
       roads: this.roadsMsg(), lots: this.lotsMsg(),
-      road: this.g.road.slice(), lv: this.lv.slice(), flags: this.g.flags.slice(),
+      road: this.g.road.slice(), lv: this.lv.slice(), flags: this.g.flags.slice(), catchment: this.catchmentRaster(),
       stations: this.metro.stations.map((st) => ({ ...st })),
       lines: this.metro.lines.map((l) => ({ id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders,
         capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice() })),

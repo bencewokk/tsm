@@ -43,7 +43,7 @@ export const EVENTS: EventDef[] = [
     text:
       'The warehouses on the {village} waterfront have stood empty since the container port moved down the coast. ' +
       'The council has bought all {cells} waterfront plots and wants a new district of homes and offices there.<br><br>' +
-      '<b>Brief:</b> the district only grows where the metro reaches it. Every planned block needs a station on a line within <b>600 m</b>. ' +
+      '<b>Brief:</b> the district only grows where the metro reaches it. Every planned block needs a station on a line within an <b>8-minute walk</b> (about 600 m) along the streets. ' +
       'Blocks still unserved when the deadline passes get built car-first, and those residents buy cars for good.<br><br>Pick a development partner:',
     choices: [
       {

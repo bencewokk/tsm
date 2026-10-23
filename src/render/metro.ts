@@ -21,6 +21,7 @@ export class MetroView {
   private v = new THREE.Vector3();
   private s = new THREE.Vector3();
   plan = false;
+  private dark = new THREE.Color('#2c2f33');
   xray = 0;
 
   constructor(private sample: (x: number, z: number) => number) {
@@ -106,7 +107,7 @@ export class MetroView {
       });
       const mat = new THREE.MeshBasicMaterial({ color: l.color, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide });
       this.ribbonMats.push(mat);
-      this.ribbons.add(this.ribbon(shifted, 16, mat, 3));
+      this.ribbons.add(this.ribbon(shifted, 12, mat, 3));
       // tunnels
       const tmat = new THREE.MeshStandardMaterial({ color: l.color, emissive: l.color, emissiveIntensity: 0.35, roughness: 0.6 });
       const tpts = pts.map((p) => new THREE.Vector3(p.x, TUNNEL_Y - li * 6, p.z));
@@ -141,14 +142,6 @@ export class MetroView {
     disc.position.set(p.x, y + 4, p.z);
     disc.renderOrder = 11;
     this.stations.add(disc);
-    // 600 m catchment ring, shown in plan mode
-    const catchMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthTest: false, depthWrite: false });
-    const catchRing = new THREE.Mesh(new THREE.RingGeometry(588, 600, 64), catchMat);
-    catchRing.rotation.x = -Math.PI / 2;
-    catchRing.position.set(p.x, y + 6, p.z);
-    catchRing.renderOrder = 9;
-    catchRing.userData.catch = true;
-    this.stations.add(catchRing);
     const inner = new THREE.Mesh(new THREE.CircleGeometry(26, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false }));
     inner.rotation.x = -Math.PI / 2;
     inner.position.set(p.x, y + 4.2, p.z);
@@ -170,13 +163,13 @@ export class MetroView {
   setPlan(on: boolean) {
     this.plan = on;
     for (const m of [...this.ribbonMats, ...this.discMats]) { m.depthTest = !on; m.needsUpdate = true; }
-    this.stations.children.forEach((c) => { if (c.userData.catch) c.visible = on; });
+    this.setXray(this.xray);
   }
 
   setXray(v: number) {
     this.xray = v;
     this.under.visible = v > 0.02;
-    for (const m of this.ribbonMats) m.opacity = 0.9 * (1 - v * 0.8);
+    for (const m of this.ribbonMats) m.opacity = (this.plan ? 0.9 : 0.6) * (1 - v * 0.8);
   }
 
   draft(points: { x: number; y: number }[], hover: { x: number; y: number } | null, color: string) {
@@ -217,10 +210,10 @@ export class MetroView {
         const ang = Math.atan2(b.x - a.x, b.z - a.z);
         this.v.set(x + (fwd ? 4 : -4) * Math.cos(ang), y, z - (fwd ? 4 : -4) * Math.sin(ang));
         this.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ang);
-        this.s.set(13, 9, 80);
+        if (this.plan && this.xray < 0.5) this.s.set(30, 10, 130); else this.s.set(13, 9, 80);
         this.m.compose(this.v, this.q, this.s);
         this.trains.setMatrixAt(n, this.m);
-        this.trains.setColorAt(n, p.color);
+        this.trains.setColorAt(n, this.plan && this.xray < 0.5 ? this.dark : p.color);
         n++;
       }
     }
