@@ -17,6 +17,8 @@ import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './
 import { MinHeap } from './heap';
 import { pruneRoads, promoteJunctions } from './hierarchy';
 import { T, T_CAP, TERR, updateTerritories } from './territory';
+import { planReserves, applyReserve } from './reserves';
+import { evaluateSquares, SQ } from './squares';
 import { RELIEF, hAt, toblerFactor, slopeField, viewField, zoneEffort } from './relief';
 
 /** Tunable knobs for the growth model. */
@@ -86,6 +88,10 @@ export class Sim {
   accCell = new Float32Array(N * N);        // station access 0..1 (walk x reach)
   field = new DensityField();
   /** static relief rasters: gradient (m per m), view value 0..1, car effort ratio between zones */
+  /** deliberate open land (reserves.ts) and the squares' hysteresis streaks (squares.ts) */
+  reserve: Uint8Array = new Uint8Array(N * N);
+  sqStreak = new Map<number, number>();
+  cSquare: Float32Array = new Float32Array(N * N);
   slope: Float32Array = new Float32Array(N * N);
   view: Float32Array = new Float32Array(N * N);
   effort: Float32Array = new Float32Array(ZONES * ZONES).fill(1);
@@ -161,6 +167,9 @@ export class Sim {
     this.lvS.set(this.lv);
     this.field.update(this);
     updateTerritories(this);
+    this.reserve = planReserves(this);
+    for (const l of this.lots.lots) if (l.alive) applyReserve(this, l);
+    this.aggregate();
   }
 
   get liveLots(): Lot[] { return this.lots.lots.filter((l) => l.alive); }
@@ -443,6 +452,7 @@ export class Sim {
     for (let i = 0; i < N * N; i++) this.lvS[i] += (this.lv[i] - this.lvS[i]) * TUNE.lvLag;
     this.field.update(this);
     if (this.month % 12 === 0) updateTerritories(this);
+    if (this.month % SQ.everyMonths === 6) evaluateSquares(this);
     this.grow();
     this.resubdivide();
     this.docksTick();
@@ -511,6 +521,7 @@ export class Sim {
 
   aggregate() {
     const g = this.g;
+    this.cSquare.fill(0);
     this.cHomes.fill(0); this.cJobs.fill(0); this.cInd.fill(0); this.cPark.fill(0); this.cBuilt.fill(0);
     this.zHomes.fill(0); this.zJobs.fill(0); this.zRoads.fill(0); this.zCarLocked.fill(0);
     let h = 0, j = 0, jx = 0, jy = 0;
@@ -520,6 +531,7 @@ export class Sim {
       this.cHomes[l.cell] += hh; this.cJobs[l.cell] += jj;
       if (!isAmenity(l.type) && l.level > 0) this.cBuilt[l.cell]++;
       if (l.type === BT.Ind) this.cInd[l.cell] += l.level;
+      if (l.type === BT.Square) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const xx = (l.cell % N) + dx, yy = ((l.cell / N) | 0) + dy; if (xx >= 0 && yy >= 0 && xx < N && yy < N) this.cSquare[yy * N + xx] += 1 / (1 + Math.abs(dx) + Math.abs(dy)); }
       if (l.type === BT.Park || l.type === BT.Square) this.cPark[l.cell] += 1;
       else if (l.type === BT.Landmark) this.cPark[l.cell] += l.level > 0 ? (landmarkAt(l.lm)?.value ?? 0.5) * 3 : 0;
       this.zHomes[z] += hh; this.zJobs[z] += jj; h += hh; j += jj;
@@ -851,7 +863,7 @@ export class Sim {
         const tt = TERR.on ? this.town.terr[l.cell] : 0;
         const heavy = tt === T.Port || tt === T.Industry;
         if (v >= spawnR && !heavy) res.push({ l, s: (v + jit + fill) * fr, kind: BT.Res, to: 1, h: 0 });
-        if (v >= spawnC && !heavy) com.push({ l, s: (v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12 + fill) * fc, kind: BT.Com, to: 1, h: 0 });
+        if (v >= spawnC && !heavy) com.push({ l, s: (v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12 + fill + 0.3 * Math.min(1, this.cSquare[l.cell])) * fc, kind: BT.Com, to: 1, h: 0 });
         if (!TERR.on || heavy) ind.push({ l, s: (0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit) * fi, kind: BT.Ind, to: 1, h: 0 });
       } else if (t === BT.Res && lv < 3) {
         const cap = l.flags & Flag.CarLocked ? 2 : 3;
@@ -1007,6 +1019,8 @@ export class Sim {
     l.nhgt = type === BT.Ind ? 0 : h ?? this.pickHeight(l, level);
     const had = l.level > 0 && l.type !== BT.None;
     if (had) { l.demo = 1; l.ntype = type; } else { l.type = type; l.level = 0; l.demo = 0; l.ntype = 0; }
+    // some industrial plots in the industrial territory are fenced, paved yards (container stacks, pipe racks)
+    if (type === BT.Ind && TERR.on) { const tt = this.town.terr[l.cell]; l.deco = (tt === T.Industry || tt === T.Port) && hash01(l.id, 33) < 0.18 ? 4 : 0; }
     l.target = level;
     l.constrTotal = BUILD_MONTHS[level];
     l.constr = BUILD_MONTHS[level] + l.demo;
@@ -1088,6 +1102,7 @@ export class Sim {
       if (x >= 0 && y >= 0 && x < N && y < N && g.water[y * N + x] === Water.River) { river = true; break; }
     }
     if (river && !l.flags && ((l.id * 2654435761) >>> 0) % 100 < 65) { l.type = BT.Park; l.level = 1; }
+    else applyReserve(this, l);
   }
 
   /** Streets near busy stations gain importance and are upgraded (local -> collector -> arterial) over time. */
@@ -1259,9 +1274,9 @@ export class Sim {
     const n = ls.length;
     const f = () => new Float32Array(n), u = () => new Uint8Array(n);
     const m: LotsMsg = { n, id: new Int32Array(n), x: f(), y: f(), ang: f(), w: f(), d: f(), type: u(), level: u(), target: u(), constr: u(), constrTotal: u(), flags: u(), planType: u(), planLevel: u(), served: u(),
-      asm: new Uint16Array(n), astate: u(), hgt: u(), nhgt: u(), poly: new Float32Array(n * 8), dens: u(), prof: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u(), lm: u() };
+      asm: new Uint16Array(n), astate: u(), deco: u(), hgt: u(), nhgt: u(), poly: new Float32Array(n * 8), dens: u(), prof: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u(), lm: u() };
     ls.forEach((l, k) => {
-      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.prof[k] = l.prof; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype; m.lm[k] = l.lm; m.asm[k] = l.asm; m.astate[k] = l.astate; m.hgt[k] = Math.min(255, l.hgt); m.nhgt[k] = Math.min(255, l.nhgt);
+      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.prof[k] = l.prof; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype; m.lm[k] = l.lm; m.asm[k] = l.asm; m.astate[k] = l.astate; m.deco[k] = l.deco; m.hgt[k] = Math.min(255, l.hgt); m.nhgt[k] = Math.min(255, l.nhgt);
       m.id[k] = l.id; m.x[k] = l.x; m.y[k] = l.y; m.ang[k] = l.ang; m.w[k] = l.w; m.d[k] = l.d;
       m.type[k] = l.type; m.level[k] = l.level; m.target[k] = l.target; m.constr[k] = l.constr; m.constrTotal[k] = l.constrTotal;
       m.flags[k] = l.flags; m.planType[k] = l.planType; m.planLevel[k] = l.planLevel;

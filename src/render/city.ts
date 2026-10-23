@@ -153,6 +153,11 @@ export class CityView {
           const y0 = yAt(p0[0], p0[1]), y1 = yAt(p1[0], p1[1]);
           const off = (p: Pt, o: number): Pt => [p[0] + nx * o, p[1] + nz * o];
           quad(off(p0, -4), off(p0, 4), off(p1, 4), off(p1, -4), y0, y1, 0xa9a396);          // ballast
+          // a kept corridor: grass verges, a fence line each side (the rail corridor is deliberate open land)
+          for (const sgn of [-1, 1]) {
+            quad(off(p0, sgn * 4), off(p0, sgn * 11), off(p1, sgn * 11), off(p1, sgn * 4), y0 - 0.1, y1 - 0.1, 0xb4c796);
+            quad(off(p0, sgn * 10.4), off(p0, sgn * 11), off(p1, sgn * 11), off(p1, sgn * 10.4), y0 + 0.9, y1 + 0.9, 0x575b5f);
+          }
           for (const o of [-1.7, 1.7]) quad(off(p0, o - 0.45), off(p0, o + 0.45), off(p1, o + 0.45), off(p1, o - 0.45), y0 + 0.25, y1 + 0.25, 0x4d5055); // rails
           // sleepers every 3 m
           const n = Math.max(1, Math.round((L / steps) / 3));
@@ -308,7 +313,7 @@ export class CityView {
   private sigOf(L: LotsMsg, k: number): number {
     let h = imul(L.id[k] + 1, 2654435761) ^ imul(L.prof[k] + 5, 7919) ^ imul(L.lm[k] + 3, 104729);
     h ^= imul(L.asm[k] * 6151 + L.astate[k] * 389 + L.hgt[k] * 3571 + L.type[k] * 31 + L.level[k] * 7 + L.dens[k] * 977 + L.sides[k] * 53 + L.back[k] * 13, 40503);
-    h ^= imul((L.flags[k] & 23) * 131 + L.planType[k] * 17 + L.planLevel[k] * 19 + L.served[k] * 23 + L.built[k] * 3, 69069);
+    h ^= imul(L.deco[k] * 7727 + (L.flags[k] & 23) * 131 + L.planType[k] * 17 + L.planLevel[k] * 19 + L.served[k] * 23 + L.built[k] * 3, 69069);
     for (let i = 0; i < 8; i++) h = imul(h ^ Math.round(L.poly[k * 8 + i] * 200), 16777619);
     return h;
   }
@@ -320,7 +325,7 @@ export class CityView {
     mb.baseY = g; mb.seed = L.id[k] % 4096;
     const dens = L.dens[k];
     return {
-      mb, Q, id: L.id[k], seed, g, kind, level, dens, hgt, sides: L.sides[k], back: L.back[k], isCom: L.type[k] === BT.Com, flags: L.flags[k],
+      mb, Q, id: L.id[k], seed, g, kind, level, dens, hgt, sides: L.sides[k], back: L.back[k], isCom: L.type[k] === BT.Com, flags: L.flags[k], deco: L.deco[k],
       prof: this.profiles[L.prof[k]], pal: PALETTES[this.profiles[L.prof[k]].palette], wave: Math.floor(L.built[k] / 24), site: this.city.site, mine: this.mine ? [this.mine.x * CELL, this.mine.y * CELL] : null, lmForm: landmarkAt(L.lm[k])?.form,
       era: Math.min(1, this.profiles[L.prof[k]].era * 0.3 + (L.built[k] / 96) * 0.8), lv: dens === 2 ? 0.8 : dens === 1 ? 0.5 : 0.3, trees,
       r: (j: number) => vhash(seed >>> 3, j),

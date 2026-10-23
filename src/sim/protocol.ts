@@ -93,6 +93,7 @@ export interface LotsMsg {
   served: Uint8Array;    // planned plot already within walking range of a station
   asm: Uint16Array;      // large-plot assembly id (0 = none)
   astate: Uint8Array;    // 0 pending, 1 acquired (hoarding), 2 holdout, 3 cleared
+  deco: Uint8Array;      // deliberate open land / yard kind (see reserves.ts)
   hgt: Uint8Array;       // height in metres of the current building (0 = default for its level)
   nhgt: Uint8Array;      // height of the building under construction
   poly: Float32Array;    // 8 numbers per plot: F0, F1, B1, B0 (cell units); F0-F1 is the street front

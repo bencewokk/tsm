@@ -35,6 +35,7 @@ export interface Lot {
   nhgt: number;               // height of the building under construction
   asm: number;                // large-plot assembly this plot belongs to (id), 0 = none
   astate: number;             // 0 pending, 1 acquired (hoarding), 2 holdout, 3 cleared
+  deco: number;               // deliberate open land / yard kind (reserves.ts): 1 park, 2 green wedge, 3 campus lawn, 4 industrial yard, 5 public square
 }
 
 const HB = 2; // hash bucket (cells)
@@ -158,7 +159,7 @@ export class LotStore {
     for (const o of this.near(cx, cy, 1)) if (quadsOverlap(q, o.poly)) return null;
     const l: Lot = {
       id: this.lots.length, x: 0, y: 0, ang: 0, w: 0, d: 0, cell: 0, cls, type: BT.None, level: 0, target: 0, constr: 0, constrTotal: 0, age: 0, low: 0,
-      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(this.profiles[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0, lm: 0, edge, hgt: 0, nhgt: 0, asm: 0, astate: 0,
+      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(this.profiles[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0, lm: 0, edge, hgt: 0, nhgt: 0, asm: 0, astate: 0, deco: 0,
     };
     this.setGeom(l, q);
     l.flags = this.flags[l.cell] & Flag.Docks;

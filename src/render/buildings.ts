@@ -11,6 +11,7 @@ export interface Ctx {
   mb: MB; Q: Quad; id: number; seed: number;
   g: number;                     // ground level
   kind: Kind; level: number; dens: number; sides: number; back: number; isCom: boolean; flags: number;
+  deco?: number;                 // deliberate open land / yard kind (reserves.ts), 0 or missing = plain
   era: number;                   // 0..1 game progress when the building was started
   lv: number;                    // land value 0..1
   trees: Tree[];
@@ -303,6 +304,7 @@ function designTowerKind(c: Ctx, cbd: boolean) {
 }
 
 function designInd(c: Ctx) {
+  if (c.deco === 4) return designIndYard(c);
   const { Q, r } = c;
   pad(c, GROUND.ind, 0.4, 0.3);
   const col = pick(PAL.ind, r(1));
@@ -374,7 +376,19 @@ function designDockNew(c: Ctx) {
   }
 }
 
+/** An edged ground: a pale kerb line (and optionally a hedge) round the plot so open land reads as deliberate. */
+function edging(c: Ctx, kerb = 0xd9d4c6, hedge = 0, h = 0.6) {
+  const { Q, mb, g } = c;
+  const t = 0.035;
+  for (const [s0, s1, t0, t1] of [[0.02, 0.98, 0.02, 0.02 + t], [0.02, 0.98, 0.98 - t, 0.98], [0.02, 0.02 + t * 0.7, 0.02, 0.98], [0.98 - t * 0.7, 0.98, 0.02, 0.98]] as [number, number, number, number][]) {
+    mb.prism('plain', Q.strip(s0, s1, t0, t1), g + 0.05, g + h, hedge || kerb, hedge || kerb);
+  }
+}
+
 function designPark(c: Ctx) {
+  if (c.deco === 1) return designBigPark(c);
+  if (c.deco === 2) return designWedge(c);
+  if (c.deco === 3) return designCampus(c);
   const { Q, r, mb, g } = c;
   pad(c, GROUND.park, 0.3, 0.3);
   // a curving path across the plot
@@ -398,7 +412,82 @@ function designPark(c: Ctx) {
   }
 }
 
+/** A large park: a formal layout, crossing paths with a round bed, rows of trees along them, a kerbed edge. */
+function designBigPark(c: Ctx) {
+  const { Q, r, mb, g } = c;
+  pad(c, 0x9cc07c, 0.1, 0.3);
+  edging(c, 0xdcd6c6, 0, 0.5);
+  const path = 0xeee6d2;
+  mb.prism('plain', Q.strip(0.05, 0.95, 0.47, 0.53), g + 0.25, g + 0.5, path, path);
+  mb.prism('plain', Q.strip(0.47, 0.53, 0.05, 0.95), g + 0.25, g + 0.5, path, path);
+  const ce = Q.centre();
+  mb.prism('plain', circle(ce[0], ce[1], 6.5, 16), g + 0.25, g + 0.55, path, path);
+  mb.prism('plain', circle(ce[0], ce[1], 4.6, 14), g + 0.5, g + 0.75, 0xd8b7c2, 0xd8b7c2);
+  for (let k = 0; k < 4; k++) for (const [s, t] of [[0.2 + k * 0.2, 0.4], [0.2 + k * 0.2, 0.6], [0.4, 0.2 + k * 0.2], [0.6, 0.2 + k * 0.2]] as [number, number][]) {
+    if (Math.hypot(s - 0.5, t - 0.5) < 0.16) continue;
+    tree(c, Q.at(s, t), 6 + r(300 + k * 7 + Math.round(s * 10)) * 3, 300 + k * 4 + Math.round(t * 9));
+  }
+}
+
+/** A green wedge: a dense planted belt with a winding path and a pond. */
+function designWedge(c: Ctx) {
+  const { Q, r, mb, g } = c;
+  pad(c, 0x93b873, 0.05, 0.3);
+  const pts: Pt[] = [];
+  const bend = (r(1) - 0.5) * 0.6;
+  for (let k = 0; k <= 10; k++) { const t = k / 10; pts.push(Q.at(0.5 + Math.sin(t * Math.PI * 2) * bend * 0.5, t)); }
+  for (let k = 0; k < 10; k++) {
+    const a = pts[k], b = pts[k + 1], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1, nx = -dz / l * 1.1, nz = dx / l * 1.1;
+    mb.prism('plain', [[a[0] + nx, a[1] + nz], [b[0] + nx, b[1] + nz], [b[0] - nx, b[1] - nz], [a[0] - nx, a[1] - nz]], g + 0.1, g + 0.45, 0xe3dcc4, 0xe3dcc4);
+  }
+  if (r(3) < 0.5) { const p = Q.at(0.3 + r(4) * 0.4, 0.3 + r(5) * 0.4); mb.prism('plain', circle(p[0], p[1], 6 + r(6) * 3, 14), g + 0.1, g + 0.5, 0x8db4cb, 0x8db4cb); }
+  let n = 0;
+  for (let k = 0; k < 40 && n < 20; k++) {
+    const s = 0.06 + r(200 + k) * 0.88, t = 0.06 + r(240 + k) * 0.88;
+    const p = Q.at(s, t);
+    if (pts.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 3)) continue;
+    tree(c, p, 6.5 + r(280 + k) * 4.5, 320 + k);
+    n++;
+  }
+}
+
+/** A campus lawn: a paved quad with cross paths, benches and a flagpole, trees round the edge. */
+function designCampus(c: Ctx) {
+  const { Q, r, mb, g } = c;
+  pad(c, 0xa9c98a, 0.1, 0.3);
+  edging(c, 0xcfc7b4, 0x7fa06a, 0.9);
+  mb.prism('plain', Q.strip(0.22, 0.78, 0.22, 0.78), g + 0.25, g + 0.5, 0xe0d8c6, 0xe0d8c6);
+  mb.prism('plain', Q.strip(0.06, 0.94, 0.48, 0.52), g + 0.25, g + 0.45, 0xe9e1cf, 0xe9e1cf);
+  mb.prism('plain', Q.strip(0.48, 0.52, 0.06, 0.94), g + 0.25, g + 0.45, 0xe9e1cf, 0xe9e1cf);
+  for (const [s, t] of [[0.32, 0.32], [0.68, 0.32], [0.32, 0.68], [0.68, 0.68]] as [number, number][]) mb.prism('plain', Q.strip(s - 0.05, s + 0.05, t - 0.012, t + 0.012), g + 0.5, g + 1.2, 0x8a6a4a, 0x8a6a4a);
+  const ce = Q.centre();
+  mb.prism('plain', circle(ce[0], ce[1], 0.5, 6), g + 0.5, g + 12, 0xe8e4dc, 0xe8e4dc);
+  for (let k = 0; k < 8; k++) tree(c, Q.at(0.12 + (k % 4) * 0.25, k < 4 ? 0.12 : 0.88), 6 + r(340 + k) * 3, 340 + k);
+}
+
+/** A fenced, paved industrial yard with container stacks, a gate and a pipe rack. */
+function designIndYard(c: Ctx) {
+  const { Q, r, mb, g } = c;
+  pad(c, 0xb2b1aa, 0.05, 0.3);
+  const fence = 0x4a4e52, t = 0.03;
+  for (const [s0, s1, t0, t1] of [[0.03, 0.97, 0.03, 0.03 + t], [0.03, 0.97, 0.97 - t, 0.97], [0.03, 0.03 + t * 0.7, 0.03, 0.97], [0.97 - t * 0.7, 0.97, 0.03, 0.97]] as [number, number, number, number][]) mb.prism('plain', Q.strip(s0, s1, t0, t1), g + 0.1, g + 2.4, fence, fence);
+  mb.prism('plain', Q.strip(0.4, 0.6, 0.02, 0.05), g + 0.1, g + 3.4, 0x8a8f94, 0x8a8f94);   // gate
+  const rows = 2 + Math.floor(r(1) * 2);
+  for (let k = 0; k < rows; k++) {
+    let s0 = 0.08 + r(10 + k) * 0.06;
+    while (s0 < 0.86) {
+      const len = 0.09 + r(20 + k + Math.round(s0 * 10)) * 0.05;
+      const st = 1 + Math.floor(r(30 + k * 5 + Math.round(s0 * 10)) * 3);
+      const cc = pick(PAL.container, r(40 + k * 9 + Math.round(s0 * 10)));
+      mb.prism('plain', Q.strip(s0, Math.min(0.94, s0 + len), 0.2 + k * 0.22, 0.2 + k * 0.22 + 0.12), g + 0.3, g + 0.3 + st * 2.6, cc, cc);
+      s0 += len + 0.025;
+    }
+  }
+  mb.prism('plain', Q.strip(0.08, 0.92, 0.9, 0.93), g + 3, g + 3.5, 0x6d7276, 0x6d7276);   // pipe rack
+}
+
 function designSquare(c: Ctx) {
+  if (c.deco === 5) return designNewSquare(c);
   const { Q, r, mb, g } = c;
   pad(c, GROUND.square, 0.1, 0.4);
   // paved plaza with a fountain and trees at the corners
@@ -510,11 +599,39 @@ function designChurch(c: Ctx) {
 }
 
 function designYard(c: Ctx) {
-  const { Q, r } = c;
-  // vacant plot in a built-up area: a quiet lawn (back yards are gravelled), a few trees
-  pad(c, c.back ? 0xcfc6b0 : GROUND.yard, 0.5, 0.18);
-  const n = Math.floor(r(1) * (1 + 3 * c.prof.yardChance));
-  for (let i = 0; i < n; i++) tree(c, Q.at(0.2 + r(10 + i) * 0.6, 0.2 + r(20 + i) * 0.6), 5 + r(30 + i) * 3, 40 + i);
+  const { Q, r, mb, g } = c;
+  // vacant plot in a built-up area: it never reads as leftover land, it is kept as something. A kerbed lawn with trees,
+  // allotment beds with a shed, or a small car park (back yards are gravelled)
+  const kind = c.back ? 2 : r(2);
+  if (kind < 0.5) {
+    pad(c, GROUND.yard, 0.5, 0.18);
+    edging(c, 0xdad5c8, 0, 0.35);
+    const n = Math.floor(r(1) * (1 + 3 * c.prof.yardChance));
+    for (let i = 0; i < n; i++) tree(c, Q.at(0.2 + r(10 + i) * 0.6, 0.2 + r(20 + i) * 0.6), 5 + r(30 + i) * 3, 40 + i);
+  } else if (kind < 0.78) {
+    pad(c, 0xb8c79a, 0.4, 0.2);
+    edging(c, 0x8a7a5e, 0, 0.7);
+    for (let k = 0; k < 6; k++) mb.prism('plain', Q.strip(0.12, 0.78, 0.14 + k * 0.12, 0.14 + k * 0.12 + 0.07), g + 0.2, g + 0.55, k % 2 ? 0x7e9a5e : 0x6d5a45, k % 2 ? 0x7e9a5e : 0x6d5a45);
+    mb.prism('plain', Q.strip(0.82, 0.94, 0.1, 0.24), g + 0.2, g + 2.6, 0xb59a74, 0x8a6a4a);
+  } else {
+    pad(c, 0x9d9f9f, 0.3, 0.25);
+    edging(c, 0xd9d4c6, 0, 0.5);
+    for (let k = 0; k < 6; k++) mb.prism('plain', Q.strip(0.1 + k * 0.14, 0.1 + k * 0.14 + 0.012, 0.15, 0.85), g + 0.25, g + 0.32, 0xe9e9e4, 0xe9e9e4);
+  }
+}
+
+/** A square that formed under pedestrian pressure: pale paving in bands, a fountain, benches, lamps and trees on the edges. */
+function designNewSquare(c: Ctx) {
+  const { Q, r, mb, g } = c;
+  pad(c, 0xe0d7c4, 0.02, 0.4);
+  for (let k = 1; k < 6; k++) mb.prism('plain', Q.strip(0.02, 0.98, k / 6 - 0.008, k / 6 + 0.008), g + 0.4, g + 0.5, 0xc9bda6, 0xc9bda6);
+  const ce = Q.centre();
+  mb.prism('plain', circle(ce[0], ce[1], 6.5, 16), g + 0.4, g + 1.2, 0xd2c8b4, 0xd2c8b4);
+  mb.prism('plain', circle(ce[0], ce[1], 5, 14), g + 1.1, g + 1.5, 0x9dc1d5, 0x9dc1d5);
+  mb.prism('plain', circle(ce[0], ce[1], 0.9, 8), g + 1.1, g + 5.5, 0xe0d8c8, 0xe0d8c8);
+  for (const [s, t] of [[0.12, 0.12], [0.88, 0.12], [0.12, 0.88], [0.88, 0.88], [0.5, 0.1], [0.5, 0.9]] as [number, number][]) tree(c, Q.at(s, t), 5.5 + r(10 + Math.round(s * 10 + t * 3)) * 2, 20 + Math.round(s * 5 + t * 7));
+  for (const [s, t] of [[0.28, 0.5], [0.72, 0.5], [0.5, 0.28], [0.5, 0.72]] as [number, number][]) { const p = Q.at(s, t); mb.prism('plain', circle(p[0], p[1], 0.3, 6), g + 0.4, g + 5, 0x55595d, 0x55595d); }
+  for (const [s, t] of [[0.35, 0.22], [0.65, 0.78]] as [number, number][]) mb.prism('plain', Q.strip(s - 0.05, s + 0.05, t - 0.012, t + 0.012), g + 0.4, g + 1.1, 0x8a6a4a, 0x8a6a4a);
 }
 
 export function designLot(c: Ctx) {

@@ -22,7 +22,7 @@ import { LANDMARKS, LANDMARK_INDEX, type LandmarkDef } from './landmarks';
 import type { Sim } from './sim';
 import type { Lot } from './lots';
 
-export type AsmKind = 'tower' | 'landmark' | 'docks';
+export type AsmKind = 'tower' | 'landmark' | 'docks' | 'square';
 export const ASM_PHASES = ['assembling', 'hoardings up', 'demolition', 'site cleared', 'foundations', 'structure', 'facade'] as const;
 
 export interface AsmPlan {
@@ -244,6 +244,17 @@ export class AssemblySystem {
     return a;
   }
 
+  /** A public square: the plots round a busy junction are bought (land already council-owned: straight to hoardings), cleared and paved. */
+  startSquare(lots: Lot[], label: string): Assembly {
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const l of lots) for (let k = 0; k < 4; k++) { x0 = Math.min(x0, l.poly[k * 2]); x1 = Math.max(x1, l.poly[k * 2]); y0 = Math.min(y0, l.poly[k * 2 + 1]); y1 = Math.max(y1, l.poly[k * 2 + 1]); }
+    const plan: AsmPlan = { kind: 'square', members: lots, plaza: [], quad: [x0, y0, x1, y0, x1, y1, x0, y1], closed: [], rect: true, homes: 0, jobs: 0, buildings: 0, cost: 0 };
+    const a = this.start(plan, { type: BT.Square, level: 1, hgt: 0, months: 0, label, form: 'square' });
+    for (const l of lots) l.astate = 1;
+    a.phase = 1; a.t = 0; a.len = 1;
+    return a;
+  }
+
   private allLots(a: Assembly): Lot[] { return [...a.lots, ...a.plaza].map((id) => this.sim.lots.lots[id]).filter((l) => l && l.alive); }
 
   // ---------------------------------------------------------------- monthly
@@ -322,6 +333,7 @@ export class AssemblySystem {
       case 3:
         if (a.t >= a.len) {
           if (a.kind === 'docks') { this.finishDocks(a); a.phase = -1; this.stats.finished++; break; }
+          if (a.kind === 'square') { this.finishSquare(a); a.phase = -1; this.stats.finished++; break; }
           if (!this.merge(a)) { this.abort(a, 'the site could not be assembled, left vacant'); break; }
           a.phase = 4; a.t = 0; a.len = a.kind === 'tower' ? 1 : Math.max(1, Math.min(4, Math.round(1 + Math.abs(polyArea(a.quad)) / 1.6)));
         }
@@ -452,6 +464,12 @@ export class AssemblySystem {
     }
     a.phase = -1;
     this.stats.finished++;
+    this.sim.say(`${a.label} opens`);
+  }
+
+  /** The cleared plots become the square: paved, planted, with a fountain. It stays for good. */
+  private finishSquare(a: Assembly) {
+    for (const l of this.allLots(a)) { l.asm = 0; l.astate = 0; l.type = BT.Square; l.level = 1; l.demo = 0; l.constr = 0; l.deco = 5; l.age = 0; }
     this.sim.say(`${a.label} opens`);
   }
 

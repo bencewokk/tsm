@@ -14,7 +14,8 @@
     "impact": "tsx scripts/impact.ts",
     "routes": "tsx scripts/routes.ts",
     "towers": "tsx scripts/towers.ts",
-    "zones": "tsx scripts/zones.ts"
+    "zones": "tsx scripts/zones.ts",
+    "structure": "tsx scripts/structure.ts"
   },
   "dependencies": {
     "three": "^0.186.1"
