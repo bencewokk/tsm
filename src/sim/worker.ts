@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { HIER } from './hierarchy';
+import { TERR } from './territory';
 import { ART } from './roads';
 import { Sim } from './sim';
 import type { Command, WorkerOut } from './protocol';
@@ -31,10 +32,11 @@ function step() {
 }
 
 self.onmessage = (ev: MessageEvent) => {
-  const m = ev.data as Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean } | { type: 'quote'; id: number; stations: number[] };
+  const m = ev.data as Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean } | { type: 'quote'; id: number; stations: number[] };
   try {
     if (m.type === 'start') {
       if (m.nohier) { HIER.on = false; ART.valley = 0; ART.climb = 0; ART.steep = 6; }   // dev: the unstructured road growth, for before / after captures
+      if (m.noterr) TERR.on = false;
       sim = new Sim(m.seed, { terrain: m.terrain as never, origin: m.origin as never });
       post(sim.initMsg());
       post(sim.snapshot());

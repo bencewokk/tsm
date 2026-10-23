@@ -17,7 +17,7 @@ const seed = Number(params.get('seed') ?? 4821) | 0 || 4821;
 const app = document.getElementById('app')!;
 const env = new Env(app);
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
-const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean }) => worker.postMessage(c);
+const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean }) => worker.postMessage(c);
 
 let init: InitMsg | null = null;
 let terrain: TerrainView | null = null;
@@ -36,7 +36,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   if (m.type === 'init') {
     init = m;
     terrain = buildTerrain(m.height, m.water, m.flags);
-    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours);
+    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours, terrain.zones);
     city = new CityView(m.water, m.flags, m.villages, (x, z) => terrain!.sample(x, z), m);
     env.scene.add(city.group);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
@@ -57,6 +57,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     if (linesChanged) metro?.update(m);
     planner?.onState(m);
     if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
+    if (hud.toggles.zones) terrain?.setZones(m.terr, init!.water);
     if (hud.toggles.desire) desire.update(m.desire);
     if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
     hud.update(m);
@@ -65,7 +66,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     console.error('[sim]', m.message);
   }
 };
-send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1' });
+send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1' });
 
 // ------------------------------------------------------------------ tools
 let savedView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
@@ -95,6 +96,7 @@ hud.handlers.onTool = (t) => {
 };
 hud.handlers.onToggle = (name, on) => {
   if (name === 'heat' && terrain) { terrain.heat.visible = on; terrain.contours.visible = on || hud.tool === 'plan'; if (on && state && init) terrain.setHeat(state.lv, init.water); }
+  if (name === 'zones' && terrain) { terrain.zones.visible = on; if (on && state && init) terrain.setZones(state.terr, init.water); }
   if (name === 'xray') xrayTarget = on ? 1 : 0;
   if (name === 'night') { nightTarget = on ? 1 : 0; fastDawn = !on; }
   if (name === 'desire') { desire.group.visible = on; if (on && state) desire.update(state.desire); }
@@ -168,6 +170,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'v' || e.key === 'V') hud.setTool('view');
   else if (e.key === 'h' || e.key === 'H') hud.toggle('heat');
   else if (e.key === 'x' || e.key === 'X') hud.toggle('xray');
+  else if (e.key === 'z' || e.key === 'Z') hud.toggle('zones');
   else if (e.key === 'n' || e.key === 'N') hud.toggle('night');
   else if (e.key === 'd' || e.key === 'D') hud.toggle('desire');
   else if (e.key === 't' || e.key === 'T') hud.toggle('tilt');

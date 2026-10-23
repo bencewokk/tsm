@@ -8,6 +8,7 @@ import { PROFILE_INDEX } from './profiles';
 import type { CityProfile } from './cityprofile';
 import { LANDMARKS, LANDMARK_INDEX } from './landmarks';
 import type { DistrictProfile } from './profiles';
+import { staticTerritories } from './territory';
 import { HIER, inCoreXY, shapeHierarchy, arterialJunctionNear, promoteJunctions } from './hierarchy';
 
 /** Each village/district has its own street orientation and profile set; noise bends it, and districts meet irregularly. */
@@ -27,6 +28,8 @@ export interface TownCtx {
   rng: Rng;
   districts: District[];
   profiles: DistrictProfile[];
+  /** land-use territory per cell (territory.ts) */
+  terr: Uint8Array;
   /** district profile index at a point (street regularity etc.) */
   profileAt?: (x: number, y: number) => number;
 }
@@ -204,6 +207,7 @@ export function layoutTown(c: TownCtx) {
     const ang = rng.range(0, Math.PI / 2);
     return { x: v.x + 0.5, y: v.y + 0.5, ang, style: v.style, kind: v.kind, core: PROFILE_INDEX[q.core], mid: PROFILE_INDEX[q.mid], outer: PROFILE_INDEX[q.outer], coreR: q.coreR, midR: q.midR };
   });
+  const tz = staticTerritories(c);   // working port / yards, heavy industry and the workers' terraces follow the harbour, the rail and the open land
   const centres: number[] = [];
   for (const d of c.districts) {
     if (d.style === 'planned') {
@@ -218,6 +222,12 @@ export function layoutTown(c: TownCtx) {
     } else if (d.style === 'terraces') skeletonTerraces(c, d, centres);
     else if (d.style === 'radial') skeletonRadial(c, d, centres);
     else skeletonOrganic(c, d, centres);
+  }
+  // the industrial district gets its own street grid, aligned along the corridor back to the old town
+  if (tz.industry) {
+    const o = c.districts[0];
+    const ang = Math.round(Math.atan2(tz.industry[1] - o.y, tz.industry[0] - o.x) / (Math.PI / 4)) * (Math.PI / 4);
+    skeletonPlanned(c, { x: tz.industry[0], y: tz.industry[1], ang, style: 'planned', kind: 'village' }, centres, false);
   }
   roads.rasterize(g.road);
   // arterials: least-cost paths between villages (each to its nearest earlier one), then off the north edge
@@ -239,6 +249,8 @@ export function layoutTown(c: TownCtx) {
     while (tx < N - 2 && g.water[tx]) tx++;
     link([north.x, north.y], [tx + 0.5, 0.5]);
   }
+  // the freight corridor: an arterial from the port (or yards) to the industrial district
+  if (tz.port && tz.industry) link(tz.industry, tz.port);
   // the docks: a waterfront road along the strip, joined to the harbour village
   if (g.docksCells.length > 4) {
     const dc = g.docksCells.filter((i) => g.distWater[i] === 2);

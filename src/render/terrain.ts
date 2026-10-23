@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { N, CELL, Flag } from '../sim/constants';
 import { VS } from './common';
+import { T_COLORS } from '../sim/territory';
 
 export interface TerrainView {
   mesh: THREE.Mesh;
@@ -16,6 +17,9 @@ export interface TerrainView {
   setCatchment(c: Uint8Array): void;
   /** contour lines (every 10 m, index line every 50 m) for plan mode and the heatmap */
   contours: THREE.Mesh;
+  /** land-use territory overlay (Z) */
+  zones: THREE.Mesh;
+  setZones(terr: Uint8Array, water: Uint8Array): void;
 }
 
 export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uint8Array): TerrainView {
@@ -173,6 +177,18 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   contours.renderOrder = 3;
   contours.position.y = 1.2;
 
+  // land-use territories overlay
+  const zdata = new Uint8Array(N * N * 4);
+  const zoneTex = new THREE.DataTexture(zdata, N, N, THREE.RGBAFormat);
+  zoneTex.magFilter = THREE.NearestFilter;
+  zoneTex.minFilter = THREE.NearestFilter;
+  zoneTex.needsUpdate = true;
+  const zoneMat = new THREE.MeshBasicMaterial({ map: zoneTex, transparent: true, opacity: 0.9, toneMapped: false, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  const zones = new THREE.Mesh(geo, zoneMat);
+  zones.visible = false;
+  zones.renderOrder = 2;
+  zones.position.y = 1.6;
+
   const ramp = [
     [0.0, [70, 95, 160]],
     [0.3, [110, 170, 190]],
@@ -193,7 +209,14 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   };
 
   return {
-    mesh, water, heat, heatTex, material, waterMat, catchment, contours,
+    mesh, water, heat, heatTex, material, waterMat, catchment, contours, zones,
+    setZones(terr: Uint8Array, w: Uint8Array) {
+      for (let i = 0; i < N * N; i++) {
+        const t = terr[i], c = T_COLORS[t] ?? [0, 0, 0];
+        zdata[i * 4] = c[0]; zdata[i * 4 + 1] = c[1]; zdata[i * 4 + 2] = c[2]; zdata[i * 4 + 3] = t && !w[i] ? 235 : 0;
+      }
+      zoneTex.needsUpdate = true;
+    },
     setCatchment(c: Uint8Array) {
       for (let i = 0; i < N * N; i++) {
         const m = c[i] / 10; // minutes

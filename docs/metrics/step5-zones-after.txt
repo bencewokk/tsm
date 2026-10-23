@@ -1,0 +1,45 @@
+== seed 4821 coast/port/harbour month 96 pop 29378 (territories)
+   territory      area%  plots  mean height
+   rural               86%     35    0.0 m
+   old core             3%    884   12.0 m
+   inner mixed use      1%     96   13.5 m
+   detached suburb      5%    365   10.2 m
+   heavy industry       1%    108   10.0 m
+   workers' district    1%    125   10.0 m
+   green                2%      0    0.0 m
+   industry plots inside port / industry areas: 91/101 (90%), jobs 2317/2548 (91%)
+   homes plots inside port / industry areas: 0/836;  shops inside: 0;  towers (>= 36 m) on port land: 0 of 1; tallest building on port land 0 m
+== seed 187 hills/rail-junction/railyard month 96 pop 37481 (territories)
+   territory      area%  plots  mean height
+   rural               83%     11    0.0 m
+   old core             3%    529   12.1 m
+   inner mixed use      1%     94   13.7 m
+   transit district     0%     28   15.0 m
+   detached suburb      8%    923   10.2 m
+   heavy industry       3%    170   10.1 m
+   workers' district    1%    193   11.7 m
+   green                1%      0    0.0 m
+   industry plots inside port / industry areas: 101/105 (96%), jobs 2888/3008 (96%)
+   homes plots inside port / industry areas: 3/919;  shops inside: 0;  towers (>= 36 m) on port land: 0 of 0; tallest building on port land 0 m
+== seed 304 coast/planned-capital/railyard month 96 pop 34275 (territories)
+   territory      area%  plots  mean height
+   rural               82%     79    0.0 m
+   old core             4%    991   11.1 m
+   inner mixed use      1%    111   12.6 m
+   detached suburb      6%    520   10.3 m
+   heavy industry       3%    189   10.0 m
+   workers' district    1%    198   10.1 m
+   green                2%      0    0.0 m
+   industry plots inside port / industry areas: 96/101 (95%), jobs 2783/2923 (95%)
+   homes plots inside port / industry areas: 1/1140;  shops inside: 0;  towers (>= 36 m) on port land: 0 of 0; tallest building on port land 0 m
+== seed 57 river/market-town/harbour month 96 pop 27496 (territories)
+   territory      area%  plots  mean height
+   rural               87%     59    0.0 m
+   old core             3%    706   12.4 m
+   inner mixed use      1%    108   12.1 m
+   detached suburb      5%    383   10.2 m
+   heavy industry       1%    120   10.0 m
+   workers' district    1%    101   10.1 m
+   green                4%      0    0.0 m
+   industry plots inside port / industry areas: 98/99 (99%), jobs 2418/2444 (99%)
+   homes plots inside port / industry areas: 0/839;  shops inside: 0;  towers (>= 36 m) on port land: 0 of 0; tallest building on port land 0 m

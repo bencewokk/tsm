@@ -16,6 +16,7 @@ import { makeCityProfile, type CityProfile } from './cityprofile';
 import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './town';
 import { MinHeap } from './heap';
 import { pruneRoads, promoteJunctions } from './hierarchy';
+import { T, T_CAP, TERR, updateTerritories } from './territory';
 import { RELIEF, hAt, toblerFactor, slopeField, viewField, zoneEffort } from './relief';
 
 /** Tunable knobs for the growth model. */
@@ -143,7 +144,7 @@ export class Sim {
     this.effort = zoneEffort(this.metro.terr);
     this.lots = new LotStore(this.g.water, this.g.flags, this.roads, this.profiles);
     this.lots.profileAt = (x, y) => this.profileAt(x, y);
-    this.town = { g: this.g, city: this.cp, roads: this.roads, lots: this.lots, rng: this.rng, districts: [], profiles: this.profiles };
+    this.town = { g: this.g, city: this.cp, roads: this.roads, lots: this.lots, rng: this.rng, districts: [], profiles: this.profiles, terr: new Uint8Array(N * N) };
     this.town.profileAt = (x, y) => this.profileAt(x, y);
     layoutTown(this.town);
     this.lm = new LandmarkSystem(this);
@@ -159,6 +160,7 @@ export class Sim {
     this.computeLandValue();
     this.lvS.set(this.lv);
     this.field.update(this);
+    updateTerritories(this);
   }
 
   get liveLots(): Lot[] { return this.lots.lots.filter((l) => l.alive); }
@@ -440,6 +442,7 @@ export class Sim {
     this.computeLandValue();
     for (let i = 0; i < N * N; i++) this.lvS[i] += (this.lv[i] - this.lvS[i]) * TUNE.lvLag;
     this.field.update(this);
+    if (this.month % 12 === 0) updateTerritories(this);
     this.grow();
     this.resubdivide();
     this.docksTick();
@@ -486,6 +489,11 @@ export class Sim {
   profileAt(x: number, y: number): number {
     const gx = Math.floor(x), gy = Math.floor(y);
     if (gx >= 0 && gy >= 0 && gx < N && gy < N && (this.g.flags[gy * N + gx] & Flag.Docks)) return PROFILE_INDEX[this.cp.site === 'harbour' ? 'docks' : 'railside'];
+    if (TERR.on && gx >= 0 && gy >= 0 && gx < N && gy < N) {
+      const tt = this.town.terr[gy * N + gx];
+      if (tt === T.Port || tt === T.Industry) return PROFILE_INDEX[this.cp.site === 'harbour' ? 'docks' : 'railside'];
+      if (tt === T.Workers) return PROFILE_INDEX.terraces;
+    }
     let dq = this.town.districts[0], dc = Infinity;
     for (const d of this.town.districts) { const dd = Math.hypot(d.x - x, d.y - y); if (dd < dc) { dc = dd; dq = d; } }
     const F = this.field.fAt(x, y);
@@ -832,14 +840,19 @@ export class Sim {
       const pf = this.profiles[l.prof], fr = (0.5 + pf.landUseMix.res) * pf.growthRate, fc = (0.5 + pf.landUseMix.com) * pf.growthRate, fi = (0.5 + pf.landUseMix.ind) * pf.growthRate;
       const maxL = F.maxLevel(l.x, l.y);
       if (t === BT.None) {
-        if (v < Math.min(spawnR, spawnC)) continue;
+        const tt0 = TERR.on ? this.town.terr[l.cell] : 0;
+        // heavy industry does not care about land value: it builds wherever its territory is
+        if (v < Math.min(spawnR, spawnC) && !(tt0 === T.Port || tt0 === T.Industry)) continue;
         const pull = this.stationPull(l.cell);
         const front = l.cls === RC.Arterial ? 0.1 : l.cls === RC.Collector ? 0.05 : 0;
         // fill the built-up area first: neighbours and the field's density class pull growth inward
         const fill = 0.1 * Math.min(1, built3(l.cell) / 5) + 0.2 * F.fAt(l.x, l.y);
-        if (v >= spawnR) res.push({ l, s: (v + jit + fill) * fr, kind: BT.Res, to: 1, h: 0 });
-        if (v >= spawnC) com.push({ l, s: (v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12 + fill) * fc, kind: BT.Com, to: 1, h: 0 });
-        ind.push({ l, s: (0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit) * fi, kind: BT.Ind, to: 1, h: 0 });
+        // territories: the port, yards and heavy industry take industry only; homes and shops stay out of them
+        const tt = TERR.on ? this.town.terr[l.cell] : 0;
+        const heavy = tt === T.Port || tt === T.Industry;
+        if (v >= spawnR && !heavy) res.push({ l, s: (v + jit + fill) * fr, kind: BT.Res, to: 1, h: 0 });
+        if (v >= spawnC && !heavy) com.push({ l, s: (v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12 + fill) * fc, kind: BT.Com, to: 1, h: 0 });
+        if (!TERR.on || heavy) ind.push({ l, s: (0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit) * fi, kind: BT.Ind, to: 1, h: 0 });
       } else if (t === BT.Res && lv < 3) {
         const cap = l.flags & Flag.CarLocked ? 2 : 3;
         if (lv + 1 > cap || lv + 1 > maxL) continue;
@@ -916,6 +929,7 @@ export class Sim {
     // decline: buildings whose value falls empty out
     for (const l of lots) {
       if (!l.type || isAmenity(l.type) || l.constr || l.asm || (l.flags & Flag.Planned)) continue;
+      if (l.type === BT.Ind && TERR.on && (this.town.terr[l.cell] === T.Port || this.town.terr[l.cell] === T.Industry)) continue;   // industry stays in its own territory whatever the land value
       const v = this.fieldAt(this.lvS, l.x, l.y);
       if (v < TUNE.downLV[l.level]) l.low = Math.min(255, l.low + 1); else l.low = 0;
       if (l.low >= 6 && this.rng.next() < 0.25) {
@@ -1260,7 +1274,7 @@ export class Sim {
     return {
       type: 'state', stats: this.stats(),
       roads: this.roadsMsg(), lots: this.lotsMsg(),
-      road: this.g.road.slice(), lv: this.lv.slice(), flags: this.g.flags.slice(), catchment: this.catchmentRaster(),
+      road: this.g.road.slice(), lv: this.lv.slice(), flags: this.g.flags.slice(), terr: this.town.terr.slice(), catchment: this.catchmentRaster(),
       stations: this.metro.stations.map((st) => ({ ...st })),
       lines: this.metro.lines.map((l) => ({ id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders,
         capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice(), by: l.by.slice(), elev: l.elev.slice() })),

@@ -9,6 +9,7 @@
  */
 import { N, PERSONS_PER_HOME, Flag } from './constants';
 import { baselineHeight } from './metrics';
+import { TERR, T_CAP } from './territory';
 import type { Sim } from './sim';
 import type { Lot } from './lots';
 
@@ -95,6 +96,8 @@ export class DensityField {
       // slopes limit height: full allowance up to a 5% gradient, a third of it on 17% ground (views raise value, never density)
       const slopeF = clamp(1 - (sim.slope[i] - FIELD.slopeFull) / (FIELD.slopeZero - FIELD.slopeFull) * 0.7, 0.3, 1);
       this.hmax[i] = (FIELD.hBase + FIELD.hRange * Math.pow(clamp(hp, 0, 1), FIELD.hPow)) * slopeF;
+      // territories: no towers on working quays, low heavy industry and workers' terraces, low detached suburbs
+      if (TERR.on) { const cap = T_CAP[sim.town.terr[i]]; if (cap && this.hmax[i] > cap) this.hmax[i] = cap; }
       const lvT = clamp((sim.lvS[i] - 0.3) / 0.5, 0, 1);
       this.F[i] = clamp(0.5 * cc + 0.2 * this.jc[i] + 0.2 * a + 0.2 * lvT, 0, 1) * (0.55 + 0.45 * slopeF);
     }

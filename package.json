@@ -13,7 +13,8 @@
     "terrain": "tsx scripts/terrain.ts",
     "impact": "tsx scripts/impact.ts",
     "routes": "tsx scripts/routes.ts",
-    "towers": "tsx scripts/towers.ts"
+    "towers": "tsx scripts/towers.ts",
+    "zones": "tsx scripts/zones.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

@@ -1,0 +1,32 @@
+== seed 4821 coast/port/harbour month 96 pop 33357 (old unstructured land use)
+   territory      area%  plots  mean height
+   rural               97%   1134   12.4 m
+   port / yards         1%    177   16.4 m
+   heavy industry       1%     31   10.0 m
+   workers' district    1%     18   10.1 m
+   industry plots inside port / industry areas: 11/73 (15%), jobs 275/1942 (14%)
+   homes plots inside port / industry areas: 102/518;  shops inside: 76;  towers (>= 36 m) on port land: 0 of 2; tallest building on port land 26 m
+== seed 187 hills/rail-junction/railyard month 96 pop 35328 (old unstructured land use)
+   territory      area%  plots  mean height
+   rural               95%   1615   10.9 m
+   port / yards         3%    157   14.0 m
+   heavy industry       1%     34   11.7 m
+   workers' district    1%     75   12.8 m
+   industry plots inside port / industry areas: 7/92 (8%), jobs 189/2673 (7%)
+   homes plots inside port / industry areas: 111/897;  shops inside: 66;  towers (>= 36 m) on port land: 0 of 0; tallest building on port land 23 m
+== seed 304 coast/planned-capital/railyard month 96 pop 31968 (old unstructured land use)
+   territory      area%  plots  mean height
+   rural               94%   1578   10.8 m
+   port / yards         4%    207   12.7 m
+   heavy industry       1%      9   10.0 m
+   workers' district    1%     24   10.1 m
+   industry plots inside port / industry areas: 9/82 (11%), jobs 240/2181 (11%)
+   homes plots inside port / industry areas: 133/816;  shops inside: 67;  towers (>= 36 m) on port land: 0 of 0; tallest building on port land 21 m
+== seed 57 river/market-town/harbour month 96 pop 30045 (old unstructured land use)
+   territory      area%  plots  mean height
+   rural               98%   1225   13.0 m
+   port / yards         1%    119   12.8 m
+   heavy industry       1%     11   10.0 m
+   workers' district    1%     22   10.0 m
+   industry plots inside port / industry areas: 2/84 (2%), jobs 51/2181 (2%)
+   homes plots inside port / industry areas: 71/491;  shops inside: 49;  towers (>= 36 m) on port land: 0 of 0; tallest building on port land 21 m
