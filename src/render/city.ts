@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { N, CELL, BT, Flag } from '../sim/constants';
 import type { StateMsg } from '../sim/protocol';
 import { cellCenter, groundY, vhash } from './common';
+import { patchBuildingMaterial } from './look';
 
 export interface Box { x: number; z: number; w: number; d: number; h: number; rot: number; color: number }
 
@@ -76,6 +77,11 @@ export class CityView {
   craneMast: THREE.InstancedMesh;
   craneJib: THREE.InstancedMesh;
   buildingMat: THREE.MeshStandardMaterial;
+  roadMat: THREE.MeshStandardMaterial;
+  /** every opaque surface material, for the x-ray fade */
+  get surfaceMats(): THREE.Material[] {
+    return [this.buildingMat, this.roadMat, this.trees.material as THREE.Material, this.craneMast.material as THREE.Material];
+  }
   /** per instance: x, base, z, w, h, d */
   private inst = new Float32Array(0);
   private anims: Anim[] = [];
@@ -89,7 +95,8 @@ export class CityView {
 
   constructor(private height: Float32Array, private water: Uint8Array) {
     const cap = 60000;
-    this.buildingMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 });
+    this.buildingMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0, emissive: 0x000000 });
+    patchBuildingMaterial(this.buildingMat);
     this.buildings = new THREE.InstancedMesh(boxGeo(), this.buildingMat, cap);
     this.buildings.castShadow = true;
     this.buildings.receiveShadow = true;
@@ -103,7 +110,8 @@ export class CityView {
     this.ghosts.frustumCulled = false;
     this.ghosts.renderOrder = 5;
 
-    const roadMat = new THREE.MeshStandardMaterial({ color: 0xf3f0e8, roughness: 1 });
+    const roadMat = new THREE.MeshStandardMaterial({ color: 0xf3f0e8, roughness: 1, emissive: 0xffb860, emissiveIntensity: 0 });
+    this.roadMat = roadMat;
     this.roads = new THREE.InstancedMesh(boxGeo(), roadMat, N * N * 3);
     this.roads.receiveShadow = true;
     this.roads.count = 0;

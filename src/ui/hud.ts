@@ -134,7 +134,7 @@ export class Hud {
     el.innerHTML = `<div class="h">Docks project · ${d.dealName}</div>
       <div class="small">${d.brief}</div>
       <div class="dbar"><i class="b" style="width:${pct(d.built)}"></i><i class="s" style="width:${pct(Math.max(0, d.served - d.built))}"></i><i class="l" style="width:${pct(d.carLocked)}"></i></div>
-      <div class="small"><span class="k b"></span>built ${d.built} · <span class="k s"></span>served ${d.served} · <span class="k l"></span>car-locked ${d.carLocked} / ${d.planned}</div>
+      <div class="small"><span class="lk b"></span>built ${d.built} · <span class="lk s"></span>served ${d.served} · <span class="lk l"></span>car-locked ${d.carLocked} / ${d.planned}</div>
       <div class="small">${dl} <button class="mini" data-focus>Show me</button></div>`;
     el.querySelector('[data-focus]')?.addEventListener('click', () => this.onFocusDocks?.());
   }

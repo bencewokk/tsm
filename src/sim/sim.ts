@@ -201,7 +201,7 @@ export class Sim {
       let variant: Variant | null = null;
       if (def.variants) {
         variant = def.variants.find((v) => (v.when.deal === undefined || v.when.deal === this.docks.deal?.id) &&
-          (v.when.late === undefined || v.when.late === (Number(vars.locked) > 0))) ?? null;
+          (v.when.late === undefined || v.when.late === (Number(vars.locked) > Math.max(2, Number(vars.planned) * 0.15)))) ?? null;
         if (!variant) { this.fired[def.id] = this.month; continue; }
       }
       this.fired[def.id] = this.month;

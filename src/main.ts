@@ -4,6 +4,8 @@ import { Env } from './render/env';
 import { buildTerrain, type TerrainView } from './render/terrain';
 import { CityView } from './render/city';
 import { MetroView } from './render/metro';
+import { DesireView } from './render/desire';
+import { lookUniforms } from './render/look';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
 import { Hud } from './ui/hud';
 import { Planner } from './ui/planner';
@@ -23,6 +25,9 @@ let city: CityView | null = null;
 let metro: MetroView | null = null;
 let planner: Planner | null = null;
 let state: StateMsg | null = null;
+const desire = new DesireView();
+env.scene.add(desire.group);
+desire.group.visible = false;
 let lastStateAt = performance.now();
 const hud = new Hud(document.body, send, seed);
 
@@ -50,6 +55,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     if (linesChanged) metro?.update(m);
     planner?.onState(m);
     if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
+    if (hud.toggles.desire) desire.update(m.desire);
     hud.update(m);
     refreshPlan();
   } else if (m.type === 'error') {
@@ -84,7 +90,9 @@ hud.handlers.onTool = (t) => {
 hud.handlers.onToggle = (name, on) => {
   if (name === 'heat' && terrain) { terrain.heat.visible = on; if (on && state && init) terrain.setHeat(state.lv, init.water); }
   if (name === 'xray') xrayTarget = on ? 1 : 0;
-  if (name === 'night') nightTarget = on ? 1 : 0;
+  if (name === 'night') { nightTarget = on ? 1 : 0; fastDawn = !on; }
+  if (name === 'desire') { desire.group.visible = on; if (on && state) desire.update(state.desire); }
+  if (name === 'tilt') env.tilt = on;
 };
 
 hud.onFocusDocks = () => {
@@ -166,6 +174,29 @@ window.addEventListener('keydown', (e) => {
 // ------------------------------------------------------------------ frame loop
 const MS: Record<number, number> = { 0: Infinity, 1: 1500, 3: 500, 10: 150 };
 let xray = 0, xrayTarget = 0, night = 0, nightTarget = 0;
+const DAY_SECONDS = 160;
+let dayPhase = 0.05;
+let fastDawn = false;
+/** phase 0..1 -> timeOfDay (0 noon, 0.5 midnight): 72% of the cycle is daylight */
+function phaseToTime(p: number) {
+  const day = 0.72;
+  return p < day ? -0.2 + (p / day) * 0.4 : 0.2 + ((p - day) / (1 - day)) * 0.6;
+}
+let lastXray = -1;
+function applyXray(v: number) {
+  if (v === lastXray || !terrain || !city) return;
+  lastXray = v;
+  const fade = (m: THREE.Material, min: number) => {
+    m.transparent = v > 0.001;
+    m.opacity = 1 - (1 - min) * v;
+    m.depthWrite = v < 0.5;
+  };
+  fade(terrain.material, 0.14);
+  for (const m of city.surfaceMats) fade(m, 0.1);
+  terrain.waterMat.opacity = 0.88 * (1 - 0.8 * v);
+  const board = env.scene.getObjectByName('board') as THREE.Mesh | undefined;
+  if (board) fade(board.material as THREE.Material, 0.05);
+}
 let t0 = performance.now();
 function frame(now: number) {
   const dt = Math.min(0.1, (now - t0) / 1000);
@@ -181,9 +212,23 @@ function frame(now: number) {
   const frac = state ? Math.min(1, (now - lastStateAt) / (MS[state.speed] ?? 1500)) : 0;
   city?.animate(frac, now / 1000);
   xray += (xrayTarget - xray) * Math.min(1, dt * 5);
-  night += (nightTarget - night) * Math.min(1, dt * 2);
+  if (Math.abs(xray - xrayTarget) < 0.002) xray = xrayTarget;
+  applyXray(xray);
+  // day/night: a slow cycle (long day, short night); the Night toggle holds it at night
+  if (nightTarget > 0) dayPhase += (0.86 - dayPhase) * Math.min(1, dt * 1.5);
+  else {
+    // after the Night toggle is released, hurry through to dawn
+    const rate = fastDawn && dayPhase > 0.6 ? 0.25 : 1 / DAY_SECONDS;
+    dayPhase += dt * rate;
+    if (dayPhase >= 1) { dayPhase -= 1; fastDawn = false; }
+  }
+  env.timeOfDay = phaseToTime(dayPhase);
+  env.applyTime();
+  night = env.night;
+  lookUniforms.uNight.value = night;
+  if (city) city.roadMat.emissiveIntensity = night * 0.05;
   if (metro) { metro.setXray(xray); metro.animate(now / 1000); }
-  env.renderer.render(env.scene, env.camera);
+  env.render();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -194,4 +239,29 @@ function cellToScreen(x: number, y: number) {
   const r = env.renderer.domElement.getBoundingClientRect();
   return { x: Math.round(r.left + (v.x + 1) / 2 * r.width), y: Math.round(r.top + (1 - v.y) / 2 * r.height) };
 }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
+/** Test helper: fast-forward, take a docks deal, build a line through the villages (used for screenshots). */
+async function demo(deal = 0, lineAt = 10) {
+  const sl = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const waitMonth = async (m: number) => { send({ type: 'speed', speed: 10 }); while (state && state.stats.month < m) { if (state.event) send({ type: 'choose', event: state.event.id, choice: state.event.id === 'docks_bought' ? deal : 0 }); await sl(100); } send({ type: 'speed', speed: 0 }); await sl(200); };
+  await waitMonth(lineAt);
+  if (!state || !init || !planner) return;
+  const vs = init.villages.slice().sort((a, b) => a.y - b.y);
+  const pts: [number, number][] = [];
+  for (let k = 0; k < vs.length; k++) {
+    if (k > 0) {
+      const a = vs[k - 1], b = vs[k];
+      const n = Math.max(1, Math.round(Math.hypot(a.x - b.x, a.y - b.y) / 11));
+      for (let j = 1; j < n; j++) pts.push([Math.round(a.x + (b.x - a.x) * j / n), Math.round(a.y + (b.y - a.y) * j / n)]);
+    }
+    pts.push([vs[k].x, vs[k].y]);
+  }
+  for (const [x, y] of pts) {
+    let cx = x, cy = y;
+    for (let r = 0; r < 4 && init.water[cy * N + cx]; r++) { cx = x + r; cy = y - r; }
+    planner.click(state, cx, cy);
+    await sl(120);
+  }
+  planner.commit();
+  await sl(400);
+}
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
