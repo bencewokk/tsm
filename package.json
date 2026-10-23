@@ -9,7 +9,9 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "headless": "tsx scripts/headless.ts",
     "seeds": "tsx scripts/seeds.ts",
-    "metrics": "tsx scripts/metrics.ts"
+    "metrics": "tsx scripts/metrics.ts",
+    "terrain": "tsx scripts/terrain.ts",
+    "impact": "tsx scripts/impact.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

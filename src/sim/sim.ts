@@ -15,6 +15,7 @@ import { LANDMARKS, landmarkAt } from './landmarks';
 import { makeCityProfile, type CityProfile } from './cityprofile';
 import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './town';
 import { MinHeap } from './heap';
+import { RELIEF, hAt, toblerFactor, slopeField, viewField, zoneEffort } from './relief';
 
 /** Tunable knobs for the growth model. */
 export const TUNE = {
@@ -29,6 +30,7 @@ export const TUNE = {
   wTransit: 1.25,
   base: 0.12,
   wWater: 0.12,
+  wView: 0.1,
   wPark: 0.05,
   wInd: 0.06,
   wCentre: 0.55,
@@ -78,6 +80,10 @@ export class Sim {
   cBuilt = new Float32Array(N * N);         // built (non-amenity) plots per cell
   accCell = new Float32Array(N * N);        // station access 0..1 (walk x reach)
   field = new DensityField();
+  /** static relief rasters: gradient (m per m), view value 0..1, car effort ratio between zones */
+  slope: Float32Array = new Float32Array(N * N);
+  view: Float32Array = new Float32Array(N * N);
+  effort: Float32Array = new Float32Array(ZONES * ZONES).fill(1);
   // zones (8x8 cells)
   zHomes = new Float64Array(ZONES);
   zJobs = new Float64Array(ZONES);
@@ -127,6 +133,10 @@ export class Sim {
     this.profiles = deriveProfiles(this.cp);
     this.g = generateTerrain(seed, this.rng, this.cp);
     this.roads = new RoadGraph(this.g);
+    this.metro.terr = { height: this.g.height, water: this.g.water };
+    this.slope = slopeField(this.g.height);
+    this.view = viewField(this.g.height, this.g.water);
+    this.effort = zoneEffort(this.metro.terr);
     this.lots = new LotStore(this.g.water, this.g.flags, this.roads, this.profiles);
     this.lots.profileAt = (x, y) => this.profileAt(x, y);
     this.town = { g: this.g, city: this.cp, roads: this.roads, lots: this.lots, rng: this.rng, districts: [], profiles: this.profiles };
@@ -171,14 +181,16 @@ export class Sim {
       }
       case 'removeStation': if (m.removeStation(cmd.id)) this.money += STATION_COST * 0.5; break;
       case 'buildLine': {
-        const q = m.quote(cmd.stations, w);
+        const q = m.quote(cmd.stations);
+        if (!q.ok) { this.say(`Line not built: station ${m.station(cmd.stations[q.badStation])?.name ?? ''} would have to lie ${q.depth[q.badStation].toFixed(0)} m deep to keep the grade under ${(RELIEF.maxGrade * 100).toFixed(0)}% (limit ${RELIEF.maxDepth} m). Add stations on easier ground.`); return; }
         const est = q.cost + 2 * TRAIN_COST;
         if (this.money < est) { this.say(`Line needs ${(est / 1e6).toFixed(0)}M, not enough money`); return; }
-        const l = m.addLine(cmd.stations, w);
+        const l = m.addLine(cmd.stations);
         if (!l) return;
         const cost = q.cost + l.trains * TRAIN_COST;
         this.money -= cost; this.buildSpend += cost;
-        this.say(`Line ${l.id} opened: ${l.stations.length} stations, ${l.lengthKm.toFixed(1)} km${q.wkm > 0.05 ? ` (${q.wkm.toFixed(1)} km under water)` : ''}`);
+        const bits = [q.by[1] > 0.05 ? `${q.by[1].toFixed(1)} km bored tunnel` : '', q.by[2] > 0.05 ? `${q.by[2].toFixed(1)} km viaduct` : '', q.wkm > 0.05 ? `${q.wkm.toFixed(1)} km under water` : ''].filter(Boolean);
+        this.say(`Line ${l.id} opened: ${l.stations.length} stations, ${l.lengthKm.toFixed(1)} km${bits.length ? ` (${bits.join(', ')})` : ''}`);
         this.refreshTransit();
         break;
       }
@@ -400,7 +412,7 @@ export class Sim {
   paused(): boolean { return this.pending !== null; }
 
   quoteLine(stations: number[]) {
-    const q = this.metro.quote(stations, this.g.water);
+    const q = this.metro.quote(stations);
     return { cost: q.cost, km: q.km, underwaterKm: q.wkm };
   }
 
@@ -564,7 +576,7 @@ export class Sim {
       for (let b = 0; b < ZONES; b++) {
         const bx = (b % NZ) + 0.5, by = ((b / NZ) | 0) + 0.5;
         const mx = Math.min(NZ - 1, Math.floor((ax + bx) / 2)), my = Math.min(NZ - 1, Math.floor((ay + by) / 2));
-        const dist = a === b ? 300 : Math.hypot(ax - bx, ay - by) * ZONE * CELL * TUNE.circuity;
+        const dist = a === b ? 300 : Math.hypot(ax - bx, ay - by) * ZONE * CELL * TUNE.circuity * this.effort[a * ZONES + b];
         const sp = (this.zSpeed[a] + this.zSpeed[b] + this.zSpeed[my * NZ + mx] + this.driveSpeed) / 4;
         dt[a * ZONES + b] = (dist / 1000) / sp * 60 + TUNE.accessMin;
       }
@@ -581,12 +593,14 @@ export class Sim {
    * Station catchments follow the street network: Dijkstra from each station over road nodes at walking speed,
    * then each cell takes its nearest node's time plus the walk to it. A station across a river with no bridge barely helps.
    */
-  private computeWalkFields(used: { id: number; x: number; y: number }[]) {
+  private computeWalkFields(used: { id: number; x: number; y: number; depth?: number }[]) {
     const key = `${this.roads.version}|${used.map((s) => `${s.id}:${s.x.toFixed(2)},${s.y.toFixed(2)}`).join(';')}`;
     if (key === this.walkKey) return;
     this.walkKey = key;
     const R = this.roads, M = R.nx.length, sp = TUNE.walkSpeed / CELL; // cells per minute
     const cap = TUNE.walkCap;
+    const hn = new Float32Array(M);
+    for (let n = 0; n < M; n++) hn[n] = hAt(this.g.height, R.nx[n], R.ny[n]);
     this.walk = [];
     for (const st of used) {
       const t = new Float32Array(M).fill(Infinity);
@@ -595,7 +609,7 @@ export class Sim {
       for (let n = 0; n < M; n++) {
         if (!R.adj[n].length) continue;
         const d = Math.hypot(R.nx[n] - st.x, R.ny[n] - st.y);
-        if (d < 2.5) { const v = (d * 1.2) / sp; if (v < t[n]) { t[n] = v; heap.push(n, v); } }
+        if (d < 2.5) { const v = (d * 1.2) / sp + (st.depth ?? 0) * RELIEF.escalatorMin; if (v < t[n]) { t[n] = v; heap.push(n, v); } }
       }
       while (heap.size) {
         const n = heap.pop();
@@ -603,7 +617,10 @@ export class Sim {
         if (tn > cap) continue;
         for (const e of R.adj[n]) {
           const o = R.other(e, n);
-          const v = tn + R.edgeLen(e) / sp;
+          // people walk from o towards the station at n: uphill is slow (Tobler)
+          const L = R.edgeLen(e);
+          const slope = L > 0 ? (hn[n] - hn[o]) / (L * CELL) : 0;
+          const v = tn + L / sp / toblerFactor(slope);
           if (v < t[o]) { t[o] = v; heap.push(o, v); }
         }
       }
@@ -665,7 +682,7 @@ export class Sim {
       const cell = Math.floor(cy) * N + Math.floor(cx);
       for (let k = 0; k < S; k++) {
         const wt = this.walk[k][cell];
-        if (wt < TUNE.walkCap) this.zoneNear[z].push({ s: k, w: wt + 1 });
+        if (wt < TUNE.walkCap) this.zoneNear[z].push({ s: k, w: wt + 1 });  // the escalator time is already inside the walk field
       }
     }
     const T = m.T, eg = this.egress;
@@ -745,6 +762,8 @@ export class Sim {
       const dc = Math.hypot(x - cx, y - cy) / (N * 0.5);
       let v = TUNE.base + TUNE.wCar * car + TUNE.wTransit * this.transitCell[i] + this.stationPrem[i] + water + pk - nz - TUNE.wCentre * dc;
       if (g.flags[i] & Flag.Steep) v -= 0.2;
+      if (g.flags[i] & Flag.Flood) v -= 0.25;
+      v += TUNE.wView * this.view[i];   // views raise value (not density: the field ignores them)
       this.lv[i] = clamp(v, 0, 1.5);
     }
   }
@@ -1218,7 +1237,7 @@ export class Sim {
       road: this.g.road.slice(), lv: this.lv.slice(), flags: this.g.flags.slice(), catchment: this.catchmentRaster(),
       stations: this.metro.stations.map((st) => ({ ...st })),
       lines: this.metro.lines.map((l) => ({ id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders,
-        capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice() })),
+        capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice(), by: l.by.slice(), elev: l.elev.slice() })),
       event: this.eventInfo(),
       docks: this.docksInfo(),
       landmarks: this.lm.info(),

@@ -1,5 +1,6 @@
 import type { StateMsg, Command } from '../sim/protocol';
-import { STATION_COST, TRAIN_COST, LINE_COLORS, METRO_SPEED, segmentCost } from '../sim/constants';
+import { STATION_COST, TRAIN_COST, LINE_COLORS, METRO_SPEED } from '../sim/constants';
+import { quoteLine, RELIEF, SEG_NAMES, type Terr, type LineQuote } from '../sim/relief';
 import { money } from './hud';
 
 /** Metro planning: click empty land to dig a station, click stations in order, Enter to build. */
@@ -8,7 +9,8 @@ export class Planner {
   private pending: { x: number; y: number }[] = [];
   hover: { x: number; y: number } | null = null;
 
-  constructor(private send: (c: Command) => void, private water: Uint8Array) {}
+  private water: Uint8Array;
+  constructor(private send: (c: Command) => void, private terr: Terr) { this.water = terr.water; }
 
   stationAt(s: StateMsg, x: number, y: number) {
     let best = null as null | { id: number; x: number; y: number }, bd = 2.6;
@@ -75,24 +77,40 @@ export class Planner {
     return LINE_COLORS.find((c) => !used.has(c)) ?? LINE_COLORS[0];
   }
 
+  /** Vertical profile and cost of the draft (plus the hovered point as a trial next station). */
+  profile(s: StateMsg, withHover = false): LineQuote | null {
+    const pts = this.points(s).map((p) => ({ x: p.x, y: p.y }));
+    if (withHover && this.hover && pts.length) pts.push({ x: this.hover.x, y: this.hover.y });
+    return pts.length >= 2 ? quoteLine(pts, this.terr) : null;
+  }
+
   quote(s: StateMsg) {
+    const q = this.profile(s);
+    const km = q?.km ?? 0, wkm = q?.wkm ?? 0;
     const pts = this.points(s);
-    let km = 0, wkm = 0, cost = 0;
-    for (let k = 1; k < pts.length; k++) {
-      const c = segmentCost(pts[k - 1].x, pts[k - 1].y, pts[k].x, pts[k].y, this.water);
-      km += c.km; wkm += c.wkm; cost += c.cost;
-    }
     const roundTrip = (km / METRO_SPEED) * 60 * 2 + pts.length + 4;
     const trains = Math.max(2, Math.round(roundTrip / 5));
-    return { km, wkm, cost: cost + trains * TRAIN_COST, trains };
+    return { km, wkm, cost: (q?.cost ?? 0) + trains * TRAIN_COST, trains, q };
   }
 
   hint(s: StateMsg): string {
-    if (!this.draft.length) return `Click anywhere on land to dig a station (${money(STATION_COST)}), or click existing stations in order. Blue = within an 8-minute walk over the streets. Drag to pan, wheel to zoom.`;
-    const q = this.quote(s);
-    const water = q.wkm > 0.05 ? `, <b>${q.wkm.toFixed(1)} km under water</b>` : '';
-    const ok = q.cost <= s.stats.money;
-    return `Line draft: ${this.draft.length} stations, ${q.km.toFixed(1)} km${water}, ${q.trains} trains. Cost <b class="${ok ? '' : 'neg'}">${money(q.cost)}</b>. ` +
+    if (!this.draft.length) return `Click anywhere on land to dig a station (${money(STATION_COST)}), or click existing stations in order. Blue = within an 8-minute walk over the streets (slower uphill). Drag to pan, wheel to zoom.`;
+    const r = this.quote(s);
+    const q = r.q;
+    const ok = r.cost <= s.stats.money && (!q || q.ok);
+    let types = '';
+    if (q) {
+      const parts = q.by.map((km, k) => (km > 0.05 ? `${km.toFixed(1)} km ${SEG_NAMES[k]}` : '')).filter(Boolean);
+      if (parts.length) types = ` (${parts.join(', ')})`;
+    }
+    let extra = '';
+    if (q) {
+      const dmax = Math.max(0, ...q.depth), gmax = Math.max(0, ...q.segs.map((g) => Math.abs(g.grade)));
+      if (dmax > 6) extra += ` Deepest station ${dmax.toFixed(0)} m (+${money(q.stationCost)}, longer walk to the platform).`;
+      if (gmax > 0.005) extra += ` Steepest grade ${(gmax * 100).toFixed(1)}% (limit ${(RELIEF.maxGrade * 100).toFixed(0)}%).`;
+      if (!q.ok) extra += ` <b class="neg">Too steep: station ${q.badStation + 1} would need ${q.depth[q.badStation].toFixed(0)} m of depth; add a station on easier ground.</b>`;
+    }
+    return `Line draft: ${this.draft.length} stations, ${r.km.toFixed(1)} km${types}, ${r.trains} trains. Cost <b class="${ok ? '' : 'neg'}">${money(r.cost)}</b>.${extra} ` +
       `<b>Enter</b> build · <b>Backspace</b> undo · <b>Esc</b> cancel`;
   }
 }

@@ -14,6 +14,8 @@ export interface TerrainView {
   setHeat(lv: Float32Array, water: Uint8Array): void;
   catchment: THREE.Mesh;
   setCatchment(c: Uint8Array): void;
+  /** contour lines (every 10 m, index line every 50 m) for plan mode and the heatmap */
+  contours: THREE.Mesh;
 }
 
 export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uint8Array): TerrainView {
@@ -22,6 +24,7 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   const vw = new Float32Array(V * V); // water fraction per vertex
   const vd = new Float32Array(V * V); // docks (concrete) fraction
   const vs = new Float32Array(V * V); // steep (woodland) fraction
+  const vf = new Float32Array(V * V); // flood plain (wetland) fraction
   for (let vy = 0; vy < V; vy++)
     for (let vx = 0; vx < V; vx++) {
       let s = 0, c = 0, w = 0;
@@ -34,11 +37,13 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
           if (wmask[i]) w++;
           if (!wmask[i] && (flags[i] & Flag.Docks)) vd[vy * V + vx] += 1;
           if (!wmask[i] && (flags[i] & Flag.Steep)) vs[vy * V + vx] += 1;
+          if (!wmask[i] && (flags[i] & Flag.Flood)) vf[vy * V + vx] += 1;
         }
       vh[vy * V + vx] = (s / c) * VS;
       vw[vy * V + vx] = w / c;
       vd[vy * V + vx] /= c;
       vs[vy * V + vx] /= c;
+      vf[vy * V + vx] /= c;
     }
 
   const pos = new Float32Array(V * V * 3);
@@ -47,11 +52,16 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   const sand = new THREE.Color('#e6dcc2');
   const low = new THREE.Color('#cdd9b6');
   const mid = new THREE.Color('#bfcfa6');
-  const high = new THREE.Color('#d3dcc0');
+  const high = new THREE.Color('#cfd6b5');
   const bed = new THREE.Color('#9fbccb');
   const concrete = new THREE.Color('#c9c6be');
   const wood = new THREE.Color('#9fb889');
   const rock = new THREE.Color('#bdb8aa');
+  const cliff = new THREE.Color('#a9a396');
+  const scree = new THREE.Color('#c9c3b3');
+  const snow = new THREE.Color('#eef0ec');
+  const marsh = new THREE.Color('#a7b78f');
+  const forest = new THREE.Color('#86a274');
   const c = new THREE.Color();
   for (let vy = 0; vy < V; vy++)
     for (let vx = 0; vx < V; vx++) {
@@ -59,12 +69,26 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
       const h = vh[k];
       pos[k * 3] = vx * CELL; pos[k * 3 + 1] = h; pos[k * 3 + 2] = vy * CELL;
       uv[k * 2] = vx / N; uv[k * 2 + 1] = vy / N;
+      // slope (m per m) from the vertex grid
+      const hxm = vh[vy * V + Math.max(0, vx - 1)], hxp = vh[vy * V + Math.min(N, vx + 1)], hym = vh[Math.max(0, vy - 1) * V + vx], hyp = vh[Math.min(N, vy + 1) * V + vx];
+      const slope = Math.hypot((hxp - hxm) / (Math.min(N, vx + 1) - Math.max(0, vx - 1)), (hyp - hym) / (Math.min(N, vy + 1) - Math.max(0, vy - 1))) / (CELL * VS);
+      const hm = h / VS;
       if (vw[k] > 0.6) c.copy(bed);
-      else if (h < 5 * VS || vw[k] > 0) c.copy(sand).lerp(low, Math.max(0, Math.min(1, (h - 2 * VS) / (3 * VS))));
-      else if (h < 25 * VS) c.copy(low).lerp(mid, (h - 5 * VS) / (20 * VS));
-      else c.copy(mid).lerp(high, Math.min(1, (h - 25 * VS) / (30 * VS)));
-      if (h > 55 * VS) c.lerp(rock, Math.min(0.85, (h - 55 * VS) / (90 * VS)));
-      if (vs[k] > 0) c.lerp(wood, vs[k] * 0.9);
+      else if (hm < 5 || vw[k] > 0) c.copy(sand).lerp(low, Math.max(0, Math.min(1, (hm - 2) / 3)));
+      else if (hm < 25) c.copy(low).lerp(mid, (hm - 5) / 20);
+      else c.copy(mid).lerp(high, Math.min(1, (hm - 25) / 30));
+      if (vf[k] > 0 && vw[k] < 0.6) c.lerp(marsh, Math.min(1, vf[k] * 1.4));
+      // slope materials: woodland on the flanks, bare rock on cliffs and above the tree line, snow on the tops
+      if (vw[k] < 0.6) {
+        const treeLine = hm < 95 ? 1 : Math.max(0, 1 - (hm - 95) / 40);
+        const wooded = Math.min(1, Math.max(0, (slope - 0.06) / 0.07)) * Math.min(1, Math.max(0, (hm - 5) / 8)) * treeLine;
+        c.lerp(forest, wooded * 0.85);
+        const rocky = Math.min(1, Math.max(0, (slope - 0.2) / 0.14)) + Math.min(1, Math.max(0, (hm - 100) / 50)) * 0.7;
+        c.lerp(slope > 0.26 ? cliff : rock, Math.min(0.92, rocky));
+        if (hm > 80) c.lerp(scree, Math.min(0.5, (hm - 80) / 120));
+        if (hm > 135) c.lerp(snow, Math.min(0.9, (hm - 135) / 35) * (1 - Math.min(1, Math.max(0, (slope - 0.35) / 0.2)) * 0.5));
+      }
+      if (vs[k] > 0 && vs[k] > 0.2) c.lerp(wood, vs[k] * 0.4);
       if (vd[k] > 0 && vw[k] < 0.6) c.lerp(concrete, Math.min(1, vd[k] * 1.6));
       col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
     }
@@ -118,6 +142,37 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   catchment.renderOrder = 8;
   catchment.position.y = 2;
 
+  // contour lines: baked from the height field at 8x the cell resolution
+  const CR = N * 8;
+  const cdat = new Uint8Array(CR * CR * 4);
+  {
+    const hs = (x: number, y: number) => {
+      const fx = Math.max(0, Math.min(N - 1.001, x / 8 - 0.5)), fy = Math.max(0, Math.min(N - 1.001, y / 8 - 0.5));
+      const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+      const hv = (xx: number, yy: number) => (wmask[yy * N + xx] ? -1 : height[yy * N + xx]);
+      return (hv(x0, y0) * (1 - tx) + hv(x0 + 1, y0) * tx) * (1 - ty) + (hv(x0, y0 + 1) * (1 - tx) + hv(x0 + 1, y0 + 1) * tx) * ty;
+    };
+    for (let y = 0; y < CR - 1; y++) for (let x = 0; x < CR - 1; x++) {
+      const h = hs(x, y);
+      if (h < 3) continue;
+      const lv = (v: number) => Math.floor(v / 10);
+      const edge = lv(h) !== lv(hs(x + 1, y)) || lv(h) !== lv(hs(x, y + 1));
+      if (!edge) continue;
+      const index = lv(Math.max(h, hs(x + 1, y), hs(x, y + 1))) % 5 === 0;
+      const o = (y * CR + x) * 4;
+      cdat[o] = 92; cdat[o + 1] = 70; cdat[o + 2] = 48; cdat[o + 3] = index ? 150 : 70;
+    }
+  }
+  const contourTex = new THREE.DataTexture(cdat, CR, CR, THREE.RGBAFormat);
+  contourTex.magFilter = THREE.LinearFilter;
+  contourTex.minFilter = THREE.LinearFilter;
+  contourTex.needsUpdate = true;
+  const contourMat = new THREE.MeshBasicMaterial({ map: contourTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const contours = new THREE.Mesh(geo, contourMat);
+  contours.visible = false;
+  contours.renderOrder = 3;
+  contours.position.y = 1.2;
+
   const ramp = [
     [0.0, [70, 95, 160]],
     [0.3, [110, 170, 190]],
@@ -138,7 +193,7 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   };
 
   return {
-    mesh, water, heat, heatTex, material, waterMat, catchment,
+    mesh, water, heat, heatTex, material, waterMat, catchment, contours,
     setCatchment(c: Uint8Array) {
       for (let i = 0; i < N * N; i++) {
         const m = c[i] / 10; // minutes

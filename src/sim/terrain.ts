@@ -1,5 +1,5 @@
 import { N, Water, Flag } from './constants';
-import { Rng, fbm } from './rng';
+import { Rng, fbm, hash2 } from './rng';
 import type { CityProfile } from './cityprofile';
 
 export type QuarterStyle = 'organic' | 'planned' | 'terraces' | 'radial' | 'rail';
@@ -28,6 +28,8 @@ export interface Grid {
   mine: { x: number; y: number } | null;
   /** roundabout centres of planned boulevards (cells) */
   rondpoints: [number, number][];
+  /** landform features for dev tools and renders: ridge crest polylines, passes (cells) and the castle hill */
+  landforms: { ridges: [number, number][][]; passes: [number, number][]; castle: { x: number; y: number } | null };
 }
 
 const NAMES = ['Saltmarsh', 'Oldbridge', 'Kestrel Hill', 'Fernway', 'Millford', 'Ashcombe', 'Holloway', 'Brindle'];
@@ -102,7 +104,7 @@ function inlandLand(seed: number, rng: Rng, kind: 'river' | 'hills' | 'plain'): 
         if (Math.hypot(xx - px, yy - y) <= hw) water[idx(xx, yy)] = Water.River;
       }
   }
-  return { water, bay: { x: N / 2, y: N * 1.4, r: 1 }, hillAmp: kind === 'hills' ? 250 : kind === 'plain' ? 9 : 40, hillPow: kind === 'hills' ? 1.1 : 1.5, hillThresh: kind === 'hills' ? 0.14 : 0.3, distGain: kind === 'hills' ? 4.8 : 1.4, ridge: kind === 'hills' ? 48 : 0 };
+  return { water, bay: { x: N / 2, y: N * 1.4, r: 1 }, hillAmp: kind === 'hills' ? 130 : kind === 'plain' ? 9 : 40, hillPow: kind === 'hills' ? 1.1 : 1.5, hillThresh: kind === 'hills' ? 0.14 : 0.3, distGain: kind === 'hills' ? 4.8 : 1.4, ridge: kind === 'hills' ? 48 : 0 };
 }
 
 function heights(seed: number, land: Land, distWater: Uint8Array): { height: Float32Array; flags: Uint8Array } {
@@ -156,11 +158,140 @@ export function generateTerrain(seed: number, rng: Rng, cp: CityProfile): Grid {
   const water = land.water;
   const distWater = distField(water);
   const { height, flags } = heights(seed, land, distWater);
+  const lf = applyLandforms(seed, cp, land, distWater, height);
   markSteep(height, water, flags);
   const road = new Uint8Array(N * N);
-  const g: Grid = { seed, height, water, distWater, road, flags, villages: [], docksCells: [], bay: land.bay, rail: [], mine: null, rondpoints: [] };
+  const g: Grid = { seed, height, water, distWater, road, flags, villages: [], docksCells: [], bay: land.bay, rail: [], mine: null, rondpoints: [], landforms: { ridges: lf.ridges, passes: lf.passes, castle: null } };
   placeSettlements(g, cp, rng);
+  markFlood(g, cp);
   return g;
+}
+
+// ------------------------------------------------------------------ landforms: ridges with passes, headlands, isolated hills, flood plains
+const sstep = (a: number, b: number, x: number) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+/**
+ * Ridge along a polyline: a bell profile across, a crest that varies along (noise) and drops at passes (saddles).
+ * Rivers cut gaps through it: the ridge fades out within ~10 cells of any water, which is also where roads and rail pass.
+ */
+function addRidge(height: Float32Array, water: Uint8Array, distWater: Uint8Array, seed: number, pts: [number, number][], halfW: number, peak: number, passes: number[]) {
+  const seg: number[] = [0];
+  for (let k = 1; k < pts.length; k++) seg.push(seg[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+  const total = seg[seg.length - 1];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = idx(x, y);
+    if (water[i]) continue;
+    let bd = 1e9, bt = 0;
+    for (let k = 1; k < pts.length; k++) {
+      const ax = pts[k - 1][0], ay = pts[k - 1][1], bx = pts[k][0], by = pts[k][1];
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1;
+      const u = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
+      const d = Math.hypot(x - (ax + dx * u), y - (ay + dy * u));
+      if (d < bd) { bd = d; bt = (seg[k - 1] + Math.sqrt(l2) * u) / total; }
+    }
+    if (bd > halfW * 2.6) continue;
+    const prof = Math.exp(-Math.pow(bd / halfW, 2) * 0.9);
+    let crest = peak * (0.72 + 0.56 * fbm(bt * 7, 1.3, seed + 21));
+    for (const ps of passes) crest *= 1 - 0.8 * Math.exp(-Math.pow((bt - ps) / 0.05, 2));
+    const rug = 0.8 + 0.4 * (1 - Math.abs(2 * fbm(x * 0.09, y * 0.09, seed + 33) - 1));
+    height[i] += crest * prof * rug * sstep(1.5, 11, distWater[i]);
+  }
+}
+
+function addBlob(height: Float32Array, water: Uint8Array, cx: number, cy: number, sigma: number, peak: number) {
+  const r = Math.ceil(sigma * 3);
+  for (let y = Math.floor(cy - r); y <= cy + r; y++) for (let x = Math.floor(cx - r); x <= cx + r; x++) {
+    if (!inb(x, y) || water[idx(x, y)]) continue;
+    const d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+    height[idx(x, y)] += peak * Math.exp(-d2 / (2 * sigma * sigma));
+  }
+}
+
+function applyLandforms(seed: number, cp: CityProfile, land: Land, distWater: Uint8Array, height: Float32Array) {
+  // a separate stream: the settlements' random draws stay as they were
+  const lr = new Rng((seed * 2654435761 + 0x1f3d5b79) >>> 0);
+  const { water } = land;
+  const ridges: [number, number][][] = [];
+  const passes: [number, number][] = [];
+  const addR = (pts: [number, number][], halfW: number, peak: number, ps: number[]) => {
+    addRidge(height, water, distWater, seed, pts, halfW, peak, ps);
+    ridges.push(pts);
+    // remember the pass positions (cells) for the metrics / dev tools
+    const seg: number[] = [0];
+    for (let k = 1; k < pts.length; k++) seg.push(seg[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+    for (const t of ps) {
+      const d = t * seg[seg.length - 1];
+      let k = 1; while (k < seg.length - 1 && seg[k] < d) k++;
+      const u = (d - seg[k - 1]) / (seg[k] - seg[k - 1] || 1);
+      passes.push([pts[k - 1][0] + (pts[k][0] - pts[k - 1][0]) * u, pts[k - 1][1] + (pts[k][1] - pts[k - 1][1]) * u]);
+    }
+  };
+  const c = N / 2;
+  if (cp.terrain === 'coast') {
+    // a mountain range inland along the north edge; the river runs through a gap
+    const y0 = lr.range(26, 34);
+    addR([[-8, y0 + lr.range(-4, 6)], [N * 0.3, y0 - 6 + lr.range(-3, 3)], [N * 0.65, y0 + lr.range(-2, 6)], [N + 8, y0 - 4 + lr.range(-4, 4)]], 9.5, 120, [lr.range(0.22, 0.4), lr.range(0.6, 0.82)]);
+    // headlands flank the bay: cliffs plunge into the sea
+    const by = land.bay.y + land.bay.r * 0.2;
+    for (const sgn of [-1, 1]) {
+      const hx = land.bay.x + sgn * (land.bay.r + lr.range(12, 18)), hy = Math.min(N - 14, by + lr.range(2, 8));
+      if (hx > 8 && hx < N - 8) addBlob(height, water, hx, hy, lr.range(5, 7), lr.range(30, 44));
+    }
+  } else if (cp.terrain === 'river') {
+    // the river valley is flanked by ridges with passes, a wide floodplain on the valley floor
+    let sx = 0, sn = 0;
+    for (let y = 0; y < N; y += 4) for (let x = 0; x < N; x++) if (water[idx(x, y)]) { sx += x; sn++; }
+    const rx = sn ? sx / sn : c;
+    for (const sgn of [-1, 1]) {
+      const xr = rx + sgn * lr.range(36, 46);
+      if (xr < 10 || xr > N - 10) continue;
+      const w = (k: number) => xr + Math.sin(k * 2.1 + sgn) * 7 + lr.range(-2, 2);
+      addR([[w(0), -8], [w(1), N * 0.3], [w(2), N * 0.65], [w(3), N + 8]], 9, 105, [lr.range(0.2, 0.4), lr.range(0.6, 0.8)]);
+    }
+  } else if (cp.terrain === 'hills') {
+    // a ridge splits the map into two basins ~22 cells from the middle, a second range far on the other side
+    const th = lr.range(0, Math.PI), nx = Math.cos(th + Math.PI / 2), ny = Math.sin(th + Math.PI / 2), dx = Math.cos(th), dy = Math.sin(th);
+    const off = lr.range(20, 26) * (lr.next() < 0.5 ? 1 : -1);
+    const bx = c + nx * off, by = c + ny * off;
+    const wob = (k: number) => Math.sin(k * 3.7 + th) * 4;
+    addR([[bx - dx * 100 + nx * wob(0), by - dy * 100 + ny * wob(0)], [bx - dx * 35 + nx * wob(1), by - dy * 35 + ny * wob(1)], [bx + dx * 35 + nx * wob(2), by + dy * 35 + ny * wob(2)], [bx + dx * 100 + nx * wob(3), by + dy * 100 + ny * wob(3)]], 7.5, 110, [lr.range(0.22, 0.34), lr.range(0.62, 0.78)]);
+    const off2 = -Math.sign(off) * lr.range(46, 54);
+    addR([[c + nx * off2 - dx * 100, c + ny * off2 - dy * 100], [c + nx * off2, c + ny * off2], [c + nx * off2 + dx * 100, c + ny * off2 + dy * 100]], 9, 120, [lr.range(0.35, 0.65)]);
+  } else {
+    // plain: one low ridge on the horizon and a couple of lookout hills
+    const th = lr.range(0, Math.PI), nx = Math.cos(th + Math.PI / 2), ny = Math.sin(th + Math.PI / 2), dx = Math.cos(th), dy = Math.sin(th);
+    const off = lr.range(34, 42) * (lr.next() < 0.5 ? 1 : -1);
+    addR([[c + nx * off - dx * 100, c + ny * off - dy * 100], [c + nx * off, c + ny * off], [c + nx * off + dx * 100, c + ny * off + dy * 100]], 11, 52, [lr.range(0.3, 0.7)]);
+    for (let k = 0; k < 2; k++) {
+      const a = lr.range(0, Math.PI * 2), r = lr.range(18, 30);
+      addBlob(height, water, c + Math.cos(a) * r, c + Math.sin(a) * r, lr.range(3.6, 5), lr.range(28, 40));
+    }
+  }
+  return { ridges, passes };
+}
+
+/** River floodplain: low land beside river water is wetland (no plots; roads cross on causeways). */
+function markFlood(g: Grid, cp: CityProfile) {
+  const riverD = new Uint8Array(N * N).fill(255);
+  const q: number[] = [];
+  for (let i = 0; i < N * N; i++) if (g.water[i] === Water.River) { riverD[i] = 0; q.push(i); }
+  for (let h = 0; h < q.length; h++) {
+    const i = q[h], x = i % N, y = (i / N) | 0;
+    if (riverD[i] >= 5) continue;
+    for (const [dx, dy] of DIR4) {
+      const nx = x + dx, ny = y + dy;
+      if (!inb(nx, ny)) continue;
+      const j = idx(nx, ny);
+      if (riverD[j] > riverD[i] + 1) { riverD[j] = riverD[i] + 1; q.push(j); }
+    }
+  }
+  const band = cp.terrain === 'river' ? 3.2 : 2.1;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = idx(x, y);
+    if (g.water[i] || riverD[i] > 5 || (g.flags[i] & (Flag.Docks | Flag.Steep | Flag.Rail))) continue;
+    if (g.villages.some((v) => Math.hypot(v.x - x, v.y - y) < 4.5)) continue;
+    if (riverD[i] <= band + (fbm(x * 0.15, y * 0.15, g.seed + 61) - 0.5) * 1.8 && g.height[i] < 9) g.flags[i] |= Flag.Flood;
+  }
 }
 
 // ------------------------------------------------------------------ settlements: the origin first, then older villages, then later layers
@@ -255,6 +386,43 @@ function placeSettlements(g: Grid, cp: CityProfile, rng: Rng) {
       return -Math.abs(minD - 40) * 0.3 - distWater[i] * 0.2 + rng.next() * 6;
     }, 12, N - 12, 12, N - 12);
     if (bi >= 0) add(bi, 'village', cp.origin === 'mining' ? 'terraces' : cp.origin === 'planned-capital' ? 'organic' : 'organic');
+  }
+
+  // ---- hill country: a ridge rises between the old town and its nearest neighbour, splitting the city into two basins (a pass or a tunnel joins them)
+  if (cp.terrain === 'hills' && g.villages.length >= 2) {
+    const o = g.villages[0];
+    const nb = g.villages.slice(1).sort((a, b) => Math.hypot(a.x - o.x, a.y - o.y) - Math.hypot(b.x - o.x, b.y - o.y))[0];
+    const dx = nb.x - o.x, dy = nb.y - o.y, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+    const t0 = 0.42 + hash2(g.seed, 3, 9) * 0.16;
+    const mx = o.x + dx * t0, my = o.y + dy * t0;
+    const px = -uy, py = ux;
+    const bend = (k: number) => Math.sin(k * 2.9 + g.seed) * 3.5;
+    const pts: [number, number][] = [[mx - px * 90 + ux * bend(0), my - py * 90 + uy * bend(0)], [mx - px * 30 + ux * bend(1), my - py * 30 + uy * bend(1)], [mx + px * 30 + ux * bend(2), my + py * 30 + uy * bend(2)], [mx + px * 90 + ux * bend(3), my + py * 90 + uy * bend(3)]];
+    const passAt = 0.5 + (hash2(g.seed, 5, 9) < 0.5 ? -1 : 1) * (0.2 + 0.1 * hash2(g.seed, 6, 9));   // the pass lies 35-55 cells to the side of the direct line
+    addRidge(height, water, distWater, g.seed, pts, 6.5, 120, [passAt]);
+    g.landforms.ridges.push(pts);
+    // pass position (cells)
+    const seg = [0]; for (let k = 1; k < pts.length; k++) seg.push(seg[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+    const d = passAt * seg[seg.length - 1]; let kk = 1; while (kk < seg.length - 1 && seg[kk] < d) kk++;
+    const u = (d - seg[kk - 1]) / (seg[kk] - seg[kk - 1] || 1);
+    g.landforms.passes.push([pts[kk - 1][0] + (pts[kk][0] - pts[kk - 1][0]) * u, pts[kk - 1][1] + (pts[kk][1] - pts[kk - 1][1]) * u]);
+    markSteep(height, water, flags);
+  }
+
+  // ---- a castle hill beside the old town (steep, wooded; the street plan bends round it)
+  if (g.villages[0] && (cp.origin === 'market-town' || cp.origin === 'port' || cp.origin === 'rail-junction') && hash2(g.seed, 17, 5) < 0.75) {
+    const o = g.villages[0];
+    const ci = bestCell((x, y, i) => {
+      const d = Math.hypot(x - o.x, y - o.y);
+      if (d < 6 || d > 10 || distWater[i] < 5 || !farFrom(x, y, 7) || openness(x, y, 3) < 0.6) return null;
+      return -Math.abs(d - 8) - height[i] * 0.05 + hash2(x, y, g.seed + 3) * 3;
+    }, 10, N - 10, 10, N - 10);
+    if (ci >= 0) {
+      const cx = ci % N, cy = (ci / N) | 0;
+      addBlob(height, water, cx, cy, 2.9, 36);
+      g.landforms.castle = { x: cx, y: cy };
+      markSteep(height, water, flags);
+    }
   }
 
   // ---- later layers add quarters on top

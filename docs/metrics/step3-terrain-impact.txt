@@ -1,0 +1,46 @@
+== 1. cost per km by construction type
+   cut-and-cover  $11M/km
+   bored tunnel   $30M/km
+   viaduct        $19M/km
+   under water    $34M/km
+   grade limit 4%, deepest station 45 m, +$0.14M per metre of depth, +0.03 min walk per metre of depth
+-- coast/port
+   village 0 -> 1: 2.0 km, $50M ($25M/km), deepest station 7 m, steepest grade 4.0%; 0.9 km cut-and-cover, 1.2 km under water
+   village 0 -> 2: 2.0 km, $22M ($11M/km), deepest station 0 m, steepest grade 1.2%; 2.0 km cut-and-cover
+-- river/port
+   village 0 -> 1: 2.1 km, $23M ($11M/km), deepest station 0 m, steepest grade 0.7%; 2.1 km cut-and-cover
+   village 0 -> 2: 2.1 km, $23M ($11M/km), deepest station 0 m, steepest grade 0.6%; 2.1 km cut-and-cover
+-- hills/port
+   village 0 -> 1: 2.0 km, $37M ($19M/km), deepest station 0 m, steepest grade 2.7%; 1.1 km cut-and-cover, 0.3 km bored tunnel, 0.3 km viaduct, 0.3 km under water
+   village 0 -> 2: 1.9 km, $55M ($30M/km), deepest station 38 m, steepest grade 4.0%; 0.6 km cut-and-cover, 0.8 km bored tunnel, 0.2 km viaduct, 0.2 km under water
+-- plain/port
+   village 0 -> 1: 2.1 km, $29M ($14M/km), deepest station 14 m, steepest grade 4.0%; 1.9 km cut-and-cover, 0.2 km bored tunnel
+   village 0 -> 2: 2.0 km, $26M ($13M/km), deepest station 0 m, steepest grade 3.2%; 1.5 km cut-and-cover, 0.5 km viaduct
+
+== 2. walk catchment (8 minutes over the street network): hilltop station vs flat station
+   hills: hilltop (26,87) slope 9.9% height 9 m: 0.37 km2, 69 plots served;  flat (8,78) slope 2.6%: 0.45 km2, 139 plots served  (hilltop = 83% of flat)
+   coast: hilltop (80,109) slope 13.1% height 28 m: 0.43 km2, 85 plots served;  flat (75,99) slope 1.1%: 0.81 km2, 362 plots served  (hilltop = 53% of flat)
+
+== 3. ridge splits the city (hills terrain): line 1 inside the origin basin, with / without line 2 = a tunnel (or viaduct) line from the origin across the ridge into the second basin
+   line 2 is opened at month 24 together with line 1; numbers at month 36 and 60. 'far basin' = cells nearer the far village than the origin.
+   seed 4821: ridge climb 45 m; line 1 2.0 km (1.1/0.3/0.3/0.3 km cc/bored/viaduct/water), deepest station 0 m; line 2 1.9 km (0.6/0.8/0.2/0.2 km cc/bored/viaduct/water), deepest station 38 m; extra build cost $76M
+      m36: trips/day 2029 -> 2453 (21%), far-basin population 1332 -> 1472
+      m60: trips/day 5200 -> 5045 (-3%), far-basin population 823 -> 1472
+   seed 57: ridge climb 40 m; line 1 1.7 km (1.4/0.1/0.0/0.1 km cc/bored/viaduct/water), deepest station 6 m; line 2 1.8 km (0.6/0.4/0.8/0.1 km cc/bored/viaduct/water), deepest station 3 m; extra build cost $61M
+      m36: trips/day 625 -> 1467 (135%), far-basin population 1962 -> 1985
+      m60: trips/day 3212 -> 4168 (30%), far-basin population 1592 -> 2180
+   seed 83: ridge climb 55 m; line 1 1.4 km (0.9/0.3/0.2/0.0 km cc/bored/viaduct/water), deepest station 0 m; line 2 2.0 km (0.4/0.6/1.0/0.0 km cc/bored/viaduct/water), deepest station 9 m; extra build cost $66M
+      m36: trips/day 2740 -> 4199 (53%), far-basin population 685 -> 708
+      m60: trips/day 4223 -> 6822 (62%), far-basin population 626 -> 646
+   seed 252: skipped (line 1 not buildable, tunnel line not buildable (grade / depth limit))
+   seed 369: skipped (line 1 not buildable, tunnel line not buildable (grade / depth limit))
+   seed 421: ridge climb 14 m; line 1 2.0 km (1.6/0.0/0.2/0.2 km cc/bored/viaduct/water), deepest station 8 m; line 2 1.7 km (1.3/0.0/0.3/0.0 km cc/bored/viaduct/water), deepest station 0 m; extra build cost $42M
+      m36: trips/day 3146 -> 3786 (20%), far-basin population 219 -> 232
+      m60: trips/day 6958 -> 5959 (-14%), far-basin population 219 -> 554
+   seed 11: ridge climb 17 m; line 1 2.0 km (1.5/0.0/0.1/0.4 km cc/bored/viaduct/water), deepest station 0 m; line 2 2.0 km (0.7/0.7/0.2/0.3 km cc/bored/viaduct/water), deepest station 11 m; extra build cost $69M
+      m36: trips/day 2162 -> 3219 (49%), far-basin population 317 -> 317
+      m60: trips/day 4882 -> 5109 (5%), far-basin population 306 -> 317
+   seed 23: ridge climb 36 m; line 1 1.9 km (1.3/0.0/0.6/0.0 km cc/bored/viaduct/water), deepest station 0 m; line 2 1.7 km (0.6/0.8/0.4/0.0 km cc/bored/viaduct/water), deepest station 19 m; extra build cost $63M
+      m36: trips/day 1452 -> 2799 (93%), far-basin population 193 -> 193
+      m60: trips/day 2299 -> 4580 (99%), far-basin population 193 -> 221
+   mean over 6 seeds at month 60: mean change in transit trips/day 30%, mean far-basin population 627 -> 898

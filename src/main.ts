@@ -36,12 +36,12 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   if (m.type === 'init') {
     init = m;
     terrain = buildTerrain(m.height, m.water, m.flags);
-    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment);
+    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours);
     city = new CityView(m.water, m.flags, m.villages, (x, z) => terrain!.sample(x, z), m);
     env.scene.add(city.group);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
     env.scene.add(metro.group);
-    planner = new Planner(send, m.water);
+    planner = new Planner(send, { height: m.height, water: m.water });
     const vx = m.villages.reduce((a, v) => a + v.x, 0) / m.villages.length;
     const vy = m.villages.reduce((a, v) => a + v.y, 0) / m.villages.length;
     env.focus((vx + 0.5) * CELL, (vy + 0.5) * CELL, 3600);
@@ -80,20 +80,21 @@ hud.handlers.onTool = (t) => {
     c.screenSpacePanning = true;
     metro?.setPlan(true);
     if (terrain && state) { terrain.setCatchment(state.catchment); terrain.catchment.visible = true; }
+    if (terrain) terrain.contours.visible = true;
   } else {
     c.enableRotate = true;
     c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     c.screenSpacePanning = false;
     if (savedView) flyTo(savedView.pos, savedView.target);
     metro?.setPlan(false);
-    if (terrain) terrain.catchment.visible = false;
+    if (terrain) { terrain.catchment.visible = false; terrain.contours.visible = hud.toggles.heat; }
     planner?.cancel();
     metro?.setCursor(null);
   }
   refreshPlan();
 };
 hud.handlers.onToggle = (name, on) => {
-  if (name === 'heat' && terrain) { terrain.heat.visible = on; if (on && state && init) terrain.setHeat(state.lv, init.water); }
+  if (name === 'heat' && terrain) { terrain.heat.visible = on; terrain.contours.visible = on || hud.tool === 'plan'; if (on && state && init) terrain.setHeat(state.lv, init.water); }
   if (name === 'xray') xrayTarget = on ? 1 : 0;
   if (name === 'night') { nightTarget = on ? 1 : 0; fastDawn = !on; }
   if (name === 'desire') { desire.group.visible = on; if (on && state) desire.update(state.desire); }
@@ -117,7 +118,7 @@ function flyTo(pos: THREE.Vector3, target: THREE.Vector3) {
 function refreshPlan() {
   if (!state || !planner || !metro) return;
   if (hud.tool !== 'plan') { hud.hint(null); metro.draft([], null, '#000'); return; }
-  metro.draft(planner.points(state), planner.hover, planner.color(state));
+  metro.draft(planner.points(state), planner.hover, planner.color(state), planner.profile(state, true));
   hud.hint(planner.hint(state));
 }
 

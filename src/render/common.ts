@@ -1,7 +1,7 @@
 import { N, CELL } from '../sim/constants';
 
 /** Vertical exaggeration for terrain relief. */
-export const VS = 1.6;
+export const VS = 2.3;
 export const MAP = N * CELL;
 
 export function cellCenter(x: number, y: number): [number, number] {

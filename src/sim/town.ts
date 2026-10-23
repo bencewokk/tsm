@@ -328,7 +328,7 @@ function openness(c: TownCtx, x: number, y: number, r: number): number {
     if (cx < 0 || cy < 0 || cx >= N || cy >= N) continue;
     tot++;
     const i = cy * N + cx;
-    if (!c.g.water[i] && !(c.g.flags[i] & Flag.Steep) && !c.g.road[i]) open++;
+    if (!c.g.water[i] && !(c.g.flags[i] & (Flag.Steep | Flag.Flood)) && !c.g.road[i]) open++;
   }
   return tot ? open / tot : 0;
 }
@@ -346,7 +346,8 @@ function bestHeading(c: TownCtx, x: number, y: number, base: number, len: number
       const i = cy * N + cx, i0 = Math.floor(y) * N + Math.floor(x);
       if (c.g.water[i]) cost += 50;
       if (c.g.flags[i] & Flag.Steep) cost += 20;
-      cost += Math.abs(c.g.height[i] - c.g.height[i0]) * 0.12; // prefer following contours
+      if (c.g.flags[i] & Flag.Flood) cost += 3;
+      cost += Math.abs(c.g.height[i] - c.g.height[i0]) * 0.16; // prefer following contours (valleys and flanks), not climbing
     }
     if (cost < bc) { bc = cost; best = a; }
   }
@@ -438,7 +439,7 @@ export function densify(c: TownCtx, f: GrowthField, roadDist: Uint8Array, ops: n
     let bestCell = -1, bs = -Infinity;
     for (let k = 0; k < 90; k++) {
       const i = Math.floor(rng.next() * N * N);
-      if (g.water[i] || (g.flags[i] & Flag.Steep) || roadDist[i] < 2 || roadDist[i] > 4) continue;
+      if (g.water[i] || (g.flags[i] & (Flag.Steep | Flag.Flood)) || roadDist[i] < 2 || roadDist[i] > 4) continue;
       const x = (i % N) + 0.5, y = ((i / N) | 0) + 0.5;
       const s = f.lvAt(x, y) + f.stationPull(x, y) * 0.8 + rng.next() * 0.1;
       if (s > bs) { bs = s; bestCell = i; }

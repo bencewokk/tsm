@@ -115,7 +115,7 @@ export class LotStore {
       const gx = Math.floor(px), gy = Math.floor(py);
       if (gx < 1 || gy < 1 || gx >= N - 1 || gy >= N - 1) return false;
       const i = gy * N + gx;
-      if (this.water[i] || (this.flags[i] & (Flag.Steep | Flag.Rail))) return false;
+      if (this.water[i] || (this.flags[i] & (Flag.Steep | Flag.Rail | Flag.Flood))) return false;
     }
     // keep clear of every carriageway
     const g = this.roads;

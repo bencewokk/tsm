@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { N, CELL, Flag, BT } from '../sim/constants';
 import type { StateMsg, LotsMsg, RoadsMsg } from '../sim/protocol';
 import type { Village } from '../sim/terrain';
-import { vhash } from './common';
+import { vhash, VS } from './common';
 import { patchBuildingMaterial } from './look';
 import { Layer, unitGeos } from './layers';
 import { kindOf, SITE, PAL, type Kind } from './forms';
@@ -586,10 +586,16 @@ export class CityView {
     for (let i = 0; i < N * N; i++) {
       if (this.water[i]) continue;
       if (this.flags[i] & Flag.Docks) continue;
-      const steep = (s.flags[i] & Flag.Steep) !== 0;
-      const r0 = vhash(i, 77);
-      const want = r0 < (steep ? 0.85 : 0.16) ? (steep ? 3 : 1) + Math.floor(vhash(i, 78) * 3) : 0;
+      const flood = (s.flags[i] & Flag.Flood) !== 0;
       const cx = (i % N) * CELL, cz = ((i / N) | 0) * CELL;
+      // slope (m per m) from the terrain surface: woods on the flanks, thin willows on wetland, bare above the tree line
+      const mx = cx + CELL / 2, mz = cz + CELL / 2;
+      const gl = (this.sample(mx + CELL, mz) - this.sample(mx - CELL, mz)) / (2 * CELL * VS), gm = (this.sample(mx, mz + CELL) - this.sample(mx, mz - CELL)) / (2 * CELL * VS);
+      const slope = Math.hypot(gl, gm), hm = this.sample(mx, mz) / VS;
+      const tree = hm > 125 ? 0 : hm > 95 ? 0.3 : 1;
+      const steep = ((s.flags[i] & Flag.Steep) !== 0 || slope > 0.1) && hm > 4;
+      const r0 = vhash(i, 77);
+      const want = flood ? (r0 < 0.12 ? 1 : 0) : tree * (steep ? 1 : 0.4 + (slope > 0.06 ? 0.4 : 0)) > 0 && r0 < (steep ? 0.85 : slope > 0.06 ? 0.45 : 0.16) * tree ? (steep ? 3 : 1) + Math.floor(vhash(i, 78) * 3) : 0;
       for (let k = 0; k < want; k++) {
         const x = cx + vhash(i, 90 + k) * CELL, z = cz + vhash(i, 100 + k) * CELL;
         const gx = Math.floor(x / 12.5), gz = Math.floor(z / 12.5);

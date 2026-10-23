@@ -21,6 +21,10 @@ export function testLine(sim: Sim) {
       if (sim.metro.stations.length > before) { ids.push(sim.metro.stations[before].id); ok = true; }
     }
   }
-  sim.apply({ type: 'buildLine', stations: ids });
+  // terrain and money limit what can be built: take the longest prefix of the chain the sim accepts (grade / depth limit, budget)
+  for (let n = ids.length; n >= 2; n--) {
+    const q = sim.metro.quote(ids.slice(0, n));
+    if (q.ok && q.cost + 2 * 2e6 <= sim.money) { sim.apply({ type: 'buildLine', stations: ids.slice(0, n) }); return; }
+  }
 }
 

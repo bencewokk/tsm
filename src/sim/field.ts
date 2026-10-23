@@ -26,6 +26,7 @@ export const FIELD = {
   noAccess: 0.3,       // share of the height potential kept with no station at all
   noJobs: 0.3,
   level2: 12, level3: 24,   // metres of allowed height that unlock level 2 / level 3 buildings
+  slopeFull: 0.05, slopeZero: 0.17,  // gradient (m per m) with no limit / with the strongest limit on density
 };
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -59,7 +60,7 @@ export class DensityField {
           const x = Math.floor(px + dx), y = Math.floor(py + dy);
           if (x < 1 || y < 1 || x >= N - 1 || y >= N - 1 || dx * dx + dy * dy > 10) continue;
           const i = y * N + x;
-          if (!sim.g.water[i] && !(sim.g.flags[i] & (Flag.Steep | Flag.Docks))) free++;
+          if (!sim.g.water[i] && !(sim.g.flags[i] & (Flag.Steep | Flag.Docks | Flag.Flood))) free++;
         }
         if (free > bs) { bs = free; best = { x: px, y: py }; }
       }
@@ -90,9 +91,11 @@ export class DensityField {
       this.acc[i] = a;
       const cc = Math.max(c, 0.4 * a);                       // transit corridors read as centres of their own
       const hp = Math.pow(cc, 0.8) * (FIELD.noAccess + (1 - FIELD.noAccess) * a) * (FIELD.noJobs + (1 - FIELD.noJobs) * this.jc[i]);
-      this.hmax[i] = FIELD.hBase + FIELD.hRange * Math.pow(clamp(hp, 0, 1), FIELD.hPow);
+      // slopes limit height: full allowance up to a 5% gradient, a third of it on 17% ground (views raise value, never density)
+      const slopeF = clamp(1 - (sim.slope[i] - FIELD.slopeFull) / (FIELD.slopeZero - FIELD.slopeFull) * 0.7, 0.3, 1);
+      this.hmax[i] = (FIELD.hBase + FIELD.hRange * Math.pow(clamp(hp, 0, 1), FIELD.hPow)) * slopeF;
       const lvT = clamp((sim.lvS[i] - 0.3) / 0.5, 0, 1);
-      this.F[i] = clamp(0.5 * cc + 0.2 * this.jc[i] + 0.2 * a + 0.2 * lvT, 0, 1);
+      this.F[i] = clamp(0.5 * cc + 0.2 * this.jc[i] + 0.2 * a + 0.2 * lvT, 0, 1) * (0.55 + 0.45 * slopeF);
     }
   }
 

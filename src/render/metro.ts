@@ -2,8 +2,12 @@ import * as THREE from 'three';
 import type { StateMsg, StationInfo } from '../sim/protocol';
 import { CELL } from '../sim/constants';
 import { unitGeos } from './layers';
+import { VS } from './common';
+import { SEG_NAMES, type LineQuote } from '../sim/relief';
 
-export const TUNNEL_Y = -42;
+/** Platforms and tunnels sit this far below the track elevation (world units) so the x-ray view shows a clear cover. */
+export const UNDER = 30;
+const SEG_COL = ['', '#3a4049', '#e08a2c', '#2f6fb0'];
 
 /** Metro visuals: surface ribbons (map layer), stations, tunnels (x-ray) and trains. */
 export class MetroView {
@@ -29,7 +33,7 @@ export class MetroView {
     white: new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }),
     glass: new THREE.MeshStandardMaterial({ color: 0xa9c8d8, roughness: 0.15, metalness: 0.35, transparent: true, opacity: 0.72, side: THREE.DoubleSide, emissive: 0x7fa8bf, emissiveIntensity: 0.12 }),
   };
-  private paths: { color: THREE.Color; pts: THREE.Vector3[]; len: number[]; total: number; trains: number }[] = [];
+  private paths: { color: THREE.Color; pts: THREE.Vector3[]; ty: number[]; len: number[]; total: number; trains: number }[] = [];
   private m = new THREE.Matrix4();
   private q = new THREE.Quaternion();
   private v = new THREE.Vector3();
@@ -55,7 +59,7 @@ export class MetroView {
   private surf(x: number, z: number) { return Math.max(0.4, this.sample(x, z)); }
 
   /** Terrain-following ribbon between world points. */
-  private ribbon(pts: THREE.Vector3[], width: number, mat: THREE.Material, lift: number): THREE.Mesh {
+  private ribbon(pts: THREE.Vector3[], width: number, mat: THREE.Material, lift: number, track?: (x: number, z: number) => number): THREE.Mesh {
     const pos: number[] = [];
     const idx: number[] = [];
     let base = 0;
@@ -68,7 +72,7 @@ export class MetroView {
       for (let j = 0; j <= steps; j++) {
         const t = j / steps;
         const x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
-        const y = this.surf(x, z) + lift;
+        const y = (track ? Math.max(this.surf(x, z), track(x, z)) : this.surf(x, z)) + lift;
         pos.push(x + nx, y, z + nz, x - nx, y, z - nz);
         if (j > 0) { const o = base + (j - 1) * 2; idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2); }
       }
@@ -123,17 +127,30 @@ export class MetroView {
       });
       const mat = new THREE.MeshBasicMaterial({ color: l.color, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide });
       this.ribbonMats.push(mat);
-      this.ribbons.add(this.ribbon(shifted, 12, mat, 3));
-      // tunnels
+      // track elevation along the line: linear between the stations (the sim's vertical profile), in world units
+      const sx = l.stations.map((id) => byId.get(id)!.x * CELL), sz = l.stations.map((id) => byId.get(id)!.y * CELL);
+      const track = (x: number, z: number) => {
+        let bd = 1e18, be = 0;
+        for (let k = 1; k < sx.length; k++) {
+          const dx = sx[k] - sx[k - 1], dz = sz[k] - sz[k - 1], l2 = dx * dx + dz * dz || 1;
+          const u = Math.max(0, Math.min(1, ((x - sx[k - 1]) * dx + (z - sz[k - 1]) * dz) / l2));
+          const d = (x - sx[k - 1] - dx * u) ** 2 + (z - sz[k - 1] - dz * u) ** 2;
+          if (d < bd) { bd = d; be = (l.elev[k - 1] + (l.elev[k] - l.elev[k - 1]) * u) * VS; }
+        }
+        return be;
+      };
+      this.ribbons.add(this.ribbon(shifted, 12, mat, 3, track));
+      this.addViaducts(shifted, track, l.color);
+      // tunnels: follow the vertical profile, so a bored tunnel runs level under a hill and a deep station sits deep
       const tmat = new THREE.MeshStandardMaterial({ color: l.color, emissive: l.color, emissiveIntensity: 0.35, roughness: 0.6 });
-      const tpts = pts.map((p) => new THREE.Vector3(p.x, TUNNEL_Y - li * 6, p.z));
+      const tpts = pts.map((p) => new THREE.Vector3(p.x, track(p.x, p.z) - UNDER - li * 6, p.z));
       const curve = new THREE.CatmullRomCurve3(tpts, false, 'centripetal');
       const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(16, tpts.length), 6, 8, false), tmat);
       this.under.add(tube);
       const lens: number[] = [];
       let total = 0;
       for (let k = 1; k < pts.length; k++) { const d = pts[k].distanceTo(pts[k - 1]); lens.push(d); total += d; }
-      this.paths.push({ color: new THREE.Color('#ffffff').lerp(new THREE.Color(l.color), 0.35), pts: shifted, len: lens, total, trains: l.trains });
+      this.paths.push({ color: new THREE.Color('#ffffff').lerp(new THREE.Color(l.color), 0.35), pts: shifted, ty: shifted.map((p) => track(p.x, p.z)), len: lens, total, trains: l.trains });
       for (const id of l.stations) if (!stationColor.has(id)) stationColor.set(id, l.color);
       l.stations.forEach((id, k) => {
         if (stationDir.has(id)) return;
@@ -146,6 +163,32 @@ export class MetroView {
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
     for (const st of s.stations) this.addStation(st, stationColor.get(st.id) ?? '#8a8f96', pav, boxGeo, stationDir.get(st.id) ?? 0);
     this.setPlan(this.plan);
+  }
+
+  /** Raised deck on piers where the track runs well above the ground (a viaduct across a valley). */
+  private addViaducts(pts: THREE.Vector3[], track: (x: number, z: number) => number, color: string) {
+    const deckMat = new THREE.MeshStandardMaterial({ color: 0xcfc8ba, roughness: 0.9 });
+    const stripe = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+    const box = new THREE.BoxGeometry(1, 1, 1);
+    for (let k = 1; k < pts.length; k++) {
+      const a = pts[k - 1], b = pts[k];
+      const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+      const ty = track(mx, mz), gy = this.surf(mx, mz);
+      if (ty - gy < 5 * VS) continue;
+      const len = Math.hypot(b.x - a.x, b.z - a.z);
+      const ang = Math.atan2(b.x - a.x, b.z - a.z);
+      const deck = new THREE.Mesh(box, deckMat);
+      deck.scale.set(16, 3.2, len + 1); deck.position.set(mx, ty - 1.2, mz); deck.rotation.y = ang; deck.castShadow = true; deck.receiveShadow = true;
+      const edge = new THREE.Mesh(box, stripe);
+      edge.scale.set(16.4, 0.8, len + 1); edge.position.set(mx, ty + 0.6, mz); edge.rotation.y = ang;
+      this.ribbons.add(deck, edge);
+      if (k % 2 === 0) {
+        const h = ty - 2.8 - gy;
+        const pier = new THREE.Mesh(box, deckMat);
+        pier.scale.set(5, h, 5); pier.position.set(mx, gy + h / 2, mz); pier.rotation.y = ang; pier.castShadow = true;
+        this.ribbons.add(pier);
+      }
+    }
   }
 
   private addStation(st: StationInfo, color: string, pav: THREE.Material, boxGeo: THREE.BufferGeometry, dir: number) {
@@ -214,11 +257,12 @@ export class MetroView {
     // underground hall + shaft (x-ray)
     const hall = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: 0xf4efe4, emissive: color, emissiveIntensity: 0.15 }));
     hall.scale.set(90, 16, 34);
-    hall.position.set(p.x, TUNNEL_Y, p.z);
+    const hallY = y - st.depth * VS - UNDER;
+    hall.position.set(p.x, hallY, p.z);
     this.under.add(hall);
     const shaft = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: 0xe8e2d4, transparent: true, opacity: 0.8 }));
-    shaft.scale.set(10, y - TUNNEL_Y, 10);
-    shaft.position.set(p.x + 30, (y + TUNNEL_Y) / 2, p.z);
+    shaft.scale.set(10, y - hallY, 10);
+    shaft.position.set(p.x + 30, (y + hallY) / 2, p.z);
     this.under.add(shaft);
   }
 
@@ -236,16 +280,64 @@ export class MetroView {
     for (const m of this.ribbonMats) m.opacity = (this.plan ? 0.9 : 0.6) * (1 - v * 0.8);
   }
 
-  draft(points: { x: number; y: number }[], hover: { x: number; y: number } | null, color: string) {
-    this.draftGroup.traverse((o) => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
+  draft(points: { x: number; y: number }[], hover: { x: number; y: number } | null, color: string, q: LineQuote | null = null) {
+    this.draftGroup.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.geometry) m.geometry.dispose();
+      const mat = (m as { material?: THREE.Material & { map?: THREE.Texture } }).material;
+      if (mat?.map) mat.map.dispose();
+    });
     this.draftGroup.clear();
     const raw = points.map((p) => this.stationXZ(p));
     if (hover && raw.length) raw.push(this.stationXZ(hover));
-    const pts = this.smooth(raw.filter((p, k) => k === 0 || p.distanceTo(raw[k - 1]) > 1));
+    const kept = raw.filter((p, k) => k === 0 || p.distanceTo(raw[k - 1]) > 1);
+    if (kept.length < 2) return;
+    if (q && q.segs.length === kept.length - 1) {
+      // straight preview segments coloured by construction type; red where the profile is impossible
+      const bad = (k: number) => !q.ok && (q.badStation === k || q.badStation === k + 1);
+      q.segs.forEach((sg, k) => {
+        const col = bad(k) ? '#d03a2a' : sg.dominant === 0 ? color : SEG_COL[sg.dominant];
+        const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+        this.draftGroup.add(this.ribbon([kept[k], kept[k + 1]], 22, mat, 4));
+        // label at the midpoint: construction type, length, cost, grade
+        const a = kept[k], b = kept[k + 1];
+        const main = SEG_NAMES[sg.dominant];
+        const txt = `${main} ${sg.km.toFixed(1)} km  $${(sg.cost / 1e6).toFixed(0)}M  ${(Math.abs(sg.grade) * 100).toFixed(1)}%`;
+        const lab = this.label(txt, bad(k) ? '#d03a2a' : '#2c2f33');
+        lab.position.set((a.x + b.x) / 2, this.surf((a.x + b.x) / 2, (a.z + b.z) / 2) + 40, (a.z + b.z) / 2);
+        this.draftGroup.add(lab);
+      });
+      kept.forEach((p, k) => {
+        if (q.depth[k] > 6) {
+          const lab = this.label(`${q.depth[k].toFixed(0)} m deep`, '#2c2f33');
+          lab.position.set(p.x, this.surf(p.x, p.z) + 70, p.z);
+          this.draftGroup.add(lab);
+        }
+      });
+      return;
+    }
+    const pts = this.smooth(kept);
     if (pts.length >= 2) {
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
       this.draftGroup.add(this.ribbon(pts, 22, mat, 4));
     }
+  }
+
+  /** Small text label (canvas sprite), drawn over everything. */
+  private label(text: string, ink: string): THREE.Sprite {
+    const cv = document.createElement('canvas');
+    cv.width = 512; cv.height = 72;
+    const g = cv.getContext('2d')!;
+    g.fillStyle = 'rgba(250,247,240,0.92)';
+    g.beginPath(); g.roundRect(2, 6, 508, 60, 14); g.fill();
+    g.strokeStyle = ink; g.lineWidth = 2; g.stroke();
+    g.fillStyle = ink; g.font = '600 30px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(text, 256, 37);
+    const tex = new THREE.CanvasTexture(cv);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+    sp.scale.set(560, 79, 1);
+    sp.renderOrder = 30;
+    return sp;
   }
 
   setCursor(cell: { x: number; y: number } | null, ok = true) {
@@ -270,7 +362,8 @@ export class MetroView {
         const a = p.pts[seg], b = p.pts[seg + 1];
         const t = Math.min(1, d / p.len[seg]);
         const x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
-        const y = this.xray > 0.5 ? TUNNEL_Y : this.surf(x, z) + 7;
+        const ty = p.ty[seg] + (p.ty[seg + 1] - p.ty[seg]) * t;
+        const y = this.xray > 0.5 ? ty - UNDER : Math.max(this.surf(x, z), ty) + 7;
         const ang = Math.atan2(b.x - a.x, b.z - a.z);
         this.v.set(x + (fwd ? 4 : -4) * Math.cos(ang), y, z - (fwd ? 4 : -4) * Math.sin(ang));
         this.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ang);

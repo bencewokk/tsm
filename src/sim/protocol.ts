@@ -16,7 +16,7 @@ export interface InitMsg {
   profiles: import('./profiles').DistrictProfile[];
 }
 
-export interface StationInfo { id: number; x: number; y: number; name: string; riders: number; underwater: boolean }
+export interface StationInfo { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; depth: number }
 export interface LineInfo {
   id: number;
   color: string;
@@ -28,7 +28,9 @@ export interface LineInfo {
   peakLoad: number;    // passengers per hour on busiest segment
   rating: number;      // 0..100
   lengthKm: number;
-  segLoad: number[];   // peak-hour load per segment (both directions summed / 2)
+  segLoad: number[];
+  by: number[];        // km by construction type: cut-and-cover, bored tunnel, viaduct, under water
+  elev: number[];      // track elevation at each station (m)   // peak-hour load per segment (both directions summed / 2)
 }
 
 export interface Stats {

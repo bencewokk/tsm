@@ -192,7 +192,7 @@ export class AssemblySystem {
       const [px, py] = P(u, v), gx = Math.floor(px), gy = Math.floor(py);
       if (gx < 1 || gy < 1 || gx >= N - 1 || gy >= N - 1) return null;
       const i = gy * N + gx;
-      if (this.sim.g.water[i] || (this.sim.g.flags[i] & (Flag.Steep | Flag.Rail))) return null;
+      if (this.sim.g.water[i] || (this.sim.g.flags[i] & (Flag.Steep | Flag.Rail | Flag.Flood))) return null;
     }
     const members: Lot[] = [];
     for (const o of lots.near(cx, cy, Math.max(w, d) + 0.8)) {

@@ -61,7 +61,7 @@ export class LandmarkSystem {
       const cand: { x: number; y: number; d: number }[] = [];
       for (let y = 2; y < N - 2; y++) for (let x = 2; x < N - 2; x++) {
         const i = y * N + x;
-        if (g.water[i] || g.distWater[i] < 2 || g.distWater[i] > 3 || (g.flags[i] & (Flag.Steep | Flag.Docks))) continue;
+        if (g.water[i] || g.distWater[i] < 2 || g.distWater[i] > 3 || (g.flags[i] & (Flag.Steep | Flag.Docks | Flag.Flood))) continue;
         const d = Math.hypot(x - o.x, y - o.y);
         if (d < 4 || d > 34) continue;
         cand.push({ x: x + 0.5, y: y + 0.5, d });
@@ -72,7 +72,7 @@ export class LandmarkSystem {
       const cand: { x: number; y: number; h: number }[] = [];
       for (let y = 3; y < N - 3; y++) for (let x = 3; x < N - 3; x++) {
         const i = y * N + x;
-        if (g.water[i] || (g.flags[i] & (Flag.Steep | Flag.Docks))) continue;
+        if (g.water[i] || (g.flags[i] & (Flag.Steep | Flag.Docks | Flag.Flood))) continue;
         const d = Math.hypot(x - o.x, y - o.y);
         if (d > 30) continue;
         cand.push({ x: x + 0.5, y: y + 0.5, h: g.height[i] - d * 0.15 });

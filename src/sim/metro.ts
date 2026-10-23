@@ -1,6 +1,7 @@
-import { N, CELL, METRO_SPEED, TRAIN_CAP, LINE_COLORS, segmentCost } from './constants';
+import { N, CELL, METRO_SPEED, TRAIN_CAP, LINE_COLORS } from './constants';
+import { quoteLine, type Terr, type LineQuote } from './relief';
 
-export interface Station { id: number; x: number; y: number; name: string; riders: number; underwater: boolean }
+export interface Station { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; /** metres below ground level of the platforms (deep stations cost more and add access time) */ depth: number }
 export interface Line {
   id: number;
   color: string;
@@ -9,6 +10,10 @@ export interface Line {
   segTime: number[];       // minutes per segment (incl. dwell)
   lengthKm: number;
   wetKm: number;
+  /** km by construction type: cut-and-cover, bored tunnel, viaduct, under water */
+  by: number[];
+  /** track elevation (m above datum) at each station */
+  elev: number[];
   headway: number;
   capacity: number;        // pax / hour / direction
   riders: number;          // boardings / day
@@ -25,6 +30,8 @@ const NAMES = ['Harbour', 'Market', 'Chapel', 'Riverside', 'Cannery', 'Mill Lane
   'Abbey', 'Kiln', 'Signal Hill', 'Brewery', 'Cross Street', 'Union', 'Tidegate', 'Marsh End', 'Fishmarket', 'Bridgefoot', 'High Street', 'Customs House'];
 
 export class Metro {
+  /** ground heights, set by the sim */
+  terr: Terr = { height: new Float32Array(N * N), water: new Uint8Array(N * N) };
   stations: Station[] = [];
   lines: Line[] = [];
   private nextStation = 1;
@@ -46,7 +53,7 @@ export class Metro {
     if (x < 0 || y < 0 || x >= N || y >= N || water[Math.floor(y) * N + Math.floor(x)]) return null;
     if (this.stations.some((s) => Math.hypot(s.x - x, s.y - y) < 3)) return null;
     const id = this.nextStation++;
-    const s: Station = { id, x, y, name: NAMES[(id - 1) % NAMES.length] + (id > NAMES.length ? ` ${Math.ceil(id / NAMES.length)}` : ''), riders: 0, underwater: false };
+    const s: Station = { id, x, y, name: NAMES[(id - 1) % NAMES.length] + (id > NAMES.length ? ` ${Math.ceil(id / NAMES.length)}` : ''), riders: 0, underwater: false, depth: 0 };
     this.stations.push(s);
     return s;
   }
@@ -57,27 +64,23 @@ export class Metro {
     return true;
   }
 
-  quote(ids: number[], water: Uint8Array) {
-    let km = 0, wkm = 0, cost = 0;
-    for (let k = 1; k < ids.length; k++) {
-      const a = this.station(ids[k - 1]), b = this.station(ids[k]);
-      if (!a || !b) continue;
-      const c = segmentCost(a.x, a.y, b.x, b.y, water);
-      km += c.km; wkm += c.wkm; cost += c.cost;
-    }
-    return { km, wkm, cost };
+  quote(ids: number[]): LineQuote {
+    const pts = ids.map((id) => this.station(id)).filter((s): s is Station => !!s);
+    return quoteLine(pts, this.terr);
   }
 
-  addLine(ids: number[], water: Uint8Array): Line | null {
+  addLine(ids: number[]): Line | null {
     const clean = ids.filter((id, k) => this.station(id) && ids.indexOf(id) === k);
     if (clean.length < 2) return null;
-    const q = this.quote(clean, water);
+    const q = this.quote(clean);
+    if (!q.ok) return null;
+    clean.forEach((id, k) => { const st = this.station(id)!; st.depth = Math.max(st.depth, q.depth[k]); });
     const id = this.nextLine++;
     const roundTrip = (q.km / METRO_SPEED) * 60 * 2 + clean.length * 1 + 4;
     const trains = Math.max(2, Math.round(roundTrip / 5)); // aim for a 5 minute headway
     const used = new Set(this.lines.map((l) => l.color));
     const color = LINE_COLORS.find((c) => !used.has(c)) ?? LINE_COLORS[(id - 1) % LINE_COLORS.length];
-    const line: Line = { id, color, stations: clean, trains, segTime: [], lengthKm: q.km, wetKm: q.wkm, headway: 5, capacity: 0, riders: 0, peakLoad: 0, segLoad: [], rating: 100, crowd: 0 };
+    const line: Line = { id, color, stations: clean, trains, segTime: [], lengthKm: q.km, wetKm: q.wkm, by: q.by, elev: q.elev, headway: 5, capacity: 0, riders: 0, peakLoad: 0, segLoad: [], rating: 100, crowd: 0 };
     this.lines.push(line);
     this.updateLine(line);
     return line;
