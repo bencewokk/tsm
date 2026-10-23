@@ -47,7 +47,7 @@ self.onmessage = (ev: MessageEvent) => {
     // they are recorded in the action log against the current month (deterministic replay).
     sim.apply(m);
     post(sim.snapshot());
-    schedule();
+    if (m.type === 'speed' || !timer) schedule();
   } catch (e) {
     post({ type: 'error', message: String((e as Error).stack ?? e) });
   }

@@ -45,6 +45,13 @@ function run(withLine: boolean) {
       console.log(`m${String(s.month).padStart(3)} pop ${String(Math.round(s.population)).padStart(7)} homes ${s.homes} jobs ${s.jobs} bld ${s.buildings} $${(s.money / 1e6).toFixed(1)}M inc ${(s.income / 1e6).toFixed(2)} exp ${(s.expenses / 1e6).toFixed(2)} cong ${s.congestion.toFixed(2)} spd ${s.driveSpeed.toFixed(0)} share ${(s.transitShare * 100).toFixed(1)}% R ${s.resDemand.toFixed(2)} C ${s.comDemand.toFixed(2)}`);
     }
   }
+  const lvs: number[] = [];
+  for (let i = 0; i < N * N; i++) if (sim.g.btype[i]) lvs.push(sim.lv[i]);
+  lvs.sort((a, b) => a - b);
+  const pc = (p: number) => lvs[Math.floor(p * (lvs.length - 1))]?.toFixed(2);
+  const lc = [0, 0, 0, 0];
+  for (let i = 0; i < N * N; i++) if (sim.g.btype[i] === BT.Res) lc[sim.g.level[i]]++;
+  console.log(`LV built p10 ${pc(0.1)} p50 ${pc(0.5)} p90 ${pc(0.9)} max ${pc(1)}; res levels ${lc.join('/')}`);
   console.log(`ran ${months} months in ${Date.now() - t0} ms`);
   return sim;
 }

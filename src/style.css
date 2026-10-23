@@ -26,3 +26,31 @@ button { font: inherit; border: 1px solid var(--line); background: #fff; color: 
 button:hover { background: #f1f4f7; }
 button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
 .spacer { flex: 1; }
+.speed { display: flex; gap: 4px; }
+.speed button { min-width: 38px; }
+.side { position: absolute; top: 76px; left: 12px; width: 210px; padding: 10px 12px; }
+.h { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+.row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12px; }
+.row b { font-variant-numeric: tabular-nums; font-weight: 600; }
+.bars { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.bar { position: relative; height: 12px; background: rgba(0,0,0,0.05); border-radius: 3px; padding-left: 16px; }
+.bar span { position: absolute; left: 3px; top: -1px; font-size: 10px; font-weight: 700; color: var(--muted); }
+.bar i { position: absolute; top: 2px; bottom: 2px; border-radius: 2px; }
+.bar i.up { background: #6aa77a; }
+.bar i.down { background: #d0806a; }
+.bar::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(0,0,0,0.25); }
+.lines { position: absolute; top: 76px; right: 12px; width: 270px; padding: 10px 12px; max-height: calc(100% - 160px); overflow: auto; }
+.small { font-size: 11px; line-height: 1.4; }
+.toolbar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; align-items: center; }
+.sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
+.hint { position: absolute; bottom: 62px; left: 50%; transform: translateX(-50%); padding: 7px 12px; font-size: 12px; max-width: 560px; text-align: center; }
+.ticker { position: absolute; bottom: 14px; left: 12px; font-size: 11px; line-height: 1.5; max-width: 330px; color: var(--ink); text-shadow: 0 0 4px rgba(255,255,255,0.9); pointer-events: none; }
+button { white-space: nowrap; }
+.topbar { gap: 14px; padding: 6px 12px; }
+@media (max-width: 1100px) {
+  .topbar { gap: 10px; font-size: 12px; }
+  .stat { min-width: 0; }
+  .brand .muted { display: none; }
+  .side { top: 64px; width: 190px; font-size: 11px; }
+  .lines { top: 64px; width: 240px; }
+}

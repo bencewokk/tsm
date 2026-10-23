@@ -19,7 +19,7 @@ export const HOMES = [0, 6, 60, 280];
 /** Jobs per commercial level. */
 export const COM_JOBS = [0, 14, 150, 650];
 /** Jobs per industrial level. */
-export const IND_JOBS = [0, 40, 120, 120];
+export const IND_JOBS = [0, 30, 90, 90];
 /** Months of construction to reach a level. */
 export const BUILD_MONTHS = [0, 1, 2, 4];
 

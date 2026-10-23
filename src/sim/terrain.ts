@@ -187,7 +187,7 @@ export function generateTerrain(seed: number, rng: Rng): Grid {
     connectToNet(g, g.docksCells.filter((i) => road[i]), hv);
     for (const i of g.docksCells) {
       if (road[i] || btype[i] === BT.Park) continue;
-      btype[i] = BT.Ind; level[i] = rng.next() < 0.4 ? 2 : 1;
+      btype[i] = BT.Ind; level[i] = rng.next() < 0.2 ? 2 : 1;
     }
   }
   return g;

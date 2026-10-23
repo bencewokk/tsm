@@ -59,5 +59,13 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
+window.addEventListener('keydown', (e) => {
+  if ((e.target as HTMLElement).tagName === 'INPUT') return;
+  if (e.code === 'Space') { send({ type: 'speed', speed: state && state.speed > 0 ? 0 : 1 }); e.preventDefault(); }
+  else if (e.key === '1') send({ type: 'speed', speed: 1 });
+  else if (e.key === '2') send({ type: 'speed', speed: 3 });
+  else if (e.key === '3') send({ type: 'speed', speed: 10 });
+});
+
 // debug handle for testing
 (window as unknown as { tsm: unknown }).tsm = { env, send, get state() { return state; }, get init() { return init; } };
