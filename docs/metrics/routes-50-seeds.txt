@@ -1,0 +1,6 @@
+coast: 50/50 seeds have an affordable route (cap $120M); median $40M, max $115M; saddle cut needed on 1; cheapest route uses a rack segment on 9
+river: 50/50 seeds have an affordable route (cap $120M); median $42M, max $108M; saddle cut needed on 0; cheapest route uses a rack segment on 6
+hills: 50/50 seeds have an affordable route (cap $120M); median $46M, max $120M; saddle cut needed on 2; cheapest route uses a rack segment on 6
+plain: 50/50 seeds have an affordable route (cap $120M); median $38M, max $60M; saddle cut needed on 0; cheapest route uses a rack segment on 0
+ALL SEEDS PLAYABLE (0 failures)
+exit 0

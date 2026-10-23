@@ -11,7 +11,9 @@
     "seeds": "tsx scripts/seeds.ts",
     "metrics": "tsx scripts/metrics.ts",
     "terrain": "tsx scripts/terrain.ts",
-    "impact": "tsx scripts/impact.ts"
+    "impact": "tsx scripts/impact.ts",
+    "routes": "tsx scripts/routes.ts",
+    "towers": "tsx scripts/towers.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

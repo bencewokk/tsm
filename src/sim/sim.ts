@@ -46,6 +46,9 @@ export const TUNE = {
   comUpLV: [0, 0.55, 0.88],
   downLV: [0, 0.1, 0.3, 0.5],
   lvLag: 0.3,            // per month: how fast the value buildings react to catches up with land value
+  saveShare: 0.8,        // share of the demand pool held back while a tower waits for funds
+  intensify: 0.35,       // sort bonus for upgrades where the field allows well above mid-rise (0 at 20 m, full at 60 m)
+  towerPriority: 0.2,    // sort bonus for 36 m+ towers: they take the demand pool before mid-rise upgrades do
   maxTowerStarts: 4,     // per month: towers rise over months, not all at once
   maxMidStarts: 30,
   distDecay: 2.6,
@@ -182,14 +185,14 @@ export class Sim {
       case 'removeStation': if (m.removeStation(cmd.id)) this.money += STATION_COST * 0.5; break;
       case 'buildLine': {
         const q = m.quote(cmd.stations);
-        if (!q.ok) { this.say(`Line not built: station ${m.station(cmd.stations[q.badStation])?.name ?? ''} would have to lie ${q.depth[q.badStation].toFixed(0)} m deep to keep the grade under ${(RELIEF.maxGrade * 100).toFixed(0)}% (limit ${RELIEF.maxDepth} m). Add stations on easier ground.`); return; }
+        if (!q.ok) { this.say(`Line not built: segment ${q.badSeg + 1} climbs ${(Math.abs(q.segs[q.badSeg].grade) * 100).toFixed(0)}%, more than even a rack railway manages (${(RELIEF.maxRack * 100).toFixed(0)}%). Add stations on easier ground.`); return; }
         const est = q.cost + 2 * TRAIN_COST;
         if (this.money < est) { this.say(`Line needs ${(est / 1e6).toFixed(0)}M, not enough money`); return; }
         const l = m.addLine(cmd.stations);
         if (!l) return;
         const cost = q.cost + l.trains * TRAIN_COST;
         this.money -= cost; this.buildSpend += cost;
-        const bits = [q.by[1] > 0.05 ? `${q.by[1].toFixed(1)} km bored tunnel` : '', q.by[2] > 0.05 ? `${q.by[2].toFixed(1)} km viaduct` : '', q.wkm > 0.05 ? `${q.wkm.toFixed(1)} km under water` : ''].filter(Boolean);
+        const bits = [q.by[1] > 0.05 ? `${q.by[1].toFixed(1)} km bored tunnel` : '', q.by[2] > 0.05 ? `${q.by[2].toFixed(1)} km viaduct` : '', q.by[4] > 0.05 ? `${q.by[4].toFixed(1)} km rack railway` : '', q.wkm > 0.05 ? `${q.wkm.toFixed(1)} km under water` : ''].filter(Boolean);
         this.say(`Line ${l.id} opened: ${l.stations.length} stations, ${l.lengthKm.toFixed(1)} km${bits.length ? ` (${bits.join(', ')})` : ''}`);
         this.refreshTransit();
         break;
@@ -801,6 +804,8 @@ export class Sim {
     const jobB = B * WORKERS_PER_HOME * Math.max(0.05, 0.5 + 0.5 * this.comDemand);
     this.comPool = this.comPool * 0.85 + jobB * (this.indDemand > 0 ? 0.75 : 0.92);
     this.indPool = this.indPool * 0.85 + jobB * (this.indDemand > 0 ? 0.25 : 0.08);
+    // developers (the docks deal, landmarks) can borrow against future demand, but only about three months' worth
+    this.resPool = Math.max(this.resPool, -B * 3); this.comPool = Math.max(this.comPool, -jobB * 3);
     const pR = clamp(this.resPool / (B * 4), 0, 1), pC = clamp(this.comPool / (jobB * 4 + 1), 0, 1);
     this.pressure = (pR + pC) / 2;
     const spawnR = TUNE.spawnLV - 0.14 * pR, spawnC = TUNE.spawnLV - 0.14 * pC;
@@ -834,9 +839,12 @@ export class Sim {
         const cap = l.flags & Flag.CarLocked ? 2 : 3;
         if (lv + 1 > cap || lv + 1 > maxL) continue;
         if (v > TUNE.upLV[lv] - 0.1 * pR && l.age >= (lv === 1 ? 10 : 8)) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: lv + 1, h: this.pickHeight(l, lv + 1, true) });
+        // where the field allows a tower and the value is high, a low building is replaced by a tower directly (no stop at mid-rise)
+        if (lv === 1 && cap === 3 && maxL === 3 && F.hmaxAt(l.x, l.y) >= 40 && v > TUNE.upLV[2] && l.age >= 12) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: 3, h: this.pickHeight(l, 3, true) });
       } else if (t === BT.Com && lv < 3) {
         if (lv + 1 > maxL) continue;
         if (v > TUNE.comUpLV[lv] - 0.1 * pC && l.age >= (lv === 1 ? 5 : 10)) com.push({ l, s: v + 0.1 + jit, kind: BT.Com, to: lv + 1, h: this.pickHeight(l, lv + 1, true) });
+        if (lv === 1 && maxL === 3 && F.hmaxAt(l.x, l.y) >= 40 && v > TUNE.comUpLV[2] && l.age >= 10) com.push({ l, s: v + 0.1 + jit, kind: BT.Com, to: 3, h: this.pickHeight(l, 3, true) });
       } else if ((t === BT.Res || t === BT.Com) && lv === 3 && l.hgt > 0 && l.age >= 24 && !(l.flags & Flag.CarLocked)) {
         // a better-connected centre rebuilds its towers taller
         const hm = F.hmaxAt(l.x, l.y);
@@ -846,15 +854,28 @@ export class Sim {
         }
       }
     }
-    const order = (a: Cand, b: Cand) => b.s - a.s || a.l.id - b.l.id;
+    // where the field allows more than mid-rise, the pool goes to intensifying those plots first (towers before mid-rise upgrades before
+    // fringe spawns); the field's cap itself is untouched, so without transit nothing above ~30 m is ever allowed
+    const prio = new Map<Cand, number>();
+    for (const list of [res, com]) for (const c of list) {
+      let b = 0;
+      if (c.to >= 2) b = TUNE.intensify * clamp((F.hmaxAt(c.l.x, c.l.y) - 20) / 40, 0, 1) + (c.to === 3 && c.h >= 36 ? TUNE.towerPriority : 0);
+      prio.set(c, c.s + b);
+    }
+    const order = (a: Cand, b: Cand) => (prio.get(b) ?? b.s) - (prio.get(a) ?? a.s) || a.l.id - b.l.id;
     res.sort(order); com.sort(order); ind.sort(order);
     const zoneOps = new Uint8Array(ZONES);
     const taken = new Set<number>();
     let towers = 0, mids = 0;
     const place = (list: Cand[], poolKey: 'resPool' | 'comPool' | 'indPool', maxOps: number) => {
       let ops = 0;
+      const start = this[poolKey];
+      let keep = 0;   // a tower that does not fit the pool yet makes the city save: other starts may spend only a fifth of it this month
       for (const c of list) {
-        if (this[poolKey] <= 0 || ops >= maxOps) break;
+        if (ops >= maxOps) break;
+        // an anchor tower may be financed on credit (regional demand) while the pool is in debt, as long as the debt stays under ~2 months of growth
+        const credit = c.to === 3 && c.h >= 36 && poolKey !== 'indPool' && this[poolKey] > -2 * B;
+        if (this[poolKey] <= keep && !credit) { if (list.length && c.to !== 3) break; continue; }
         if (taken.has(c.l.id)) continue;
         // growth lags: only a few towers and mid-rises start each month
         if (c.to === 3 && towers >= TUNE.maxTowerStarts) continue;
@@ -866,16 +887,16 @@ export class Sim {
           // a tall building consumes several plots: assemble a site, or settle for what one plot allows
           if (!this.asm.canStart(this.homes * PERSONS_PER_HOME)) continue;
           plan = this.asm.planRow(c.l, h);
-          if (!plan) h = Math.max(FIELD.level3, Math.min(35, 24 + 70 * Math.max(0, c.l.w - 0.4)));
+          if (!plan) continue;   // no site to assemble here: the plot waits (its mid-rise upgrade is a separate candidate), later candidates are tried
         }
         const wEff = plan ? Math.hypot(plan.quad[2] - plan.quad[0], plan.quad[3] - plan.quad[1]) : c.l.w;
         const add = this.capacity(c.l, c.kind, c.to, h, wEff) - (c.l.type === c.kind ? this.capacity(c.l, c.kind, c.l.level, c.l.hgt) : 0);
-        if (add > this[poolKey] * 2.5 + 10) continue;
+        if (add > Math.max(0, this[poolKey]) * 2.5 + 10 && !(credit && add <= B * 3)) { if (c.to === 3 && h >= 36 && keep === 0) keep = start * TUNE.saveShare; continue; }
         this[poolKey] -= add;
         taken.add(c.l.id); zoneOps[z]++; ops++;
         if (c.to === 3) towers++; else if (c.to === 2) mids++;
         if (plan) {
-          const months = Math.max(3, Math.min(14, Math.round(h / 9)));
+          const months = Math.max(3, Math.min(11, Math.round(h / 11)));
           this.asm.start(plan, { type: c.kind, level: 3, hgt: h, months, label: `${c.kind === BT.Res ? 'Residential' : 'Office'} tower (${h} m)` });
           continue;
         }

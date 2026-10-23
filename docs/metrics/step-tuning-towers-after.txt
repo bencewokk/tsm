@@ -1,0 +1,48 @@
+== seed 4821 no metro
+   m36: pop  11601  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m48: pop  16712  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m60: pop  18379  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m72: pop  22982  >=60 m   0 (+0 rising)  >=40 m   0  tallest  37 m
+   m96: pop  31485  >=60 m   0 (+0 rising)  >=40 m   0  tallest  36 m
+== seed 4821 test line from month 24
+   m36: pop  17820  >=60 m   0 (+0 rising)  >=40 m   0  tallest  30 m | busiest station 796/day: acc 1.00 jobs 0.22 cent 0.42 hmax 73 m lv 0.95
+   m48: pop  21556  >=60 m   0 (+0 rising)  >=40 m   0  tallest  31 m | busiest station 785/day: acc 1.00 jobs 0.25 cent 0.42 hmax 75 m lv 0.97
+   m60: pop  23391  >=60 m   1 (+1 rising)  >=40 m   4  tallest  67 m | busiest station 2271/day: acc 1.00 jobs 1.00 cent 0.83 hmax 165 m lv 1.16
+   m72: pop  29334  >=60 m   3 (+1 rising)  >=40 m   8  tallest  71 m | busiest station 3591/day: acc 1.00 jobs 1.00 cent 0.84 hmax 167 m lv 1.16
+   m96: pop  40303  >=60 m   6 (+2 rising)  >=40 m  15  tallest  85 m | busiest station 6962/day: acc 1.00 jobs 1.00 cent 0.85 hmax 170 m lv 1.09
+== seed 187 no metro
+   m36: pop  12454  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m48: pop  17538  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m60: pop  20613  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m72: pop  25560  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m96: pop  36496  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+== seed 187 test line from month 24
+   m36: pop  18520  >=60 m   0 (+0 rising)  >=40 m   0  tallest  31 m | busiest station 1337/day: acc 1.00 jobs 0.45 cent 0.82 hmax 101 m lv 1.22
+   m48: pop  21850  >=60 m   0 (+0 rising)  >=40 m   0  tallest  39 m | busiest station 1907/day: acc 1.00 jobs 0.48 cent 0.83 hmax 104 m lv 1.24
+   m60: pop  23032  >=60 m   1 (+1 rising)  >=40 m   2  tallest  63 m | busiest station 2689/day: acc 1.00 jobs 0.48 cent 0.83 hmax 104 m lv 1.25
+   m72: pop  27110  >=60 m   2 (+1 rising)  >=40 m   5  tallest  65 m | busiest station 3432/day: acc 1.00 jobs 0.51 cent 0.84 hmax 107 m lv 1.27
+   m96: pop  46768  >=60 m   9 (+1 rising)  >=40 m  14  tallest  86 m | busiest station 6734/day: acc 1.00 jobs 0.90 cent 0.19 hmax 103 m lv 1.25
+== seed 304 no metro
+   m36: pop  12457  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m48: pop  18110  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m60: pop  20679  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m72: pop  24258  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m96: pop  30861  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+== seed 304 test line from month 24
+   m36: pop  22296  >=60 m   0 (+0 rising)  >=40 m   4  tallest  48 m | busiest station 1747/day: acc 1.00 jobs 0.20 cent 0.83 hmax 98 m lv 1.11
+   m48: pop  33766  >=60 m   0 (+0 rising)  >=40 m   6  tallest  48 m | busiest station 2023/day: acc 0.95 jobs 0.27 cent 0.85 hmax 101 m lv 1.09
+   m60: pop  32701  >=60 m   0 (+3 rising)  >=40 m   7  tallest  58 m | busiest station 4048/day: acc 1.00 jobs 0.37 cent 0.85 hmax 113 m lv 1.15
+   m72: pop  38831  >=60 m   3 (+2 rising)  >=40 m  12  tallest  70 m | busiest station 5852/day: acc 1.00 jobs 0.44 cent 0.85 hmax 120 m lv 1.16
+   m96: pop  51007  >=60 m  11 (+2 rising)  >=40 m  21  tallest 102 m | busiest station 11420/day: acc 1.00 jobs 0.64 cent 0.86 hmax 139 m lv 1.21
+== seed 57 no metro
+   m36: pop  11514  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m48: pop  15205  >=60 m   0 (+0 rising)  >=40 m   0  tallest  24 m
+   m60: pop  16765  >=60 m   0 (+0 rising)  >=40 m   0  tallest  31 m
+   m72: pop  21993  >=60 m   0 (+0 rising)  >=40 m   0  tallest  31 m
+   m96: pop  29401  >=60 m   0 (+0 rising)  >=40 m   0  tallest  38 m
+== seed 57 test line from month 24
+   m36: pop  15863  >=60 m   0 (+1 rising)  >=40 m   1  tallest  47 m | busiest station 1884/day: acc 1.00 jobs 0.65 cent 0.82 hmax 132 m lv 1.21
+   m48: pop  19092  >=60 m   1 (+1 rising)  >=40 m   3  tallest  88 m | busiest station 1729/day: acc 1.00 jobs 0.80 cent 0.82 hmax 146 m lv 1.22
+   m60: pop  24973  >=60 m   2 (+1 rising)  >=40 m   8  tallest  88 m | busiest station 2600/day: acc 1.00 jobs 0.69 cent 0.30 hmax 101 m lv 1.07
+   m72: pop  27933  >=60 m   6 (+2 rising)  >=40 m  12  tallest  88 m | busiest station 4295/day: acc 1.00 jobs 1.00 cent 0.30 hmax 120 m lv 1.10
+   m96: pop  37426  >=60 m  10 (+5 rising)  >=40 m  16  tallest  88 m | busiest station 4533/day: acc 1.00 jobs 1.00 cent 0.85 hmax 169 m lv 1.23

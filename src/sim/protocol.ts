@@ -29,7 +29,7 @@ export interface LineInfo {
   rating: number;      // 0..100
   lengthKm: number;
   segLoad: number[];
-  by: number[];        // km by construction type: cut-and-cover, bored tunnel, viaduct, under water
+  by: number[];        // km by construction type: cut-and-cover, bored tunnel, viaduct, under water, rack
   elev: number[];      // track elevation at each station (m)   // peak-hour load per segment (both directions summed / 2)
 }
 

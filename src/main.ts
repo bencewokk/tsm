@@ -292,6 +292,8 @@ async function demo(deal = 0, lineAt = 10) {
 }
 /** Dev helper: save the canvas at full size to screenshots/<name>.png (served by the dev server only). */
 async function shot(name: string) {
+  // a hidden pane does not run animation frames: settle the x-ray fade at once so the capture shows the toggled state
+  xray = xrayTarget; applyXray(xray); metro?.setXray(xray);
   env.timeOfDay = phaseToTime(dayPhase);
   env.applyTime();
   lookUniforms.uNight.value = env.night;

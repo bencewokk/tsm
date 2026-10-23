@@ -71,7 +71,7 @@ export class AssemblySystem {
   /** how many developments may be in assembly at once, and one new tower site per month */
   canStart(pop: number): boolean {
     const towers = this.list.filter((a) => a.kind === 'tower');
-    return towers.length < 1 + Math.floor(pop / 15000) && !towers.some((a) => a.started === this.sim.month);
+    return towers.length < 3 + Math.floor(pop / 8000) && towers.filter((a) => a.started === this.sim.month).length < 2;
   }
 
   get active() { return this.list.filter((a) => a.phase >= 0); }
@@ -283,7 +283,7 @@ export class AssemblySystem {
             } else pending++;
             continue;
           }
-          const p = c === 0 ? 0.9 : c <= 1 ? 0.5 : c <= 3 ? 0.32 : 0.16;
+          const p = c === 0 ? 0.95 : c <= 1 ? 0.8 : c <= 3 ? 0.6 : 0.45;
           if (hash01(l.id * 31 + a.id * 977, sim.month) < p) l.astate = 1;
           else {
             a.fails[l.id] = (a.fails[l.id] ?? 0) + 1;
@@ -291,7 +291,7 @@ export class AssemblySystem {
             pending++;
           }
         }
-        if (pending === 0 && this.allLots(a).every((l) => l.astate === 1)) { a.phase = 1; a.t = 0; a.len = 1 + (a.lots.length > 6 ? 1 : 0); }
+        if (pending === 0 && this.allLots(a).every((l) => l.astate === 1)) { a.phase = 1; a.t = 0; a.len = 1; }
         break;
       }
       case 1:
@@ -304,17 +304,17 @@ export class AssemblySystem {
       case 2: {
         // building by building: a few plots per month, each shows rubble for two months
         const n = a.demoOrder.length;
-        const per = a.kind === 'docks' ? Math.max(1, Math.ceil(n / 3)) : Math.max(1, Math.ceil(n / 4));
+        const per = a.kind === 'docks' ? Math.max(1, Math.ceil(n / 3)) : a.kind === 'tower' ? Math.max(1, Math.ceil(n / 2)) : Math.max(1, Math.ceil(n / 4));
         for (let k = 0; k < per && a.demoNext < n; k++) {
           const l = lots.lots[a.demoOrder[a.demoNext++]];
           if (!l || !l.alive) continue;
-          if (l.type && l.level > 0 && !(l.flags & Flag.Planned)) { l.demo = 2; l.ntype = 0; l.target = 0; l.constr = 0; }
+          if (l.type && l.level > 0 && !(l.flags & Flag.Planned)) { l.demo = a.kind === 'tower' ? 1 : 2; l.ntype = 0; l.target = 0; l.constr = 0; }
           else { l.type = BT.None; l.level = 0; }
           l.astate = 3;
         }
         if (a.demoNext >= n && mem.every((l) => l.demo === 0)) {
           for (const l of mem) { if (l.type && l.level === 0) l.type = BT.None; l.astate = 3; }
-          a.phase = 3; a.t = 0; a.len = 1 + (n > 8 ? 1 : 0);
+          a.phase = 3; a.t = 0; a.len = a.kind === 'tower' ? 1 : 1 + (n > 8 ? 1 : 0);
           this.closeStreets(a);
         }
         break;
@@ -323,7 +323,7 @@ export class AssemblySystem {
         if (a.t >= a.len) {
           if (a.kind === 'docks') { this.finishDocks(a); a.phase = -1; this.stats.finished++; break; }
           if (!this.merge(a)) { this.abort(a, 'the site could not be assembled, left vacant'); break; }
-          a.phase = 4; a.t = 0; a.len = Math.max(1, Math.min(4, Math.round(1 + Math.abs(polyArea(a.quad)) / 1.6)));
+          a.phase = 4; a.t = 0; a.len = a.kind === 'tower' ? 1 : Math.max(1, Math.min(4, Math.round(1 + Math.abs(polyArea(a.quad)) / 1.6)));
         }
         break;
       case 4:

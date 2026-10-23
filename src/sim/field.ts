@@ -18,13 +18,14 @@ export const FIELD = {
   mainGrow: 0.4,       // extra cells per sqrt(thousand people)
   subW: { origin: 1, village: 0.42, planned: 0.5, garden: 0.3 } as Record<string, number>,
   subR: 4.2,
-  jobsRef: 45,         // mean jobs per cell (5x5 blur) that count as full job concentration
-  accRef: 0.2,         // station accessibility (share of the city's jobs reached) that counts as full
+  jobsRef: 35,         // mean jobs per cell (5x5 blur) that count as full job concentration
+  accRef: 0.12,        // station accessibility (share of the city's jobs reached) that counts as full
   walkFull: 3,         // minutes of walk with full station weight
   walkZero: 10,        // minutes at which the station no longer counts
-  hBase: 13, hRange: 175, hPow: 1.6,
+  hBase: 13, hRange: 190, hPow: 1.5,
+  corridor: 0.62,      // centrality a fully accessible station area has on its own (a corridor is a centre)
   noAccess: 0.3,       // share of the height potential kept with no station at all
-  noJobs: 0.3,
+  noJobs: 0.6,
   level2: 12, level3: 24,   // metres of allowed height that unlock level 2 / level 3 buildings
   slopeFull: 0.05, slopeZero: 0.17,  // gradient (m per m) with no limit / with the strongest limit on density
 };
@@ -89,7 +90,7 @@ export class DensityField {
       this.jc[i] = clamp(this.blur[i] / FIELD.jobsRef, 0, 1);
       const a = sim.accCell[i];
       this.acc[i] = a;
-      const cc = Math.max(c, 0.4 * a);                       // transit corridors read as centres of their own
+      const cc = Math.max(c, FIELD.corridor * a);            // transit corridors read as centres of their own
       const hp = Math.pow(cc, 0.8) * (FIELD.noAccess + (1 - FIELD.noAccess) * a) * (FIELD.noJobs + (1 - FIELD.noJobs) * this.jc[i]);
       // slopes limit height: full allowance up to a 5% gradient, a third of it on 17% ground (views raise value, never density)
       const slopeF = clamp(1 - (sim.slope[i] - FIELD.slopeFull) / (FIELD.slopeZero - FIELD.slopeFull) * 0.7, 0.3, 1);

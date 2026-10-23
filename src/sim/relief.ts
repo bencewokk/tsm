@@ -3,10 +3,12 @@
  * the metro's vertical profile (station depth from the gradient limit, segment types and costs) and the car effort field.
  * Pure functions of the height / water rasters, so both threads give the same quote.
  */
-import { N, CELL, ZONE, NZ, ZONES } from './constants';
+import { N, CELL, ZONE, NZ, ZONES, STATION_COST, TRAIN_COST, METRO_SPEED } from './constants';
 
 export const RELIEF = {
   maxGrade: 0.04,          // metro gradient limit (m per m)
+  maxRack: 0.12,           // steeper segments can be built as a rack railway / funicular up to this gradient
+  rackMult: 1.8,           // cost multiplier of a rack segment (and 1.8x the ride time)
   maxDepth: 45,            // deepest station / tunnel the profile may use below the ground, metres
   boredCover: 10,          // ground more than this above the track = bored tunnel
   viaductCover: -4,        // ground more than this below the track = viaduct
@@ -17,7 +19,7 @@ export const RELIEF = {
 
 /** Metro cost per km by construction type: [cut-and-cover / at grade, bored tunnel, viaduct, under water]. */
 export const SEG_KM_COST = [11e6, 30e6, 19e6, 34e6];
-export const SEG_NAMES = ['cut-and-cover', 'bored tunnel', 'viaduct', 'under water'];
+export const SEG_NAMES = ['cut-and-cover', 'bored tunnel', 'viaduct', 'under water', 'rack / funicular'];
 
 export interface Terr { height: Float32Array; water: Uint8Array }
 
@@ -69,9 +71,11 @@ export function viewField(height: Float32Array, water: Uint8Array): Float32Array
 export interface Pt { x: number; y: number }
 export interface SegQuote {
   km: number;
-  /** km by construction type (SEG_NAMES order) */
+  /** km by construction type (SEG_NAMES order; the last entry counts rack segments, which are not counted under their ground type) */
   by: number[];
   cost: number;
+  /** steeper than the metro limit: built as a rack railway / funicular (cost and ride time x1.8) */
+  rack: boolean;
   /** gradient of the track between the two stations, m per m (signed: positive rises towards the second station) */
   grade: number;
   dominant: number;
@@ -90,8 +94,8 @@ export interface LineQuote {
   ground: number[];
   elev: number[];
   depth: number[];
-  /** a station would have to lie deeper than RELIEF.maxDepth to satisfy the gradient limit: -1 = fine, else the station index */
-  badStation: number;
+  /** index of a segment that is steeper than even a rack railway can climb (-1 = none) */
+  badSeg: number;
   ok: boolean;
 }
 
@@ -108,10 +112,11 @@ export function quoteLine(pts: Pt[], t: Terr): LineQuote {
   const elev = ground.slice();
   for (let k = 1; k < n; k++) elev[k] = Math.min(elev[k], elev[k - 1] + RELIEF.maxGrade * L[k - 1]);
   for (let k = n - 2; k >= 0; k--) elev[k] = Math.min(elev[k], elev[k + 1] + RELIEF.maxGrade * L[k]);
+  // no station deeper than maxDepth: where that leaves a segment steeper than the metro limit it becomes a rack / funicular segment
+  for (let k = 0; k < n; k++) elev[k] = Math.max(elev[k], ground[k] - RELIEF.maxDepth);
   const depth = ground.map((g, k) => Math.max(0, g - elev[k]));
-  let badStation = -1;
-  depth.forEach((d, k) => { if (d > RELIEF.maxDepth && badStation < 0) badStation = k; });
-  const by = [0, 0, 0, 0];
+  let badSeg = -1;
+  const by = [0, 0, 0, 0, 0];
   const segs: SegQuote[] = [];
   let trackCost = 0;
   for (let k = 1; k < n; k++) {
@@ -131,13 +136,63 @@ export function quoteLine(pts: Pt[], t: Terr): LineQuote {
     }
     const sb = cnt.map((c) => (c / steps) * km);
     let cost = deepPrem * km * SEG_KM_COST[1], dom = 0;
-    for (let q = 0; q < 4; q++) { cost += sb[q] * SEG_KM_COST[q]; by[q] += sb[q]; if (sb[q] > sb[dom]) dom = q; }
-    segs.push({ km, by: sb, cost, grade: (elev[k] - elev[k - 1]) / L[k - 1], dominant: dom });
+    for (let q = 0; q < 4; q++) { cost += sb[q] * SEG_KM_COST[q]; if (sb[q] > sb[dom]) dom = q; }
+    const grade = (elev[k] - elev[k - 1]) / L[k - 1];
+    const rack = Math.abs(grade) > RELIEF.maxGrade + 1e-6;
+    if (Math.abs(grade) > RELIEF.maxRack && badSeg < 0) badSeg = k - 1;
+    if (rack) { cost *= RELIEF.rackMult; by[4] += km; dom = 4; } else for (let q = 0; q < 4; q++) by[q] += sb[q];
+    segs.push({ km, by: sb, cost, rack, grade, dominant: dom });
     trackCost += cost;
   }
   const stationCost = depth.reduce((s, d) => s + d * RELIEF.stationDepthCost, 0);
-  const km = by[0] + by[1] + by[2] + by[3];
-  return { km, wkm: by[3], by, trackCost, stationCost, cost: trackCost + stationCost, segs, ground, elev, depth, badStation, ok: badStation < 0 };
+  const km = by[0] + by[1] + by[2] + by[3] + by[4];
+  return { km, wkm: by[3], by, trackCost, stationCost, cost: trackCost + stationCost, segs, ground, elev, depth, badSeg, ok: badSeg < 0 };
+}
+
+// ------------------------------------------------------------------ guaranteed route between two places
+/** What the player can reasonably afford for one line in the first years (the start money is 150M). */
+export const ROUTE_CAP = 120e6;
+
+export interface Route { pts: Pt[]; q: LineQuote; total: number; how: string }
+
+/**
+ * Cheapest buildable line between two places over any of: a direct two-station line, stations every 12 / 20 cells, and the same
+ * through each pass near the straight line. "Buildable" = no segment steeper than a rack railway; total = track + stations + trains.
+ * Used by the generator (it carves a saddle when nothing is affordable) and by the route check script.
+ */
+export function bestRoute(t: Terr, a: Pt, b: Pt, passes: Pt[]): Route | null {
+  const snap = (p: Pt): Pt | null => {
+    for (let r = 0; r <= 3; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const x = Math.round(p.x) + dx, y = Math.round(p.y) + dy;
+      if (x < 1 || y < 1 || x >= N - 1 || y >= N - 1) continue;
+      if (!t.water[y * N + x]) return { x, y };
+    }
+    return null;
+  };
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const near = passes.slice().sort((p, q) => Math.hypot(p.x - mid.x, p.y - mid.y) - Math.hypot(q.x - mid.x, q.y - mid.y)).slice(0, 2).filter((p) => Math.hypot(p.x - mid.x, p.y - mid.y) < 70);
+  const via: (Pt | null)[] = [null, ...near];
+  let best: Route | null = null;
+  for (const w of via) {
+    for (const sp of [0, 20, 12]) {
+      const legs: Pt[] = w ? [a, w, b] : [a, b];
+      const raw: Pt[] = [legs[0]];
+      for (let k = 1; k < legs.length; k++) {
+        const d = Math.hypot(legs[k].x - legs[k - 1].x, legs[k].y - legs[k - 1].y), n = sp ? Math.max(1, Math.round(d / sp)) : 1;
+        for (let j = 1; j <= n; j++) raw.push({ x: legs[k - 1].x + (legs[k].x - legs[k - 1].x) * j / n, y: legs[k - 1].y + (legs[k].y - legs[k - 1].y) * j / n });
+      }
+      const pts: Pt[] = [];
+      let bad = false;
+      for (const p of raw) { const sp2 = snap(p); if (!sp2) { bad = true; break; } if (!pts.length || Math.hypot(sp2.x - pts[pts.length - 1].x, sp2.y - pts[pts.length - 1].y) >= 3) pts.push(sp2); }
+      if (bad || pts.length < 2) continue;
+      const q = quoteLine(pts, t);
+      if (!q.ok) continue;
+      const trains = Math.max(2, Math.round(((q.km / METRO_SPEED) * 60 * 2 + pts.length + 4) / 5));
+      const total = q.cost + pts.length * STATION_COST + trains * TRAIN_COST;
+      if (!best || total < best.total) best = { pts, q, total, how: `${w ? 'via pass' : 'direct'}, ${sp ? `stations every ${sp} cells` : 'two stations'}` };
+    }
+  }
+  return best;
 }
 
 // ------------------------------------------------------------------ car effort between zones

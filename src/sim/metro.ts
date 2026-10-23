@@ -12,6 +12,8 @@ export interface Line {
   wetKm: number;
   /** km by construction type: cut-and-cover, bored tunnel, viaduct, under water */
   by: number[];
+  /** per segment: rack / funicular (slower) */
+  rack: boolean[];
   /** track elevation (m above datum) at each station */
   elev: number[];
   headway: number;
@@ -80,7 +82,7 @@ export class Metro {
     const trains = Math.max(2, Math.round(roundTrip / 5)); // aim for a 5 minute headway
     const used = new Set(this.lines.map((l) => l.color));
     const color = LINE_COLORS.find((c) => !used.has(c)) ?? LINE_COLORS[(id - 1) % LINE_COLORS.length];
-    const line: Line = { id, color, stations: clean, trains, segTime: [], lengthKm: q.km, wetKm: q.wkm, by: q.by, elev: q.elev, headway: 5, capacity: 0, riders: 0, peakLoad: 0, segLoad: [], rating: 100, crowd: 0 };
+    const line: Line = { id, color, stations: clean, trains, segTime: [], lengthKm: q.km, wetKm: q.wkm, by: q.by, rack: q.segs.map((g) => g.rack), elev: q.elev, headway: 5, capacity: 0, riders: 0, peakLoad: 0, segLoad: [], rating: 100, crowd: 0 };
     this.lines.push(line);
     this.updateLine(line);
     return line;
@@ -92,7 +94,7 @@ export class Metro {
     for (let k = 1; k < l.stations.length; k++) {
       const a = this.station(l.stations[k - 1])!, b = this.station(l.stations[k])!;
       const km = (Math.hypot(a.x - b.x, a.y - b.y) * CELL) / 1000;
-      const t = (km / METRO_SPEED) * 60 + 0.6;
+      const t = (km / METRO_SPEED) * 60 * (l.rack[k - 1] ? 1.8 : 1) + 0.6;
       l.segTime.push(t);
       ride += t;
     }

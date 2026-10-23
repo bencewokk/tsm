@@ -1,5 +1,6 @@
 import { N, Water, Flag } from './constants';
 import { Rng, fbm, hash2 } from './rng';
+import { bestRoute, ROUTE_CAP } from './relief';
 import type { CityProfile } from './cityprofile';
 
 export type QuarterStyle = 'organic' | 'planned' | 'terraces' | 'radial' | 'rail';
@@ -29,7 +30,7 @@ export interface Grid {
   /** roundabout centres of planned boulevards (cells) */
   rondpoints: [number, number][];
   /** landform features for dev tools and renders: ridge crest polylines, passes (cells) and the castle hill */
-  landforms: { ridges: [number, number][][]; passes: [number, number][]; castle: { x: number; y: number } | null };
+  landforms: { ridges: [number, number][][]; passes: [number, number][]; castle: { x: number; y: number } | null; /** saddle cuts the route guarantee needed (0 = the land already had an affordable route) */ carved: number };
 }
 
 const NAMES = ['Saltmarsh', 'Oldbridge', 'Kestrel Hill', 'Fernway', 'Millford', 'Ashcombe', 'Holloway', 'Brindle'];
@@ -161,8 +162,9 @@ export function generateTerrain(seed: number, rng: Rng, cp: CityProfile): Grid {
   const lf = applyLandforms(seed, cp, land, distWater, height);
   markSteep(height, water, flags);
   const road = new Uint8Array(N * N);
-  const g: Grid = { seed, height, water, distWater, road, flags, villages: [], docksCells: [], bay: land.bay, rail: [], mine: null, rondpoints: [], landforms: { ridges: lf.ridges, passes: lf.passes, castle: null } };
+  const g: Grid = { seed, height, water, distWater, road, flags, villages: [], docksCells: [], bay: land.bay, rail: [], mine: null, rondpoints: [], landforms: { ridges: lf.ridges, passes: lf.passes, castle: null, carved: 0 } };
   placeSettlements(g, cp, rng);
+  ensureRoute(g);
   markFlood(g, cp);
   return g;
 }
@@ -268,6 +270,50 @@ function applyLandforms(seed: number, cp: CityProfile, land: Land, distWater: Ui
     }
   }
   return { ridges, passes };
+}
+
+/**
+ * Playability guarantee: the old town and its nearest neighbour must be joined by at least one buildable, affordable metro route.
+ * If not, a saddle is cut along the straight line between them (the ground there is lowered to the line between the two
+ * ends plus an allowance that shrinks each attempt), which is how a pass or a notch in a ridge appears.
+ */
+function ensureRoute(g: Grid) {
+  if (g.villages.length < 2) return;
+  const o = g.villages[0];
+  const nb = g.villages.slice(1).sort((a, b) => Math.hypot(a.x - o.x, a.y - o.y) - Math.hypot(b.x - o.x, b.y - o.y))[0];
+  const terr = { height: g.height, water: g.water };
+  const passes = g.landforms.passes.map(([x, y]) => ({ x, y }));
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const r = bestRoute(terr, o, nb, passes);
+    if (r && r.total <= ROUTE_CAP) return;
+    const allow = [34, 24, 15, 8, 3][attempt];
+    const h0 = g.height[Math.floor(o.y) * N + Math.floor(o.x)], h1 = g.height[Math.floor(nb.y) * N + Math.floor(nb.x)];
+    const dx = nb.x - o.x, dy = nb.y - o.y, L2 = dx * dx + dy * dy || 1;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const i = idx(x, y);
+      if (g.water[i]) continue;
+      const u = Math.max(0, Math.min(1, ((x - o.x) * dx + (y - o.y) * dy) / L2));
+      const d = Math.hypot(x - (o.x + dx * u), y - (o.y + dy * u));
+      if (d > 9) continue;
+      const w = 1 - sstep(3.5, 9, d);
+      const line = h0 + (h1 - h0) * u + allow;
+      if (g.height[i] > line) g.height[i] = g.height[i] * (1 - w) + line * w;
+    }
+    g.landforms.carved++;
+    markSteep(g.height, g.water, g.flags);
+  }
+  // still nothing affordable (the old town sits high above everything else): re-site the neighbour on the cheapest nearby ground
+  let best: { x: number; y: number; total: number } | null = null;
+  for (let k = 0; k < 90; k++) {
+    const a = hash2(g.seed, k, 71) * Math.PI * 2, d = 26 + hash2(g.seed, k, 72) * 20;
+    const x = Math.round(o.x + Math.cos(a) * d), y = Math.round(o.y + Math.sin(a) * d);
+    if (x < 10 || y < 10 || x >= N - 10 || y >= N - 10) continue;
+    const i = idx(x, y);
+    if (g.water[i] || (g.flags[i] & Flag.Steep) || g.villages.some((v, vi) => vi !== g.villages.indexOf(nb) && Math.hypot(v.x - x, v.y - y) < 24)) continue;
+    const r = bestRoute(terr, o, { x, y }, passes);
+    if (r && (!best || r.total < best.total)) best = { x, y, total: r.total };
+  }
+  if (best && best.total <= ROUTE_CAP) { nb.x = best.x; nb.y = best.y; }
 }
 
 /** River floodplain: low land beside river water is wetland (no plots; roads cross on causeways). */

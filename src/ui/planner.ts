@@ -107,8 +107,9 @@ export class Planner {
     if (q) {
       const dmax = Math.max(0, ...q.depth), gmax = Math.max(0, ...q.segs.map((g) => Math.abs(g.grade)));
       if (dmax > 6) extra += ` Deepest station ${dmax.toFixed(0)} m (+${money(q.stationCost)}, longer walk to the platform).`;
-      if (gmax > 0.005) extra += ` Steepest grade ${(gmax * 100).toFixed(1)}% (limit ${(RELIEF.maxGrade * 100).toFixed(0)}%).`;
-      if (!q.ok) extra += ` <b class="neg">Too steep: station ${q.badStation + 1} would need ${q.depth[q.badStation].toFixed(0)} m of depth; add a station on easier ground.</b>`;
+      if (gmax > 0.005) extra += ` Steepest grade ${(gmax * 100).toFixed(1)}% (metro limit ${(RELIEF.maxGrade * 100).toFixed(0)}%, rack railway up to ${(RELIEF.maxRack * 100).toFixed(0)}%).`;
+      if (q.by[4] > 0.05) extra += ` ${q.by[4].toFixed(1)} km is steeper than the metro limit and is built as a rack railway / funicular (x${RELIEF.rackMult} cost, slow).`;
+      if (!q.ok) extra += ` <b class="neg">Too steep: segment ${q.badSeg + 1} climbs more than ${(RELIEF.maxRack * 100).toFixed(0)}%; add a station on easier ground.</b>`;
     }
     return `Line draft: ${this.draft.length} stations, ${r.km.toFixed(1)} km${types}, ${r.trains} trains. Cost <b class="${ok ? '' : 'neg'}">${money(r.cost)}</b>.${extra} ` +
       `<b>Enter</b> build · <b>Backspace</b> undo · <b>Esc</b> cancel`;

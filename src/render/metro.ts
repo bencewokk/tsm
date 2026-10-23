@@ -7,7 +7,7 @@ import { SEG_NAMES, type LineQuote } from '../sim/relief';
 
 /** Platforms and tunnels sit this far below the track elevation (world units) so the x-ray view shows a clear cover. */
 export const UNDER = 30;
-const SEG_COL = ['', '#3a4049', '#e08a2c', '#2f6fb0'];
+const SEG_COL = ['', '#3a4049', '#e08a2c', '#2f6fb0', '#8e4fb0'];
 
 /** Metro visuals: surface ribbons (map layer), stations, tunnels (x-ray) and trains. */
 export class MetroView {
@@ -142,10 +142,11 @@ export class MetroView {
       this.ribbons.add(this.ribbon(shifted, 12, mat, 3, track));
       this.addViaducts(shifted, track, l.color);
       // tunnels: follow the vertical profile, so a bored tunnel runs level under a hill and a deep station sits deep
-      const tmat = new THREE.MeshStandardMaterial({ color: l.color, emissive: l.color, emissiveIntensity: 0.35, roughness: 0.6 });
+      const tmat = new THREE.MeshStandardMaterial({ color: l.color, emissive: l.color, emissiveIntensity: 0.9, roughness: 0.5, depthTest: false });
       const tpts = pts.map((p) => new THREE.Vector3(p.x, track(p.x, p.z) - UNDER - li * 6, p.z));
       const curve = new THREE.CatmullRomCurve3(tpts, false, 'centripetal');
-      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(16, tpts.length), 6, 8, false), tmat);
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(24, tpts.length * 3), 11, 10, false), tmat);
+      tube.renderOrder = 9;
       this.under.add(tube);
       const lens: number[] = [];
       let total = 0;
@@ -294,7 +295,7 @@ export class MetroView {
     if (kept.length < 2) return;
     if (q && q.segs.length === kept.length - 1) {
       // straight preview segments coloured by construction type; red where the profile is impossible
-      const bad = (k: number) => !q.ok && (q.badStation === k || q.badStation === k + 1);
+      const bad = (k: number) => !q.ok && q.badSeg === k;
       q.segs.forEach((sg, k) => {
         const col = bad(k) ? '#d03a2a' : sg.dominant === 0 ? color : SEG_COL[sg.dominant];
         const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
