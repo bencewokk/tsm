@@ -4,6 +4,7 @@ import { ROAD_HALF } from './roads';
 import { hash01 } from './profiles';
 import type { Sim } from './sim';
 import type { Lot } from './lots';
+import type { AsmPlan } from './assembly';
 
 export interface LmState {
   lot: number; def: number; state: 'building' | 'open';
@@ -85,11 +86,14 @@ export class LandmarkSystem {
     return out;
   }
 
-  /** Try to carve the plot near an anchor, facing the nearest street. */
-  private tryPlace(def: LandmarkDef, ax: number, ay: number): Lot | null {
+  /** Venues get a bigger forecourt: a drop-off loop between the street and the entrance. */
+  hasLoop(def: LandmarkDef) { return def.category === 'sport' || def.category === 'leisure' || def.category === 'health' || def.category === 'education'; }
+
+  /** Find a site near an anchor, facing the nearest street: every plot it overlaps is bought up, local streets through it close. */
+  private tryPlan(def: LandmarkDef, ax: number, ay: number): AsmPlan | null {
     const s = this.sim, R = s.roads;
     const [w, d] = def.size;
-    const prof = s.profileAt(ax, ay);
+    const loop = this.hasLoop(def) ? 0.3 : 0;
     for (let ring = 0; ring <= 9; ring++) {
       const n = ring === 0 ? 1 : 12;
       for (let k = 0; k < n; k++) {
@@ -103,32 +107,39 @@ export class LandmarkSystem {
         const side = (x - e.x) * nx + (y - e.y) * ny >= 0 ? 1 : -1;
         const ang = side > 0 ? ea : ea + Math.PI;
         const vx = -Math.sin(ang), vy = Math.cos(ang);
-        const setback = ROAD_HALF[R.ecls[e.e]] + 0.1 + d / 2;
+        const setback = ROAD_HALF[R.ecls[e.e]] + 0.1 + loop + d / 2;
         for (const slide of [0, 0.6, -0.6, 1.2, -1.2]) {
           const cx = e.x + vx * setback + Math.cos(ang) * slide * w, cy = e.y + vy * setback + Math.sin(ang) * slide * w;
-          const r = s.lots.carve(cx, cy, ang, w, d, prof);
-          if (r) { this.sim.say(`${r.cleared.length ? r.cleared.length + ' plots cleared for the ' + def.name.toLowerCase() : def.name + ' plot reserved'}`); return r.lot; }
+          const plan = s.asm.planRect(cx, cy, ang, w, d, true, 'landmark');
+          if (plan) return plan;
         }
       }
     }
     return null;
   }
 
+  private findPlan(def: LandmarkDef, site: SiteChoice): AsmPlan | null {
+    for (const [ax, ay] of this.anchors(def, site)) { const p = this.tryPlan(def, ax, ay); if (p) return p; }
+    return null;
+  }
+
+  /** Words for the proposal dialog: what this site would clear. */
+  preview(id: string, site: SiteChoice): string {
+    const def = LANDMARKS.find((l) => l.id === id);
+    if (!def) return '';
+    const plan = this.findPlan(def, site);
+    return plan ? this.sim.asm.describe(plan, def) : 'No site found.';
+  }
+
   /** The effect of accepting a proposal. Returns false (and the caller refunds) if no site fits. */
   place(id: string, site: SiteChoice, pay: 'city' | 'dev'): boolean {
     const def = LANDMARKS.find((l) => l.id === id);
     if (!def) return false;
-    for (const [ax, ay] of this.anchors(def, site)) {
-      const lot = this.tryPlace(def, ax, ay);
-      if (!lot) continue;
-      lot.type = BT.Landmark; lot.lm = LANDMARK_INDEX[id]; lot.level = 0; lot.target = 1; lot.demo = 0; lot.age = 0;
-      lot.constr = def.buildMonths; lot.constrTotal = def.buildMonths;
-      this.states.set(lot.id, { lot: lot.id, def: lot.lm - 1, state: 'building', pay, opened: -1, served: false, carPark: false, eventDay: false, events: 0, penalty: false });
-      this.sim.say(`${def.name} approved: ${def.buildMonths} months to build`);
-      return true;
-    }
-    this.sim.say(`No site found for the ${def.name.toLowerCase()}`);
-    return false;
+    const plan = this.findPlan(def, site);
+    if (!plan) { this.sim.say(`No site found for the ${def.name.toLowerCase()}`); return false; }
+    this.sim.asm.start(plan, { type: BT.Landmark, level: 1, hgt: 0, months: def.buildMonths, label: def.name, form: def.form, landmark: id, pay, loop: this.hasLoop(def) });
+    this.sim.say(`${def.name} approved: ${plan.members.length} plots to buy up${plan.closed.length ? `, ${plan.closed.length} street${plan.closed.length > 1 ? 's' : ''} to close` : ''}`);
+    return true;
   }
 
   // ---------------------------------------------------------------- monthly

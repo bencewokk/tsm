@@ -88,6 +88,26 @@ export class RoadGraph {
     this.version++;
   }
 
+  /** Close a street (a development took its land). */
+  closeEdge(e: number) { if (this.alive[e]) this.killEdge(e); }
+
+  /** Are nodes a and b still joined by streets within `maxHops` edges? */
+  connected(a: number, b: number, maxHops: number): boolean {
+    if (a === b) return true;
+    const seen = new Set<number>([a]);
+    let frontier = [a];
+    for (let h = 0; h < maxHops && frontier.length; h++) {
+      const next: number[] = [];
+      for (const n of frontier) for (const e of this.adj[n]) {
+        const o = this.other(e, n);
+        if (o === b) return true;
+        if (!seen.has(o)) { seen.add(o); next.push(o); }
+      }
+      frontier = next;
+    }
+    return false;
+  }
+
   /** Split edge e at (x,y); returns the new node. Both halves keep class and build year. */
   splitEdge(e: number, x: number, y: number): number {
     const a = this.ea[e], b = this.eb[e], c = this.ecls[e], yr = this.eyear[e], imp = this.eimp[e];

@@ -89,6 +89,8 @@ export interface LotsMsg {
   type: Uint8Array; level: Uint8Array; target: Uint8Array; constr: Uint8Array; constrTotal: Uint8Array;
   flags: Uint8Array; planType: Uint8Array; planLevel: Uint8Array;
   served: Uint8Array;    // planned plot already within walking range of a station
+  asm: Uint16Array;      // large-plot assembly id (0 = none)
+  astate: Uint8Array;    // 0 pending, 1 acquired (hoarding), 2 holdout, 3 cleared
   hgt: Uint8Array;       // height in metres of the current building (0 = default for its level)
   nhgt: Uint8Array;      // height of the building under construction
   poly: Float32Array;    // 8 numbers per plot: F0, F1, B1, B0 (cell units); F0-F1 is the street front
@@ -119,6 +121,7 @@ export interface StateMsg {
   event: EventInfo | null;
   docks: DocksInfo;
   landmarks: import('./landmarkSys').LandmarkInfo[];
+  assemblies: import('./assembly').AssemblyInfo[];
   desire: DesireLine[];
   log: string[];
   speed: number;

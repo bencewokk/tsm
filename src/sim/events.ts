@@ -175,8 +175,8 @@ function proposal(def: LandmarkDef): EventDef {
     title: def.name + ': a proposal',
     text: (def.pitch ?? '') + '<br><br><b>Brief:</b> a landmark is only a success if people can get to it. If there is no station within an <b>8-minute walk</b> when it opens, it gets a car park and its visitors stay in their cars for good. Where do you want it?',
     choices: [
-      { label: `Build it ${SITE_WORD[a]} (the city pays ${m(def.cost)})`, detail: `Opens in ${def.buildMonths} months. Plots in the way are cleared.`, effects: [{ kind: 'money', amount: -def.cost }, { kind: 'landmark', id: def.id, site: a, pay: 'city' }] },
-      { label: `Developer deal: ${SITE_WORD[b]}`, detail: `The developer pays and adds ${m(def.cost * 0.2)} to the city. Unserved at opening, you owe a ${m(def.cost * 0.25)} penalty and it still gets its car park.`, effects: [{ kind: 'money', amount: def.cost * 0.2 }, { kind: 'landmark', id: def.id, site: b, pay: 'dev' }] },
+      { label: `Build it ${SITE_WORD[a]} (the city pays ${m(def.cost)})`, detail: `{pre_a} Then ${def.buildMonths} months of construction.`, effects: [{ kind: 'money', amount: -def.cost }, { kind: 'landmark', id: def.id, site: a, pay: 'city' }] },
+      { label: `Developer deal: ${SITE_WORD[b]}`, detail: `The developer pays and adds ${m(def.cost * 0.2)} to the city. {pre_b} Unserved at opening, you owe a ${m(def.cost * 0.25)} penalty and it still gets its car park.`, effects: [{ kind: 'money', amount: def.cost * 0.2 }, { kind: 'landmark', id: def.id, site: b, pay: 'dev' }] },
       { label: 'Decline', detail: 'Nothing is built.', effects: [] },
     ],
   };

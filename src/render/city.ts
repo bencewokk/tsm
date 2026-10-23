@@ -13,6 +13,7 @@ import type { CityProfile } from '../sim/cityprofile';
 import type { InitMsg } from '../sim/protocol';
 import { landmarkAt, LANDMARKS } from '../sim/landmarks';
 import { designLot, massing, pad, tree as ctxTree, FOOT, type Ctx, type Tree } from './buildings';
+import { buildSite, siteSig, type Site } from './sites';
 
 // road widths (m) by class, and the narrow cobbled lanes of the old cores
 const ROAD_W = [16, 11, 8];
@@ -54,7 +55,7 @@ export class CityView {
   private L: Record<string, Layer>;
   private craneMast: Layer;
   private craneJib: Layer;
-  private polyMats: Record<Mat, THREE.Material>;
+  polyMats: Record<Mat, THREE.Material>;
   harbour: Harbour;
   get surfaceMats(): THREE.Material[] {
     return [this.wallMat, this.glassMat, this.plainMat, this.treeMat, this.roadMat, this.craneMat];
@@ -62,6 +63,8 @@ export class CityView {
   private chunks = new Map<number, Chunk>();
   private chunkGroup = new THREE.Group();
   private grows = new Map<number, Grow>();
+  private sites = new Map<number, Site & { pct: number }>();
+  private siteGroup = new THREE.Group();
   private growGroup = new THREE.Group();
   private cranes: { x: number; y: number; z: number; h: number; k: number }[] = [];
   private lots: LotsMsg | null = null;
@@ -109,10 +112,10 @@ export class CityView {
 
     this.railMesh = this.buildRail();
     this.harbour = new Harbour(water, flags, sample, plainInst, init.city.terrain === 'coast', init.city.site === 'harbour');
-    this.group.add(this.roads, this.railMesh, this.chunkGroup, this.growGroup, ...Object.values(this.L).map((l) => l.mesh), this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
+    this.group.add(this.roads, this.railMesh, this.chunkGroup, this.growGroup, this.siteGroup, ...Object.values(this.L).map((l) => l.mesh), this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
   }
 
-  private ground(x: number, z: number) {
+  ground(x: number, z: number) {
     const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
     if (cx >= 0 && cz >= 0 && cx < N && cz < N && this.water[cz * N + cx]) return 0.4;
     return this.sample(x, z);
@@ -281,7 +284,7 @@ export class CityView {
   }
 
   // ---------------------------------------------------------------- plots: merged chunks of buildings, growing plots, trees
-  private quadOf(L: LotsMsg, k: number): Quad {
+  quadOf(L: LotsMsg, k: number): Quad {
     const p = L.poly, o = k * 8;
     const P = (i: number): Pt => [p[o + i * 2] * CELL, p[o + i * 2 + 1] * CELL];
     return new Quad(P(0), P(1), P(2), P(3));
@@ -289,13 +292,13 @@ export class CityView {
 
   private sigOf(L: LotsMsg, k: number): number {
     let h = imul(L.id[k] + 1, 2654435761) ^ imul(L.prof[k] + 5, 7919) ^ imul(L.lm[k] + 3, 104729);
-    h ^= imul(L.hgt[k] * 3571 + L.type[k] * 31 + L.level[k] * 7 + L.dens[k] * 977 + L.sides[k] * 53 + L.back[k] * 13, 40503);
+    h ^= imul(L.asm[k] * 6151 + L.astate[k] * 389 + L.hgt[k] * 3571 + L.type[k] * 31 + L.level[k] * 7 + L.dens[k] * 977 + L.sides[k] * 53 + L.back[k] * 13, 40503);
     h ^= imul((L.flags[k] & 23) * 131 + L.planType[k] * 17 + L.planLevel[k] * 19 + L.served[k] * 23 + L.built[k] * 3, 69069);
     for (let i = 0; i < 8; i++) h = imul(h ^ Math.round(L.poly[k * 8 + i] * 200), 16777619);
     return h;
   }
 
-  private ctxFor(L: LotsMsg, k: number, Q: Quad, mb: MB, kind: Kind, level: number, trees: Tree[], hgt = L.hgt[k]): Ctx {
+  ctxFor(L: LotsMsg, k: number, Q: Quad, mb: MB, kind: Kind, level: number, trees: Tree[], hgt = L.hgt[k]): Ctx {
     const cx = L.x[k] * CELL, cz = L.y[k] * CELL;
     const g = this.ground(cx, cz);
     const seed = L.seed[k];
@@ -326,6 +329,7 @@ export class CityView {
         const gx = Math.floor(p[0] / 12.5), gz = Math.floor(p[1] / 12.5);
         if (gx >= 0 && gz >= 0 && gx < W4 && gz < W4) lotOcc[gz * W4 + gx] = 1;
       }
+      if (L.asm[k] > 0 && L.constr[k] > 0) continue;        // assembly sites draw their own structure
       if (L.constr[k] > 0 || L.demo[k] > 0) { grows.add(k); continue; }
       const key = Math.floor(L.y[k] / CHUNK) * 100 + Math.floor(L.x[k] / CHUNK);
       sigs.set(key, (sigs.get(key) ?? 0) + this.sigOf(L, k));
@@ -340,9 +344,11 @@ export class CityView {
     }
     for (const [key, ch] of this.chunks) if (!sigs.has(key)) { this.disposeChunk(ch); this.chunks.delete(key); }
     this.rebuildGrows(s, grows);
+    this.rebuildSites(s);
     // trees: lot trees (cached per chunk), street trees, wild trees
     for (const l of Object.values(this.L)) l.reset();
     for (const ch of this.chunks.values()) for (const t of ch.trees) this.treeAt(t.x, this.ground(t.x, t.z), t.z, t.size, t.h, t.pine, t.seed);
+    for (const st of this.sites.values()) for (const t of st.trees) this.treeAt(t.x, this.ground(t.x, t.z), t.z, t.size, t.h, t.pine, t.seed);
     for (const t of this.streetTrees) this.treeAt(t.x, this.sample(t.x, t.z), t.z, t.s, t.s * 1.15, vhash(t.seed, 7) < 0.12, t.seed);
     this.wildTrees(s, lotOcc);
     for (const l of Object.values(this.L)) l.finish();
@@ -350,6 +356,7 @@ export class CityView {
     this.craneMast.reset(); this.craneJib.reset();
     this.cranes = [];
     for (const gr of this.grows.values()) if (gr.crane) this.cranes.push(gr.crane);
+    for (const st of this.sites.values()) for (const c of st.cranes) this.cranes.push(c);
     for (const c of this.cranes) { this.craneMast.add(c.x, c.y, c.z, 1.6, c.h, 1.6, 0, 0xc9a24a); this.craneJib.add(c.x, c.y + c.h, c.z, 30, 1.4, 1.4, 0, 0xc9a24a); }
     this.craneMast.finish(); this.craneJib.finish();
     this.animate(0, 0);
@@ -379,7 +386,7 @@ export class CityView {
         mb.prism('ghost', m.poly, c.g, c.g + m.h, gc, gc);
         continue;
       }
-      if (kind === 'none') { if (dens >= 1 && L.type[k] === BT.None) kind = 'yard'; else continue; }
+      if (kind === 'none') { if (dens >= 1 && L.type[k] === BT.None && !L.asm[k]) kind = 'yard'; else continue; }
       const c = this.ctxFor(L, k, Q, mb, kind, L.level[k], trees);
       designLot(c);
     }
@@ -471,6 +478,30 @@ export class CityView {
     }
     for (const [id, gr] of this.grows) if (!keep.has(id)) { this.disposeGrow(gr); this.grows.delete(id); }
     this.stats.grows = this.grows.size;
+  }
+
+  private rebuildSites(s: StateMsg) {
+    const L = s.lots;
+    const idx = new Map<number, number>();
+    for (let k = 0; k < L.n; k++) if (L.asm[k] > 0 || s.assemblies.length) idx.set(L.id[k], k);
+    const keep = new Set<number>();
+    for (const a of s.assemblies) {
+      keep.add(a.id);
+      const sig = siteSig(a, L, idx);
+      const old = this.sites.get(a.id);
+      if (old && old.sig === sig) { old.pct = a.pct; continue; }
+      if (old) this.disposeSite(old);
+      const st = buildSite(this, a, s, idx) as Site & { pct: number };
+      st.sig = sig; st.pct = a.pct;
+      this.siteGroup.add(st.group);
+      this.sites.set(a.id, st);
+    }
+    for (const [id, st] of this.sites) if (!keep.has(id)) { this.disposeSite(st); this.sites.delete(id); }
+  }
+
+  private disposeSite(st: Site) {
+    this.siteGroup.remove(st.group);
+    st.group.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); });
   }
 
   private disposeGrow(gr: Grow) {
@@ -594,6 +625,7 @@ export class CityView {
         for (const b of gr.bodies) b.scale.y = p;
       }
     }
+    for (const st of this.sites.values()) for (const o of st.skin) o.scale.y = Math.max(0.03, st.pct);
     if (!this.cranes.length) return;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
     for (let k = 0; k < this.cranes.length; k++) {

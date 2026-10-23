@@ -7,17 +7,18 @@
  * the tallest allowed building is a mid-rise; tall clusters appear only where the player's lines raise accessibility.
  * F (0..1) is the coarser density class used to pick the plot fabric (CBD / inner / medium / suburb / fringe).
  */
-import { N, PERSONS_PER_HOME } from './constants';
+import { N, PERSONS_PER_HOME, Flag } from './constants';
 import { baselineHeight } from './metrics';
 import type { Sim } from './sim';
 import type { Lot } from './lots';
 
 export const FIELD = {
+  cbdOffset: 3.4,      // cells from the old town's centre to the business district's centre
   mainR0: 6.0,         // cells: radius of the main centre's influence at the start
   mainGrow: 0.4,       // extra cells per sqrt(thousand people)
   subW: { origin: 1, village: 0.42, planned: 0.5, garden: 0.3 } as Record<string, number>,
   subR: 4.2,
-  jobsRef: 60,         // mean jobs per cell (5x5 blur) that count as full job concentration
+  jobsRef: 45,         // mean jobs per cell (5x5 blur) that count as full job concentration
   accRef: 0.2,         // station accessibility (share of the city's jobs reached) that counts as full
   walkFull: 3,         // minutes of walk with full station weight
   walkZero: 10,        // minutes at which the station no longer counts
@@ -39,6 +40,7 @@ export class DensityField {
   hmax = new Float32Array(N * N);
   mainR = FIELD.mainR0;
   main = { x: N / 2, y: N / 2 };
+  private placed = false;
 
   private blur = new Float32Array(N * N);
   private tmp = new Float32Array(N * N);
@@ -47,7 +49,22 @@ export class DensityField {
     const pop = sim.homes * PERSONS_PER_HOME;
     this.mainR = FIELD.mainR0 + FIELD.mainGrow * Math.sqrt(pop / 1000);
     const ds = sim.town.districts;
-    if (ds.length) this.main = { x: ds[0].x, y: ds[0].y };
+    if (ds.length && !this.placed) {
+      // the business district forms at the flank of the old town, not on top of its protected heart: pick the side with the most free land
+      let best = { x: ds[0].x, y: ds[0].y }, bs = -1;
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2 + 0.2, px = ds[0].x + Math.cos(a) * FIELD.cbdOffset, py = ds[0].y + Math.sin(a) * FIELD.cbdOffset;
+        let free = 0;
+        for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+          const x = Math.floor(px + dx), y = Math.floor(py + dy);
+          if (x < 1 || y < 1 || x >= N - 1 || y >= N - 1 || dx * dx + dy * dy > 10) continue;
+          const i = y * N + x;
+          if (!sim.g.water[i] && !(sim.g.flags[i] & (Flag.Steep | Flag.Docks))) free++;
+        }
+        if (free > bs) { bs = free; best = { x: px, y: py }; }
+      }
+      this.main = best; this.placed = true;
+    }
     // job concentration: two box passes of radius 2 over the job raster (~gaussian, 5x5 twice)
     this.blur.set(sim.cJobs);
     for (let pass = 0; pass < 2; pass++) {
