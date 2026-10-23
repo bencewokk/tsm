@@ -114,6 +114,20 @@ export class LotStore {
         const px = k < 0 ? cx : q[k * 2], py = k < 0 ? cy : q[k * 2 + 1];
         if (pointSeg(px, py, ax, ay, bx, by).d < clear) return false;
       }
+      // a street (or a dead-end tip) inside the plot
+      const L = Math.hypot(bx - ax, by - ay), steps = Math.max(1, Math.ceil(L / 0.2));
+      for (let k = 0; k <= steps; k++) {
+        const px = ax + (bx - ax) * k / steps, py = ay + (by - ay) * k / steps;
+        let inside = true, sgn = 0;
+        for (let m = 0; m < 4 && inside; m++) {
+          const x1 = q[m * 2], y1 = q[m * 2 + 1], x2 = q[((m + 1) % 4) * 2], y2 = q[((m + 1) % 4) * 2 + 1];
+          const cr = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
+          if (Math.abs(cr) < 1e-9) continue;
+          const sg = cr > 0 ? 1 : -1;
+          if (sgn && sg !== sgn) inside = false; else sgn = sg;
+        }
+        if (inside) return false;
+      }
       // an edge passing through the plot
       for (let a = 0; a <= 4; a++) for (let b = 0; b <= 4; b++) {
         const s0 = a / 4, t0 = b / 4;

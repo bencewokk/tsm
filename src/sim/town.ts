@@ -299,7 +299,7 @@ export function layoutTown(c: TownCtx) {
     // the origin town also gets a city hall and a market hall near its square
     if (d.kind === 'origin' && sq) {
       const used = new Set([sq, ch]);
-      const pickNear = () => byDist.find((l) => l.alive && !used.has(l) && !l.lm && !l.type && Math.hypot(l.x - sq.x, l.y - sq.y) < 2.2 && Math.hypot(l.x - sq.x, l.y - sq.y) > 0.9);
+      const pickNear = () => byDist.find((l) => l.alive && !used.has(l) && !l.lm && (!l.type || l.type === BT.Res || l.type === BT.Com) && Math.hypot(l.x - sq.x, l.y - sq.y) < 2.2 && Math.hypot(l.x - sq.x, l.y - sq.y) > 0.9);
       if (!civicQuarter) { const h = pickNear(); if (h) { used.add(h); grow(h, 'cityhall'); } }
       const m = pickNear(); if (m) { used.add(m); grow(m, 'markethall'); }
     }

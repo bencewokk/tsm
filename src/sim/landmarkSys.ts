@@ -184,7 +184,9 @@ export class LandmarkSystem {
       if (!lot || !lot.alive) continue;
       const def = LANDMARKS[st.def];
       const pct = st.state === 'building' && lot.constrTotal ? 1 - lot.constr / lot.constrTotal : 1;
-      out.push({ id: def.id, name: def.name, form: def.form, category: def.category, x: lot.x, y: lot.y, state: st.state, pct, served: st.served, carPark: st.carPark, eventDay: st.eventDay, visitors: def.visitors });
+      let nm = def.name;
+      if (def.start) { let bd = Infinity, vn = ''; for (const v of this.sim.g.villages) { const dd = Math.hypot(v.x - lot.x, v.y - lot.y); if (dd < bd) { bd = dd; vn = v.name; } } nm = `${def.name} (${vn})`; }
+      out.push({ id: def.id, name: nm, form: def.form, category: def.category, x: lot.x, y: lot.y, state: st.state, pct, served: st.served, carPark: st.carPark, eventDay: st.eventDay, visitors: def.visitors });
     }
     return out;
   }
