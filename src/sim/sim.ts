@@ -3,7 +3,7 @@ import { Rng } from './rng';
 import { generateTerrain, idx, inb, adjRoad, DIR4, type Grid } from './terrain';
 import type { Command, InitMsg, StateMsg, Stats } from './protocol';
 import { Metro } from './metro';
-import { STATION_COST, TRAIN_COST, START_MONEY } from './constants';
+import { STATION_COST, TRAIN_COST, START_MONEY, TRIPS_PER_HOME, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 
 /** Tunable knobs for the growth model. Exposed so the headless runner / UI can poke them. */
 export const TUNE = {
@@ -28,6 +28,10 @@ export const TUNE = {
   upLV: [0, 0.6, 0.82],    // LV to upgrade from level k -> k+1 (index = current level)
   comUpLV: [0, 0.55, 0.88],
   downLV: [0, 0.1, 0.3, 0.5],
+  distDecay: 2.6,        // km: gravity model distance decay
+  modeBeta: 0.16,        // logistic mode choice sensitivity per minute
+  transitASC: 1.5,        // minutes: transit inconvenience constant
+  carLockASC: 14,        // extra minutes of perceived transit time where residents own cars
   growth: 0.032,        // base monthly growth rate of the region's demand pool
   minGrowth: 180,        // homes per month floor
 };
@@ -76,6 +80,13 @@ export class Sim {
   stAccess = new Float64Array(0);
   zoneNear: { s: number; w: number }[][] = [];
   egress = new Float64Array(0);
+  egressVia = new Int32Array(0);
+  transitTrips = 0;
+  totalTrips = 0;
+  rating = 0;
+  /** share of each zone's homes that are car-locked (docks) */
+  zCarLocked = new Float64Array(ZONES);
+  desire: { a: number; b: number; trips: number }[] = [];
   income = 0;
   expenses = 0;
   buildSpend = 0;
@@ -150,6 +161,7 @@ export class Sim {
   /** Recompute transit-driven land value right away so the overlay reacts to a new line. */
   refreshTransit() {
     this.computeTransit();
+    this.computeRiders();
     this.computeLandValue();
   }
 
@@ -177,6 +189,7 @@ export class Sim {
     this.computeCongestion();
     this.computeDriveTimes();
     this.computeTransit();
+    this.computeRiders();
     this.computeLandValue();
     this.grow();
     this.extendRoads();
@@ -302,6 +315,7 @@ export class Sim {
     this.zoneNear = [];
     for (let z = 0; z < ZONES; z++) this.zoneNear.push([]);
     this.egress = new Float64Array(S * ZONES).fill(Infinity);
+    this.egressVia = new Int32Array(S * ZONES).fill(-1);
     if (S === 0) return;
     const used = m.stations.filter((st) => m.sIndex.has(st.id)).sort((a, b) => m.sIndex.get(a.id)! - m.sIndex.get(b.id)!);
     for (let z = 0; z < ZONES; z++) {
@@ -317,7 +331,7 @@ export class Sim {
         for (let s = 0; s < S; s++) {
           if (s === t) continue;
           const v = T[s * S + t] + w;
-          if (v < eg[s * ZONES + b]) eg[s * ZONES + b] = v;
+          if (v < eg[s * ZONES + b]) { eg[s * ZONES + b] = v; this.egressVia[s * ZONES + b] = t; }
         }
     const J = Math.max(1, this.jobs);
     for (let s = 0; s < S; s++) {
@@ -596,10 +610,91 @@ export class Sim {
     void laid;
   }
 
+  // ---------------------------------------------------------------- riders
+  /** Gravity-model trips between zones, logistic car/transit choice, assignment onto lines. */
+  computeRiders() {
+    const m = this.metro, S = m.sIndex.size;
+    const L = m.lines.length;
+    const segLoad = m.lines.map((l) => l.segTime.map(() => [0, 0]));
+    const boards = new Float64Array(L);
+    const stEntries = new Float64Array(S);
+    const stOD = new Float64Array(S * S);
+    const zTrips = new Float64Array(ZONES), zTransit = new Float64Array(ZONES);
+    const attr = new Float64Array(ZONES);
+    for (let b = 0; b < ZONES; b++) attr[b] = this.zJobs[b] + 0.3 * this.zHomes[b];
+    const zd = (a: number, b: number) => a === b ? 0.3 : Math.hypot((a % NZ) - (b % NZ), ((a / NZ) | 0) - ((b / NZ) | 0)) * ZONE * CELL / 1000;
+    const g = new Float64Array(ZONES);
+    const desire: { a: number; b: number; trips: number }[] = [];
+    let total = 0, transit = 0;
+    for (let a = 0; a < ZONES; a++) {
+      const P = this.zHomes[a] * TRIPS_PER_HOME;
+      if (P <= 0) continue;
+      let sum = 0;
+      for (let b = 0; b < ZONES; b++) { g[b] = attr[b] > 0 ? attr[b] * Math.exp(-zd(a, b) / TUNE.distDecay) : 0; sum += g[b]; }
+      if (sum <= 0) continue;
+      const near = this.zoneNear[a] ?? [];
+      const asc = TUNE.transitASC + this.zCarLocked[a] * TUNE.carLockASC;
+      for (let b = 0; b < ZONES; b++) {
+        if (g[b] <= 0) continue;
+        const T = P * g[b] / sum;
+        total += T; zTrips[a] += T;
+        if (a === b || !near.length) { if (a !== b && T > 30 && zd(a, b) > 1.2) desire.push({ a, b, trips: T }); continue; }
+        let best = Infinity, bs = -1;
+        for (const { s, w } of near) {
+          const v = w + this.egress[s * ZONES + b];
+          if (v < best) { best = v; bs = s; }
+        }
+        const drive = this.driveTime[a * ZONES + b] + 5 * Math.min(1, this.zJobs[b] / 3000);
+        let share = 0;
+        if (bs >= 0 && best < 120) share = 1 / (1 + Math.exp(TUNE.modeBeta * (best + asc - drive)));
+        const F = T * share;
+        if (T * (1 - share) > 30 && zd(a, b) > 1.2) desire.push({ a, b, trips: T * (1 - share) });
+        if (F <= 0.01) continue;
+        transit += F; zTransit[a] += F;
+        const t = this.egressVia[bs * ZONES + b];
+        if (t >= 0) { stOD[bs * S + t] += F; stEntries[bs] += F; }
+      }
+    }
+    for (let s = 0; s < S; s++)
+      for (let t = 0; t < S; t++) {
+        const F = stOD[s * S + t];
+        if (F <= 0) continue;
+        m.tracePath(s, t, (li, k, dir) => { segLoad[li][k][dir > 0 ? 0 : 1] += F; }, (li) => { boards[li] += F; });
+      }
+    let rSum = 0, rW = 0;
+    m.lines.forEach((l, li) => {
+      l.riders = boards[li];
+      l.segLoad = segLoad[li].map(([f, r]) => Math.max(f, r) * PEAK_FACTOR);
+      l.peakLoad = l.segLoad.reduce((a, b) => Math.max(a, b), 0);
+      l.crowd = l.capacity > 0 ? l.peakLoad / l.capacity : 0;
+      l.rating = clamp(100 - Math.max(0, l.crowd - 0.7) * 130 - Math.max(0, l.headway - 4) * 4, 0, 100);
+      rSum += l.rating * Math.max(1, l.riders); rW += Math.max(1, l.riders);
+    });
+    const used = m.stations.filter((st) => m.sIndex.has(st.id));
+    for (const st of m.stations) st.riders = 0;
+    for (const st of used) st.riders = stEntries[m.sIndex.get(st.id)!];
+    this.rating = rW > 0 ? rSum / rW : 0;
+    this.transitTrips = transit;
+    this.totalTrips = total;
+    for (let z = 0; z < ZONES; z++) this.zTransitShare[z] = zTrips[z] > 0 ? zTransit[z] / zTrips[z] : 0;
+    // desire lines: strongest car-bound flows between distinct zones, both directions summed
+    const agg = new Map<number, number>();
+    for (const d of desire) {
+      const k = Math.min(d.a, d.b) * ZONES + Math.max(d.a, d.b);
+      agg.set(k, (agg.get(k) ?? 0) + d.trips);
+    }
+    this.desire = [...agg.entries()].sort((x, y) => y[1] - x[1] || x[0] - y[0]).slice(0, 30).map(([k, v]) => ({ a: Math.floor(k / ZONES), b: k % ZONES, trips: v }));
+  }
+
   // ---------------------------------------------------------------- money
   protected finance() {
-    this.income = 0;
-    this.expenses = 0;
+    const m = this.metro;
+    this.income = this.transitTrips * FARE * 30;
+    let trains = 0, km = 0;
+    for (const l of m.lines) { trains += l.trains; km += l.lengthKm; }
+    const stations = m.stations.length;
+    this.expenses = trains * TRAIN_MONTH + stations * STATION_UPKEEP + km * TRACK_UPKEEP_KM;
+    this.money += this.income - this.expenses;
   }
 
   // ---------------------------------------------------------------- output
@@ -614,7 +709,8 @@ export class Sim {
       month: this.month, population: Math.round(this.homes * PERSONS_PER_HOME), homes: this.homes, jobs: this.jobs,
       money: this.money, income: this.income, expenses: this.expenses, build: this.buildSpend,
       resDemand: this.resDemand, comDemand: this.comDemand, indDemand: this.indDemand,
-      congestion: this.congestion, driveSpeed: this.driveSpeed, transitShare: 0, transitTrips: 0, rating: 0, buildings: b,
+      congestion: this.congestion, driveSpeed: this.driveSpeed, transitShare: this.totalTrips > 0 ? this.transitTrips / this.totalTrips : 0,
+      transitTrips: this.transitTrips, rating: this.rating, buildings: b,
     };
   }
 
@@ -630,7 +726,8 @@ export class Sim {
         capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice() })),
       event: null,
       docks: { state: 'none', deal: '', dealName: '', brief: '', deadline: 0, served: 0, planned: 0, carLocked: 0, built: 0, centre: { x: 0, y: 0 } },
-      desire: [], log: this.log.slice(-8), speed: this.speed,
+      desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
+      log: this.log.slice(-8), speed: this.speed,
     };
   }
 }

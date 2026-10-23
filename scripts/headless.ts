@@ -91,7 +91,7 @@ function run(withLine: boolean) {
   const lc = [0, 0, 0, 0];
   for (let i = 0; i < N * N; i++) if (sim.g.btype[i] === BT.Res) lc[sim.g.level[i]]++;
   console.log(`LV built p10 ${pc(0.1)} p50 ${pc(0.5)} p90 ${pc(0.9)} max ${pc(1)}; res levels ${lc.join('/')}`);
-  if (withLine) nearStats(sim);
+  if (withLine) { nearStats(sim); for (const l of sim.metro.lines) console.log(`line ${l.id}: riders/day ${Math.round(l.riders)} peak ${Math.round(l.peakLoad)}/h cap ${Math.round(l.capacity)}/h rating ${l.rating.toFixed(0)}`); }
   console.log(`ran ${months} months in ${Date.now() - t0} ms`);
   return sim;
 }
