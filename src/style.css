@@ -73,3 +73,21 @@ button.mini { padding: 0 6px; font-size: 11px; line-height: 16px; }
   .lines { width: 228px; }
   .row { font-size: 11px; }
 }
+.modal-wrap { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(30, 35, 40, 0.25); pointer-events: auto; }
+.modal { width: min(560px, calc(100% - 32px)); max-height: calc(100% - 40px); overflow: auto; padding: 18px 20px; }
+.modal h2 { margin: 2px 0 8px; font-size: 19px; font-weight: 650; }
+.modal p { font-size: 13px; line-height: 1.5; margin: 0 0 12px; }
+.choices { display: flex; flex-direction: column; gap: 8px; }
+.choice { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; white-space: normal; }
+.choice span { color: var(--muted); font-size: 12px; }
+.choice:hover { border-color: var(--accent); background: #f3f7fb; }
+.docks { position: absolute; right: 12px; bottom: 64px; width: 270px; padding: 10px 12px; display: none; }
+.docks .small { margin-top: 4px; }
+.dbar { position: relative; height: 8px; border-radius: 4px; background: rgba(0,0,0,0.07); overflow: hidden; display: flex; margin-top: 6px; }
+.dbar i { height: 100%; display: block; }
+.dbar .b, .k.b { background: #8fb7d9; }
+.dbar .s, .k.s { background: #cfe3f2; }
+.dbar .l, .k.l { background: #d9936f; }
+.k { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; }
+@media (max-width: 900px) { .docks { width: 228px; } }
+.stat .k, .stat .v { white-space: nowrap; }

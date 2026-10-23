@@ -95,6 +95,49 @@ export class Hud {
   }
 
   private last: StateMsg | null = null;
+  private eventSig = '';
+  private docksSig = '';
+  onFocusDocks?: () => void;
+
+  private renderEvent(s: StateMsg) {
+    const ev = s.event;
+    const sig = ev ? ev.id + ev.title : '';
+    if (sig === this.eventSig) return;
+    this.eventSig = sig;
+    const wrap = this.el.modal;
+    if (!ev) { wrap.innerHTML = ''; wrap.style.display = 'none'; return; }
+    wrap.style.display = 'flex';
+    wrap.innerHTML = `<div class="modal panel">
+      <div class="h">${dateStr(s.stats.month)} · City hall</div>
+      <h2>${ev.title}</h2>
+      <p>${ev.text}</p>
+      <div class="choices">${ev.choices.map((c, k) => `<button class="choice" data-choice="${k}"><b>${c.label}</b><span>${c.detail}</span></button>`).join('')}</div>
+    </div>`;
+    wrap.querySelectorAll<HTMLButtonElement>('[data-choice]').forEach((b) => b.addEventListener('click', () => {
+      this.send({ type: 'choose', event: ev.id, choice: Number(b.dataset.choice) });
+      wrap.innerHTML = ''; wrap.style.display = 'none';
+    }));
+  }
+
+  private renderDocks(s: StateMsg) {
+    const d = s.docks;
+    const left = d.deadline ? d.deadline - s.stats.month : 0;
+    const sig = JSON.stringify([d.state, d.served, d.planned, d.carLocked, d.built, left]);
+    if (sig === this.docksSig) return;
+    this.docksSig = sig;
+    const el = this.el.docks;
+    if (d.state !== 'active') { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    const pct = (v: number) => `${Math.round((v / Math.max(1, d.planned)) * 100)}%`;
+    const dl = !d.deadline ? '<span class="muted">no deadline</span>'
+      : left > 0 ? `<b class="${left <= 4 ? 'neg' : ''}">${left} months</b> left (deadline ${dateStr(d.deadline)})` : '<b class="neg">deadline passed</b>';
+    el.innerHTML = `<div class="h">Docks project · ${d.dealName}</div>
+      <div class="small">${d.brief}</div>
+      <div class="dbar"><i class="b" style="width:${pct(d.built)}"></i><i class="s" style="width:${pct(Math.max(0, d.served - d.built))}"></i><i class="l" style="width:${pct(d.carLocked)}"></i></div>
+      <div class="small"><span class="k b"></span>built ${d.built} · <span class="k s"></span>served ${d.served} · <span class="k l"></span>car-locked ${d.carLocked} / ${d.planned}</div>
+      <div class="small">${dl} <button class="mini" data-focus>Show me</button></div>`;
+    el.querySelector('[data-focus]')?.addEventListener('click', () => this.onFocusDocks?.());
+  }
   private linesSig = '';
 
   private renderLines(s: StateMsg) {
@@ -150,6 +193,8 @@ export class Hud {
   update(s: StateMsg) {
     this.last = s;
     this.renderLines(s);
+    this.renderEvent(s);
+    this.renderDocks(s);
     const st = s.stats, e = this.el;
     e.date.textContent = dateStr(st.month);
     e.pop.textContent = num(st.population);

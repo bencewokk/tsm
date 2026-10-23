@@ -129,6 +129,14 @@ export class MetroView {
     disc.position.set(p.x, y + 4, p.z);
     disc.renderOrder = 11;
     this.stations.add(disc);
+    // 600 m catchment ring, shown in plan mode
+    const catchMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthTest: false, depthWrite: false });
+    const catchRing = new THREE.Mesh(new THREE.RingGeometry(588, 600, 64), catchMat);
+    catchRing.rotation.x = -Math.PI / 2;
+    catchRing.position.set(p.x, y + 6, p.z);
+    catchRing.renderOrder = 9;
+    catchRing.userData.catch = true;
+    this.stations.add(catchRing);
     const inner = new THREE.Mesh(new THREE.CircleGeometry(26, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false }));
     inner.rotation.x = -Math.PI / 2;
     inner.position.set(p.x, y + 4.2, p.z);
@@ -150,7 +158,7 @@ export class MetroView {
   setPlan(on: boolean) {
     this.plan = on;
     for (const m of [...this.ribbonMats, ...this.discMats]) { m.depthTest = !on; m.needsUpdate = true; }
-    this.ribbons.scale.set(1, 1, 1);
+    this.stations.children.forEach((c) => { if (c.userData.catch) c.visible = on; });
   }
 
   setXray(v: number) {

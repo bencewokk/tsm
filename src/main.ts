@@ -87,6 +87,14 @@ hud.handlers.onToggle = (name, on) => {
   if (name === 'night') nightTarget = on ? 1 : 0;
 };
 
+hud.onFocusDocks = () => {
+  if (!state) return;
+  const c = state.docks.centre;
+  const target = new THREE.Vector3((c.x + 0.5) * CELL, 0, (c.y + 0.5) * CELL);
+  const dir = env.camera.position.clone().sub(env.controls.target).normalize();
+  flyTo(target.clone().addScaledVector(dir, 1500), target);
+};
+
 let fly: { from: THREE.Vector3; to: THREE.Vector3; tf: THREE.Vector3; tt: THREE.Vector3; t: number } | null = null;
 function flyTo(pos: THREE.Vector3, target: THREE.Vector3) {
   fly = { from: env.camera.position.clone(), to: pos, tf: env.controls.target.clone(), tt: target, t: 0 };

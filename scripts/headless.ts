@@ -9,6 +9,7 @@ const flags = new Set(args.filter((a: string) => a.startsWith('--')));
 const nums = args.filter((a: string) => !a.startsWith('--')).map(Number);
 const seed = nums[0] ?? 4821;
 const months = nums[1] ?? 60;
+const deal = nums[2] ?? 0;
 
 function ascii(sim: Sim) {
   const g = sim.g;
@@ -79,6 +80,14 @@ function run(withLine: boolean) {
   for (let m = 0; m < months; m++) {
     if (withLine && m === lineMonth) testLine(sim);
     sim.tick();
+    if (sim.pending) {
+      const ev = sim.eventInfo()!;
+      const pick = ev.id === 'docks_bought' ? deal : 0;
+      console.log(`[event m${sim.month}] ${ev.title} -> ${ev.choices[pick].label}
+   ${ev.text.replace(/<[^>]+>/g, ' ').slice(0, 300)}`);
+      sim.apply({ type: 'choose', event: ev.id, choice: pick });
+    }
+    if (sim.docks.state !== 'none' && m % 6 === 0) { const d = sim.docksInfo(); console.log(`   docks m${sim.month}: planned ${d.planned} served ${d.served} built ${d.built} carLocked ${d.carLocked}`); }
     if ((m + 1) % 12 === 0 || m === months - 1) {
       const s = sim.stats();
       console.log(`m${String(s.month).padStart(3)} pop ${String(Math.round(s.population)).padStart(7)} homes ${s.homes} jobs ${s.jobs} bld ${s.buildings} $${(s.money / 1e6).toFixed(1)}M inc ${(s.income / 1e6).toFixed(2)} exp ${(s.expenses / 1e6).toFixed(2)} cong ${s.congestion.toFixed(2)} spd ${s.driveSpeed.toFixed(0)} share ${(s.transitShare * 100).toFixed(1)}% R ${s.resDemand.toFixed(2)} C ${s.comDemand.toFixed(2)}`);

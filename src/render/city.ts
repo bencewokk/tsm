@@ -97,7 +97,7 @@ export class CityView {
     this.buildings.frustumCulled = false;
     this.inst = new Float32Array(cap * 6);
 
-    const ghostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.28, depthWrite: false, emissive: 0x6fa8d8, emissiveIntensity: 0.25 });
+    const ghostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.55, depthWrite: false, emissive: 0x404040, emissiveIntensity: 0.4 });
     this.ghosts = new THREE.InstancedMesh(boxGeo(), ghostMat, 4000);
     this.ghosts.count = 0;
     this.ghosts.frustumCulled = false;
@@ -171,6 +171,18 @@ export class CityView {
 
   private rebuildBuildings(s: StateMsg) {
     let n = 0, ng = 0;
+    // which cells are within 600 m of a station on a line (docks service brief)
+    const onLine = new Set<number>();
+    for (const l of s.lines) for (const id of l.stations) onLine.add(id);
+    const served = new Uint8Array(N * N);
+    for (const st of s.stations) {
+      if (!onLine.has(st.id)) continue;
+      for (let dy = -12; dy <= 12; dy++) for (let dx = -12; dx <= 12; dx++) {
+        const x = st.x + dx, y = st.y + dy;
+        if (dx * dx + dy * dy <= 144 && x >= 0 && y >= 0 && x < N && y < N) served[y * N + x] = 1;
+      }
+    }
+    const ghostCol = new THREE.Color();
     this.anims = [];
     this.cranes = [];
     const inst = this.inst;
@@ -203,6 +215,8 @@ export class CityView {
           if (ng >= 4000) break;
           this.v.set(b.x, this.gy(i), b.z); this.s.set(b.w, b.h, b.d); this.q.identity();
           this.m.compose(this.v, this.q, this.s);
+          ghostCol.setHex((s.flags[i] & Flag.CarLocked) ? 0xd9785a : served[i] ? 0x6fb0e8 : 0xf2c46a);
+          this.ghosts.setColorAt(ng, ghostCol);
           this.ghosts.setMatrixAt(ng++, this.m);
         }
       }
@@ -212,6 +226,7 @@ export class CityView {
     if (this.buildings.instanceColor) this.buildings.instanceColor.needsUpdate = true;
     this.ghosts.count = ng;
     this.ghosts.instanceMatrix.needsUpdate = true;
+    if (this.ghosts.instanceColor) this.ghosts.instanceColor.needsUpdate = true;
     this.craneMast.count = this.cranes.length;
     this.craneJib.count = this.cranes.length;
     this.animate(0, 0);
