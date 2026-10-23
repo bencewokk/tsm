@@ -17,7 +17,7 @@ const seed = Number(params.get('seed') ?? 4821) | 0 || 4821;
 const app = document.getElementById('app')!;
 const env = new Env(app);
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
-const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string }) => worker.postMessage(c);
+const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean }) => worker.postMessage(c);
 
 let init: InitMsg | null = null;
 let terrain: TerrainView | null = null;
@@ -65,7 +65,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     console.error('[sim]', m.message);
   }
 };
-send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined });
+send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1' });
 
 // ------------------------------------------------------------------ tools
 let savedView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;

@@ -15,6 +15,7 @@ import { LANDMARKS, landmarkAt } from './landmarks';
 import { makeCityProfile, type CityProfile } from './cityprofile';
 import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './town';
 import { MinHeap } from './heap';
+import { pruneRoads, promoteJunctions } from './hierarchy';
 import { RELIEF, hAt, toblerFactor, slopeField, viewField, zoneEffort } from './relief';
 
 /** Tunable knobs for the growth model. */
@@ -153,6 +154,7 @@ export class Sim {
         .some((l) => (l.flags & (Flag.Docks | Flag.Planned)) || l.asm > 0 || l.constr > 0 || l.type === BT.Ind || isAmenity(l.type) || l.level >= 2),
       clear: (ax, ay, bx, by) => { for (const l of this.lots.inCorridor(ax, ay, bx, by, ROAD_HALF[RC.Local] + 0.05)) this.lots.remove(l); },
     };
+    if (pruneRoads(this, 60) > 0) this.roads.rasterize(this.g.road);
     this.aggregate();
     this.computeLandValue();
     this.lvS.set(this.lv);
@@ -443,6 +445,7 @@ export class Sim {
     this.docksTick();
     this.extendRoads();
     this.upgradeRoads();
+    if (this.month % 6 === 0) { const pr = pruneRoads(this, 10), pj = promoteJunctions(this.town); if (pr + pj > 0) this.roads.rasterize(this.g.road); }
     this.finance();
     this.checkEvents();
   }
@@ -515,7 +518,9 @@ export class Sim {
       if (l.flags & Flag.CarLocked) this.zCarLocked[z] += hh;
       jx += (jj + hh * 0.3) * l.x; jy += (jj + hh * 0.3) * l.y;
     }
-    for (let i = 0; i < N * N; i++) if (g.road[i]) this.zRoads[this.zoneOf(i)]++;
+    // road capacity by class: an arterial cell carries about 2.4x a local street (g.road holds 3 / 2 / 1)
+    const CAPW = [0, 1, 1.5, 2.4];
+    for (let i = 0; i < N * N; i++) if (g.road[i]) this.zRoads[this.zoneOf(i)] += CAPW[g.road[i]];
     for (let z = 0; z < ZONES; z++) this.zCarLocked[z] = this.zHomes[z] > 0 ? this.zCarLocked[z] / this.zHomes[z] : 0;
     this.homes = h; this.jobs = j;
     const w = j + h * 0.3;

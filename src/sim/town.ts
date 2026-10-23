@@ -8,6 +8,7 @@ import { PROFILE_INDEX } from './profiles';
 import type { CityProfile } from './cityprofile';
 import { LANDMARKS, LANDMARK_INDEX } from './landmarks';
 import type { DistrictProfile } from './profiles';
+import { HIER, inCoreXY, shapeHierarchy, arterialJunctionNear, promoteJunctions } from './hierarchy';
 
 /** Each village/district has its own street orientation and profile set; noise bends it, and districts meet irregularly. */
 export interface District {
@@ -42,7 +43,9 @@ export function orientationAt(c: TownCtx, x: number, y: number): number {
 
 /** Street regularity of the district at a point (profile.roadRegularity): 0 organic .. 1 planned. */
 export function regularityAt(c: TownCtx, x: number, y: number): number {
-  return c.profileAt ? c.profiles[c.profileAt(x, y)].roadRegularity : 0.5;
+  const r = c.profileAt ? c.profiles[c.profileAt(x, y)].roadRegularity : 0.5;
+  // outside the old core the street plan is strict (grid-aligned, ordered); the core keeps its own irregularity
+  return !HIER.on || inCoreXY(c, x, y) ? r : Math.max(r, HIER.strictReg);
 }
 
 /** Profile ids and radii of a quarter, from its kind and the city's origin. */
@@ -254,6 +257,9 @@ export function layoutTown(c: TownCtx) {
     link(P(mid), [c.districts[0].x, c.districts[0].y]);
   }
   roads.rasterize(g.road);
+  shapeHierarchy(c);
+  promoteJunctions(c);
+  roads.rasterize(g.road);
   lots.frontageAll(roads.drainFresh());
 
   // initial buildings: houses thinning out from each village centre, shops at the core, one green
@@ -364,8 +370,10 @@ function alignToGrid(c: TownCtx, x: number, y: number, a: number): number {
     if (d < bd) { bd = d; best = g; }
   }
   const reg = regularityAt(c, x, y);
-  if (bd >= 0.35 + 0.4 * reg) return a;
   const signed = Math.atan2(Math.sin(a - best), Math.cos(a - best));
+  // strict outside the core: every new street lies on the district grid (no diagonals)
+  if (HIER.on && !inCoreXY(c, x, y)) return best + signed * 0.08;
+  if (bd >= 0.35 + 0.4 * reg) return a;
   return best + signed * 0.5 * (1 - reg);
 }
 
@@ -397,6 +405,8 @@ export function explore(c: TownCtx, f: GrowthField, ops: number): number {
         const ax = roads.nx[roads.ea[e]], ay = roads.ny[roads.ea[e]], bx = roads.nx[roads.eb[e]], by = roads.ny[roads.eb[e]];
         const x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
         const ea = Math.atan2(by - ay, bx - ax) + (rng.next() < 0.5 ? 1 : -1) * Math.PI / 2;
+        // junctions on an arterial are spaced out
+        if (HIER.on && roads.ecls[e] === RC.Arterial && arterialJunctionNear(c, x, y, HIER.junctionGap)) continue;
         cand = { s: 0, node: -1, fromEdge: { e, x, y }, base: ea, x, y };
       }
       const ahead = f.lvAt(cand.x + Math.cos(cand.base) * 2, cand.y + Math.sin(cand.base) * 2);
@@ -411,7 +421,9 @@ export function explore(c: TownCtx, f: GrowthField, ops: number): number {
     const len = rng.range(2.4, 3.8);
     let a = alignToGrid(c, best.x, best.y, best.base);
     a = bestHeading(c, best.x, best.y, a, len);
-    const cls = best.fromEdge && roads.ecls[best.fromEdge.e] === RC.Arterial && rng.next() < 0.4 ? RC.Collector : RC.Local;
+    // off an arterial only a collector may branch (outside the core); locals fill the blocks between collectors
+    const offArt = !!best.fromEdge && roads.ecls[best.fromEdge.e] === RC.Arterial;
+    const cls = offArt && (HIER.on ? !inCoreXY(c, best.x, best.y) || rng.next() < 0.4 : rng.next() < 0.4) ? RC.Collector : RC.Local;
     let r = roads.grow(best.node, best.x + Math.cos(a) * len, best.y + Math.sin(a) * len, cls, f.year, { fromEdge: best.fromEdge });
     if (r >= 0) { built++; growthStats.exploreOk++; }
     // keep going: streets usually run a few blocks before stopping
@@ -424,6 +436,7 @@ export function explore(c: TownCtx, f: GrowthField, ops: number): number {
       if (r >= 0) built++;
     }
   }
+  promoteJunctions(c);   // before the new frontage is cut: locals never meet an arterial directly
   return built;
 }
 
@@ -463,5 +476,6 @@ export function densify(c: TownCtx, f: GrowthField, roadDist: Uint8Array, ops: n
       if (r >= 0) { built++; done = true; growthStats.densOk++; }
     }
   }
+  promoteJunctions(c);
   return built;
 }

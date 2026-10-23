@@ -3,6 +3,7 @@ import { BT, Flag } from './constants';
 import { RC } from './roads';
 import { orientationAt } from './town';
 import { angDiff } from './geom';
+import { hAt } from './relief';
 import type { Sim } from './sim';
 import type { Lot } from './lots';
 
@@ -15,6 +16,10 @@ export interface RoadZone {
   deadEnds: number; shortDeadEnds: number;
   /** enclosed faces with three corners and under 25 cells^2, and tiny faces (< 3 cells^2) */
   triangles: number; slivers: number; faces: number;
+  /** nodes where a local street meets an arterial directly (the hierarchy wants a collector in between) and junctions of any kind on arterials */
+  localOnArterial: number; arterialJunctions: number;
+  /** mean and max gradient (m per m) along arterial edges, and the share of arterial km on ground above 8% */
+  artGradeMean: number; artGradeMax: number; artSteepShare: number;
 }
 export interface RoadStats extends RoadZone { core: RoadZone; outside: RoadZone }
 
@@ -54,7 +59,7 @@ export function roadFaces(sim: Sim): { nodes: number[]; area: number }[] {
   return out;
 }
 
-const zone = (): RoadZone => ({ edges: 0, km: 0, byClass: [0, 0, 0], kmByClass: [0, 0, 0], diagonals: 0, diagonalKm: 0, deadEnds: 0, shortDeadEnds: 0, triangles: 0, slivers: 0, faces: 0 });
+const zone = (): RoadZone => ({ edges: 0, km: 0, byClass: [0, 0, 0], kmByClass: [0, 0, 0], diagonals: 0, diagonalKm: 0, deadEnds: 0, shortDeadEnds: 0, triangles: 0, slivers: 0, faces: 0, localOnArterial: 0, arterialJunctions: 0, artGradeMean: 0, artGradeMax: 0, artSteepShare: 0 });
 
 /** The old core: within the core radius of an original village / origin quarter (the part that stays organic). */
 export function inOldCore(sim: Sim, x: number, y: number): boolean {
@@ -79,7 +84,10 @@ export function roadStats(sim: Sim): RoadStats {
       for (let k = 0; k < 4; k++) dev = Math.min(dev, angDiff(a, th + (k * Math.PI) / 2));
       diag = dev > 0.45;
     }
+    let gr = 0;
+    if (R.ecls[e] === RC.Arterial) gr = Math.abs(hAt(sim.g.height, R.nx[R.ea[e]], R.ny[R.ea[e]]) - hAt(sim.g.height, R.nx[R.eb[e]], R.ny[R.eb[e]])) / Math.max(1, R.edgeLen(e) * 50);
     for (const z of [all, inOldCore(sim, mx, my) ? core : out]) {
+      if (R.ecls[e] === RC.Arterial) { z.artGradeMean += gr; z.artGradeMax = Math.max(z.artGradeMax, gr); if (gr > 0.08) z.artSteepShare += L; }
       z.edges++; z.km += L; z.byClass[R.ecls[e]]++; z.kmByClass[R.ecls[e]] += L;
       if (diag) { z.diagonals++; z.diagonalKm += L; }
     }
@@ -87,6 +95,13 @@ export function roadStats(sim: Sim): RoadStats {
   for (let n = 0; n < R.nx.length; n++) if (R.adj[n].length === 1) {
     const short = R.edgeLen(R.adj[n][0]) < 3.5;
     for (const z of [all, inOldCore(sim, R.nx[n], R.ny[n]) ? core : out]) { z.deadEnds++; if (short) z.shortDeadEnds++; }
+  }
+  for (let n = 0; n < R.nx.length; n++) {
+    if (R.adj[n].length < 3) continue;
+    let art = false, loc = false;
+    for (const e of R.adj[n]) { if (R.ecls[e] === RC.Arterial) art = true; else if (R.ecls[e] === RC.Local) loc = true; }
+    if (!art) continue;
+    for (const z of [all, inOldCore(sim, R.nx[n], R.ny[n]) ? core : out]) { z.arterialJunctions++; if (loc) z.localOnArterial++; }
   }
   const faces = roadFaces(sim);
   for (const f of faces) {
@@ -104,6 +119,7 @@ export function roadStats(sim: Sim): RoadStats {
       if (f.area < 3) z.slivers++;
     }
   }
+  for (const z of [all, core, out]) { z.artGradeMean = z.byClass[0] ? z.artGradeMean / z.byClass[0] : 0; z.artSteepShare = z.kmByClass[0] ? z.artSteepShare / z.kmByClass[0] : 0; }
   return { ...all, core, outside: out };
 }
 

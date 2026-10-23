@@ -16,10 +16,13 @@ import { designLot, massing, pad, tree as ctxTree, FOOT, type Ctx, type Tree } f
 import { buildSite, siteSig, type Site } from './sites';
 
 // road widths (m) by class, and the narrow cobbled lanes of the old cores
-const ROAD_W = [16, 11, 8];
-const CORE_W = 6.5;
-const ASPHALT = [new THREE.Color(0x7d8186), new THREE.Color(0x8c8f93), new THREE.Color(0x9a9c9f)];
+const ROAD_W = [20, 11.5, 7];
+const CORE_W = 6;          // old-town lanes
+const CORE_MAIN_W = 9.5;   // the historic main streets of an old core (collectors there)
+const ASPHALT = [new THREE.Color(0x676b70), new THREE.Color(0x868a8e), new THREE.Color(0xa4a5a6)];
 const COBBLE = new THREE.Color(0xbfae94);
+const COBBLE_MAIN = new THREE.Color(0xcdbea5);
+const MEDIAN = new THREE.Color(0x93b076);
 const KERB = new THREE.Color(0xd9d5cb);
 
 const CHUNK = 16; // cells per chunk side (800 m)
@@ -207,7 +210,8 @@ export class CityView {
       const mx = (r.nodes[a * 2] + r.nodes[b * 2]) / 2, my = (r.nodes[a * 2 + 1] + r.nodes[b * 2 + 1]) / 2;
       const isCore = r.cls[k] !== 0 && r.year[k] === 0 && core(mx, my);
       if (isCore) this.coreEdge.add(r.ids[k]);
-      const w = isCore ? CORE_W : ROAD_W[r.cls[k]], c = isCore ? COBBLE : ASPHALT[r.cls[k]];
+      const main = isCore && r.cls[k] === 1;
+      const w = isCore ? (main ? CORE_MAIN_W : CORE_W) : ROAD_W[r.cls[k]], c = isCore ? (main ? COBBLE_MAIN : COBBLE) : ASPHALT[r.cls[k]];
       widths.push(w); colors.push(c);
       for (const n of [a, b]) if (w > maxW[n]) { maxW[n] = w; nodeCol[n] = c; }
     }
@@ -246,8 +250,11 @@ export class CityView {
       }
       base += SEG + 1;
     };
-    // street trees: one row on each side of every ordinary street, none in the cobbled cores or on the docks
+    // street trees: one row on each side of every ordinary street (plus a median row on arterials), none in the cobbled cores or on the docks
     this.streetTrees = [];
+    const degs = new Uint8Array(nNodes);
+    for (let k = 0; k < r.ea.length; k++) { degs[r.ea[k]]++; degs[r.eb[k]]++; }
+    const deg0 = (n: number) => degs[n];
     for (let k = 0; k < r.ea.length; k++) {
       if (this.coreEdge.has(r.ids[k])) continue;
       const a = r.ea[k], b = r.eb[k];
@@ -266,12 +273,20 @@ export class CityView {
           if (cx < 0 || cz < 0 || cx >= N || cz >= N || this.water[cz * N + cx] || (this.flags[cz * N + cx] & Flag.Docks)) continue;
           this.streetTrees.push({ x, z, s: 5 + vhash(seed, 6) * 2.5, seed });
         }
+        if (r.cls[k] === 0 && deg0(a) <= 2 && deg0(b) <= 2 && vhash(r.ids[k] * 31 + j, 8) > 0.2) {
+          const x = ax + ux * t, z = az + uz * t, cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+          if (cx >= 0 && cz >= 0 && cx < N && cz < N && !this.water[cz * N + cx] && !(this.flags[cz * N + cx] & Flag.Docks)) this.streetTrees.push({ x, z, s: 5.5 + vhash(r.ids[k] * 31 + j, 9) * 2, seed: r.ids[k] * 31 + j });
+        }
       }
     }
     // kerb / pavement strip first, then the carriageway on top
     for (let k = 0; k < r.ea.length; k++) strip(k, widths[k] + 5, KERB, 0);
     for (let n = 0; n < nNodes; n++) if (maxW[n]) disc(n, maxW[n] / 2 + 2.5, KERB, 0.02);
     for (let k = 0; k < r.ea.length; k++) strip(k, widths[k], colors[k], 0.25);
+    // arterials: a planted median on the open stretches (both ends plain bends or straights, not junctions)
+    const deg = new Uint8Array(nNodes);
+    for (let k = 0; k < r.ea.length; k++) { deg[r.ea[k]]++; deg[r.eb[k]]++; }
+    for (let k = 0; k < r.ea.length; k++) if (r.cls[k] === 0 && !this.coreEdge.has(r.ids[k]) && deg[r.ea[k]] <= 2 && deg[r.eb[k]] <= 2) strip(k, 2.6, MEDIAN, 0.33);
     for (let n = 0; n < nNodes; n++) if (maxW[n]) disc(n, maxW[n] / 2, nodeCol[n], 0.27);
     for (const n of rondNodes) { disc(n, 8.5, KERB, 0.3); disc(n, 6.8, new THREE.Color(0x9fbf86), 0.34); }
     const g = new THREE.BufferGeometry();

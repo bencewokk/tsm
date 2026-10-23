@@ -1,0 +1,60 @@
+== seed 4821 coast/port month 96 pop 33357 (no metro) centre 68,99
+-- by distance from the centre (cells of 50 m)
+0-4       plots   80 built   76 vacant    0 (0%)  mean  21.7 m  max  37  >=30m   6  >=60m   0
+4-8       plots  161 built  158 vacant    3 (2%)  mean  17.2 m  max  28  >=30m   0  >=60m   0
+8-12      plots  102 built   96 vacant    6 (6%)  mean  15.5 m  max  24  >=30m   0  >=60m   0
+12-18     plots  119 built  114 vacant    3 (3%)  mean  11.3 m  max  18  >=30m   0  >=60m   0
+18-28     plots   80 built   69 vacant   11 (14%)  mean   9.2 m  max  12  >=30m   0  >=60m   0
+28-+      plots  797 built  444 vacant  351 (44%)  mean   8.4 m  max  10  >=30m   0  >=60m   0
+-- by station walk time
+0-4 min   plots    0 built    0 vacant    0 (0%)  mean   0.0 m  max   0  >=30m   0  >=60m   0
+4-8 min   plots    0 built    0 vacant    0 (0%)  mean   0.0 m  max   0  >=30m   0  >=60m   0
+8-12 min  plots    0 built    0 vacant    0 (0%)  mean   0.0 m  max   0  >=30m   0  >=60m   0
+12-+ min  plots 1339 built  957 vacant  374 (28%)  mean  12.0 m  max  37  >=30m   6  >=60m   0
+-- towers (>= 60 m): 0   re-subdivided streets: 24  assemblies {"planTry":18,"planSeedBad":15,"planNoWindow":1,"planNoConvex":0,"started":8,"finished":6,"aborted":1,"closedStreets":1,"rerouted":0,"holdouts":1,"reshaped":0} active 1
+-- roads at start   all: edges  131 ( 19 km) art/col/loc 45/28/58  diagonals   5  dead ends  23 (short 21)  faces 14 triangles 4 slivers 0  arterial junctions 5 (local straight onto arterial 1)  arterial grade mean 0.8% max 8% (1% of arterial km above 8%)
+                  core: edges   75 ( 10 km) art/col/loc 0/21/54  diagonals   5  dead ends  10 (short 10)  faces 14 triangles 4 slivers 0  arterial junctions 1 (local straight onto arterial 1)  arterial grade mean 0.0% max 0% (0% of arterial km above 8%)
+               outside: edges   56 (  9 km) art/col/loc 45/7/4  diagonals   0  dead ends  13 (short 11)  faces 0 triangles 0 slivers 0  arterial junctions 4 (local straight onto arterial 0)  arterial grade mean 0.8% max 8% (1% of arterial km above 8%)
+-- roads at month 96  all: edges  189 ( 24 km) art/col/loc 50/38/101  diagonals   9  dead ends  29 (short 25)  faces 17 triangles 4 slivers 1  arterial junctions 10 (local straight onto arterial 1)  arterial grade mean 0.8% max 8% (1% of arterial km above 8%)
+                  core: edges   79 ( 10 km) art/col/loc 0/22/57  diagonals   5  dead ends  11 (short 11)  faces 15 triangles 4 slivers 1  arterial junctions 1 (local straight onto arterial 1)  arterial grade mean 0.0% max 0% (0% of arterial km above 8%)
+               outside: edges  110 ( 14 km) art/col/loc 50/16/44  diagonals   4  dead ends  18 (short 14)  faces 2 triangles 0 slivers 0  arterial junctions 9 (local straight onto arterial 0)  arterial grade mean 0.8% max 8% (1% of arterial km above 8%)
+== seed 187 hills/rail-junction month 96 pop 35328 (no metro) centre 62,65
+-- by distance from the centre (cells of 50 m)
+0-4       plots   47 built   43 vacant    0 (0%)  mean  18.7 m  max  24  >=30m   0  >=60m   0
+4-8       plots  127 built  127 vacant    0 (0%)  mean  14.8 m  max  24  >=30m   0  >=60m   0
+8-12      plots  141 built  139 vacant    2 (1%)  mean  13.0 m  max  21  >=30m   0  >=60m   0
+12-18     plots  211 built  207 vacant    3 (1%)  mean  10.2 m  max  16  >=30m   0  >=60m   0
+18-28     plots  386 built  365 vacant   21 (5%)  mean   8.8 m  max  14  >=30m   0  >=60m   0
+28-+      plots  953 built  553 vacant  397 (42%)  mean   8.7 m  max  20  >=30m   0  >=60m   0
+-- by station walk time
+0-4 min   plots    0 built    0 vacant    0 (0%)  mean   0.0 m  max   0  >=30m   0  >=60m   0
+4-8 min   plots    0 built    0 vacant    0 (0%)  mean   0.0 m  max   0  >=30m   0  >=60m   0
+8-12 min  plots    0 built    0 vacant    0 (0%)  mean   0.0 m  max   0  >=30m   0  >=60m   0
+12-+ min  plots 1865 built 1434 vacant  423 (23%)  mean  10.2 m  max  24  >=30m   0  >=60m   0
+-- towers (>= 60 m): 0   re-subdivided streets: 26  assemblies {"planTry":0,"planSeedBad":0,"planNoWindow":0,"planNoConvex":0,"started":7,"finished":3,"aborted":2,"closedStreets":4,"rerouted":3,"holdouts":1,"reshaped":0} active 2
+-- roads at start   all: edges  231 ( 33 km) art/col/loc 44/59/128  diagonals   3  dead ends  22 (short 22)  faces 37 triangles 1 slivers 0  arterial junctions 11 (local straight onto arterial 0)  arterial grade mean 3.3% max 15% (3% of arterial km above 8%)
+                  core: edges   72 ( 10 km) art/col/loc 1/28/43  diagonals   2  dead ends   9 (short 9)  faces 11 triangles 1 slivers 0  arterial junctions 0 (local straight onto arterial 0)  arterial grade mean 2.0% max 2% (0% of arterial km above 8%)
+               outside: edges  159 ( 23 km) art/col/loc 43/31/85  diagonals   1  dead ends  13 (short 13)  faces 26 triangles 0 slivers 0  arterial junctions 11 (local straight onto arterial 0)  arterial grade mean 3.3% max 15% (3% of arterial km above 8%)
+-- roads at month 96  all: edges  421 ( 46 km) art/col/loc 49/71/301  diagonals   9  dead ends  34 (short 34)  faces 70 triangles 3 slivers 12  arterial junctions 15 (local straight onto arterial 0)  arterial grade mean 3.1% max 15% (3% of arterial km above 8%)
+                  core: edges  100 ( 11 km) art/col/loc 1/31/68  diagonals   3  dead ends  10 (short 10)  faces 19 triangles 2 slivers 5  arterial junctions 0 (local straight onto arterial 0)  arterial grade mean 2.0% max 2% (0% of arterial km above 8%)
+               outside: edges  321 ( 35 km) art/col/loc 48/40/233  diagonals   6  dead ends  24 (short 24)  faces 51 triangles 1 slivers 7  arterial junctions 15 (local straight onto arterial 0)  arterial grade mean 3.1% max 15% (3% of arterial km above 8%)
+== seed 304 coast/planned-capital month 96 pop 31968 (no metro) centre 57,68
+-- by distance from the centre (cells of 50 m)
+0-4       plots   54 built   51 vacant    1 (2%)  mean  18.0 m  max  24  >=30m   0  >=60m   0
+4-8       plots  164 built  164 vacant    0 (0%)  mean  13.4 m  max  24  >=30m   0  >=60m   0
+8-12      plots  136 built  129 vacant    6 (4%)  mean  10.3 m  max  20  >=30m   0  >=60m   0
+12-18     plots  174 built  164 vacant    8 (5%)  mean   9.7 m  max  14  >=30m   0  >=60m   0
+18-28     plots  232 built  216 vacant   16 (7%)  mean   9.5 m  max  13  >=30m   0  >=60m   0
+28-+      plots 1042 built  642 vacant  398 (38%)  mean   8.5 m  max  18  >=30m   0  >=60m   0
+-- by station walk time
+0-4 min   plots    0 built    0 vacant    0 (0%)  mean   0.0 m  max   0  >=30m   0  >=60m   0
+4-8 min   plots    0 built    0 vacant    0 (0%)  mean   0.0 m  max   0  >=30m   0  >=60m   0
+8-12 min  plots    0 built    0 vacant    0 (0%)  mean   0.0 m  max   0  >=30m   0  >=60m   0
+12-+ min  plots 1802 built 1366 vacant  429 (24%)  mean   9.9 m  max  24  >=30m   0  >=60m   0
+-- towers (>= 60 m): 0   re-subdivided streets: 15  assemblies {"planTry":0,"planSeedBad":0,"planNoWindow":0,"planNoConvex":0,"started":4,"finished":4,"aborted":0,"closedStreets":0,"rerouted":0,"holdouts":0,"reshaped":0} active 0
+-- roads at start   all: edges  151 ( 23 km) art/col/loc 37/28/86  diagonals   2  dead ends  18 (short 17)  faces 24 triangles 1 slivers 0  arterial junctions 8 (local straight onto arterial 5)  arterial grade mean 0.6% max 2% (0% of arterial km above 8%)
+                  core: edges   88 ( 12 km) art/col/loc 3/21/64  diagonals   2  dead ends  10 (short 10)  faces 17 triangles 1 slivers 0  arterial junctions 5 (local straight onto arterial 5)  arterial grade mean 1.1% max 2% (0% of arterial km above 8%)
+               outside: edges   63 ( 10 km) art/col/loc 34/7/22  diagonals   0  dead ends   8 (short 7)  faces 7 triangles 0 slivers 0  arterial junctions 3 (local straight onto arterial 0)  arterial grade mean 0.6% max 2% (0% of arterial km above 8%)
+-- roads at month 96  all: edges  322 ( 37 km) art/col/loc 46/48/228  diagonals   7  dead ends  29 (short 26)  faces 49 triangles 1 slivers 2  arterial junctions 19 (local straight onto arterial 5)  arterial grade mean 0.6% max 2% (0% of arterial km above 8%)
+                  core: edges  118 ( 14 km) art/col/loc 3/25/90  diagonals   3  dead ends   7 (short 7)  faces 27 triangles 1 slivers 2  arterial junctions 6 (local straight onto arterial 5)  arterial grade mean 1.1% max 2% (0% of arterial km above 8%)
+               outside: edges  204 ( 23 km) art/col/loc 43/23/138  diagonals   4  dead ends  22 (short 19)  faces 22 triangles 0 slivers 0  arterial junctions 13 (local straight onto arterial 0)  arterial grade mean 0.6% max 2% (0% of arterial km above 8%)

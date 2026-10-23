@@ -1,4 +1,4 @@
-import { N, Water, Flag } from './constants';
+import { N, CELL, Water, Flag } from './constants';
 import { segIntersect, pointSeg, angDiff, lineDiff, simplify, chaikin } from './geom';
 import { MinHeap } from './heap';
 
@@ -320,9 +320,10 @@ export class RoadGraph {
       if (!this.alive[e]) continue;
       const ax = this.nx[this.ea[e]], ay = this.ny[this.ea[e]], bx = this.nx[this.eb[e]], by = this.ny[this.eb[e]];
       const L = Math.hypot(bx - ax, by - ay), steps = Math.max(1, Math.ceil(L / 0.35));
+      const code = 3 - this.ecls[e];   // 3 arterial, 2 collector, 1 local (the busiest class wins in a cell)
       for (let k = 0; k <= steps; k++) {
         const x = Math.floor(ax + (bx - ax) * (k / steps)), y = Math.floor(ay + (by - ay) * (k / steps));
-        if (x >= 0 && y >= 0 && x < N && y < N) out[y * N + x] = 1;
+        if (x >= 0 && y >= 0 && x < N && y < N && out[y * N + x] < code) out[y * N + x] = code;
       }
     }
   }
@@ -341,7 +342,26 @@ export class RoadGraph {
  * cost = distance * (1 + slope weight) + bridge cost on water + turn penalty; reuses existing roads cheaply.
  * Returns a smoothed polyline in cell units, split into runs that do not duplicate existing roads.
  */
+/** arterial route cost weights (the old behaviour was valley 0, climb 0, steep 6) */
+export const ART = { valley: 0.035, climb: 2.5, steep: 14 };
+const valleyCache = new WeakMap<Float32Array, Float32Array>();
+/** How far a cell stands above the lowest ground within ~6 cells (0 on valley floors and in passes, large on ridges and hillsides). */
+function valleyness(height: Float32Array): Float32Array {
+  let v = valleyCache.get(height);
+  if (v) return v;
+  v = new Float32Array(N * N);
+  const R = 6;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let lo = Infinity;
+    for (let dy = -R; dy <= R; dy += 2) for (let dx = -R; dx <= R; dx += 2) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < N && yy < N) lo = Math.min(lo, height[yy * N + xx]); }
+    v[y * N + x] = Math.max(0, height[y * N + x] - lo);
+  }
+  valleyCache.set(height, v);
+  return v;
+}
+
 export function arterialPath(t: TerrainView, road: Uint8Array, a: [number, number], b: [number, number], extra?: (cell: number) => number): [number, number][][] {
+  const valley = valleyness(t.height);
   const D8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const S = N * N * 8;
   const cost = new Float32Array(S).fill(Infinity);
@@ -363,9 +383,11 @@ export function arterialPath(t: TerrainView, road: Uint8Array, a: [number, numbe
       if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
       const j = ny * N + nx;
       const len = d < 4 ? 1 : Math.SQRT2;
-      let step = len * (1 + Math.abs(t.height[j] - t.height[c]) * 0.25);
+      const grade = Math.abs(t.height[j] - t.height[c]) / (len * CELL);
+      // arterials follow valleys and passes (low ground costs less), and a straight climb is expensive: they run along the contours and zigzag up
+      let step = len * (1 + Math.abs(t.height[j] - t.height[c]) * 0.25 + Math.pow(grade / 0.1, 2) * ART.climb + valley[j] * ART.valley);
       if (t.water[j]) step += t.water[j] === Water.Sea ? 60 : 9; // bridge
-      if (t.flags[j] & Flag.Steep) step += 6;
+      if (t.flags[j] & Flag.Steep) step += ART.steep;
       if (road[j]) step *= 0.45;
       if (extra) step += extra(j);
       if (d !== dir) step += 0.6 * angDiff(Math.atan2(D8[d][1], D8[d][0]), Math.atan2(D8[dir][1], D8[dir][0]));
@@ -380,7 +402,7 @@ export function arterialPath(t: TerrainView, road: Uint8Array, a: [number, numbe
   const runs: [number, number][][] = [];
   let cur: number[] = [];
   for (let k = 0; k < cells.length; k++) {
-    const on = road[cells[k]] === 1;
+    const on = road[cells[k]] > 0;
     if (!on) { if (!cur.length && k > 0) cur.push(cells[k - 1]); cur.push(cells[k]); }
     else if (cur.length) { cur.push(cells[k]); runs.push(smoothRun(cur)); cur = []; }
   }

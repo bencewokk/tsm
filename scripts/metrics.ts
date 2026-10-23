@@ -4,16 +4,19 @@ import { Sim } from '../src/sim/sim';
 import { roadStats, gradient, fmtRows, baselineHeight, type RoadZone } from '../src/sim/metrics';
 import { builtHeight } from '../src/sim/field';
 import { testLine } from './lib';
+import { HIER } from '../src/sim/hierarchy';
+import { ART } from '../src/sim/roads';
 
 declare const process: { argv: string[] };
 const args = process.argv.slice(2);
 const withLine = args.includes('--line');
 const useBaseline = args.includes('--baseline');
+if (args.includes('--nohier')) { HIER.on = false; ART.valley = 0; ART.climb = 0; ART.steep = 6; }
 const nums = args.filter((a) => !a.startsWith('--')).map(Number);
 const months = nums[0] ?? 96;
 const seeds = nums.slice(1).length ? nums.slice(1) : [4821, 187, 304];
 
-const fmt = (r: RoadZone) => `edges ${String(r.edges).padStart(4)} (${r.km.toFixed(0).padStart(3)} km) art/col/loc ${r.byClass.join('/')}  diagonals ${String(r.diagonals).padStart(3)}  dead ends ${String(r.deadEnds).padStart(3)} (short ${r.shortDeadEnds})  faces ${r.faces} triangles ${r.triangles} slivers ${r.slivers}`;
+const fmt = (r: RoadZone) => `edges ${String(r.edges).padStart(4)} (${r.km.toFixed(0).padStart(3)} km) art/col/loc ${r.byClass.join('/')}  diagonals ${String(r.diagonals).padStart(3)}  dead ends ${String(r.deadEnds).padStart(3)} (short ${r.shortDeadEnds})  faces ${r.faces} triangles ${r.triangles} slivers ${r.slivers}  arterial junctions ${r.arterialJunctions} (local straight onto arterial ${r.localOnArterial})  arterial grade mean ${(r.artGradeMean * 100).toFixed(1)}% max ${(r.artGradeMax * 100).toFixed(0)}% (${(r.artSteepShare * 100).toFixed(0)}% of arterial km above 8%)`;
 
 for (const seed of seeds) {
   const sim = new Sim(seed);
