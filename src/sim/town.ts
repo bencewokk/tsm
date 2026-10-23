@@ -2,20 +2,21 @@ import { N, BT, Flag } from './constants';
 import { Rng, fbm } from './rng';
 import { RoadGraph, RC, arterialPath, RULES } from './roads';
 import { LotStore } from './lots';
-import { angDiff, lineDiff } from './geom';
-import type { Grid, QuarterStyle } from './terrain';
+import { angDiff, lineDiff, chaikin } from './geom';
+import type { Grid, QuarterStyle, SatelliteCause } from './terrain';
 import { PROFILE_INDEX } from './profiles';
 import type { CityProfile } from './cityprofile';
 import { LANDMARKS, LANDMARK_INDEX } from './landmarks';
 import type { DistrictProfile } from './profiles';
-import { staticTerritories } from './territory';
-import { HIER, inCoreXY, shapeHierarchy, arterialJunctionNear, promoteJunctions } from './hierarchy';
+import { staticTerritories, T } from './territory';
+import { HIER, inCoreXY, freeformXY, shapeHierarchy, arterialJunctionNear, promoteJunctions } from './hierarchy';
 
 /** Each village/district has its own street orientation and profile set; noise bends it, and districts meet irregularly. */
 export interface District {
   x: number; y: number; ang: number;
   style?: QuarterStyle;
-  kind?: 'origin' | 'village' | 'planned' | 'garden';
+  kind?: 'origin' | 'village' | 'planned' | 'garden' | 'satellite';
+  cause?: SatelliteCause;
   /** profile indices for the core, the mid ring and the outskirts of this quarter, and the radii (cells) of the first two */
   core?: number; mid?: number; outer?: number; coreR?: number; midR?: number;
 }
@@ -48,13 +49,14 @@ export function orientationAt(c: TownCtx, x: number, y: number): number {
 export function regularityAt(c: TownCtx, x: number, y: number): number {
   const r = c.profileAt ? c.profiles[c.profileAt(x, y)].roadRegularity : 0.5;
   // outside the old core the street plan is strict (grid-aligned, ordered); the core keeps its own irregularity
-  return !HIER.on || inCoreXY(c, x, y) ? r : Math.max(r, HIER.strictReg);
+  return !HIER.on || freeformXY(c, x, y) ? r : Math.max(r, HIER.strictReg);
 }
 
 /** Profile ids and radii of a quarter, from its kind and the city's origin. */
-function quarterProfiles(kind: District['kind'], origin: CityProfile['origin']): { core: string; mid: string; outer: string; coreR: number; midR: number } {
+function quarterProfiles(kind: District['kind'], origin: CityProfile['origin'], cause?: SatelliteCause): { core: string; mid: string; outer: string; coreR: number; midR: number } {
   if (kind === 'planned') return { core: 'grand', mid: 'grandOuter', outer: 'garden', coreR: 8, midR: 14 };
   if (kind === 'garden') return { core: 'garden', mid: 'garden', outer: 'garden', coreR: 6, midR: 12 };
+  if (kind === 'satellite') return cause === 'factory' ? { core: 'terraces', mid: 'terraces', outer: 'suburb', coreR: 5, midR: 10 } : { core: 'terraces', mid: 'suburb', outer: 'suburb', coreR: 5.5, midR: 11 };
   const oldCore = origin === 'mining' ? 'miners' : origin === 'market-town' ? 'marketTown' : origin === 'rail-junction' ? 'terraces' : origin === 'planned-capital' && kind === 'origin' ? 'grand' : 'oldTown';
   const mid = origin === 'planned-capital' && kind === 'origin' ? 'grandOuter' : 'terraces';
   const outer = origin === 'planned-capital' && kind === 'origin' ? 'garden' : 'suburb';
@@ -198,14 +200,36 @@ function skeletonRadial(c: TownCtx, d: District, mainNodesOut: number[]) {
   if (first.length >= 4) roads.polyline([...first, first[0]], RC.Local, 0);
 }
 
+/** Commuter suburb: a looping collector with curving crescents and cul-de-sacs off it (no grid). */
+function skeletonCurvi(c: TownCtx, d: District, mainNodesOut: number[]) {
+  const { roads, rng } = c;
+  const centre = roads.addNode(d.x, d.y);
+  mainNodesOut.push(centre);
+  const loop: [number, number][] = [];
+  const n = 10, R0 = rng.range(3.2, 4.0);
+  for (let k = 0; k < n; k++) { const a = d.ang + (k / n) * Math.PI * 2, r = R0 * (1 + 0.18 * Math.sin(k * 1.7)); loop.push([d.x + Math.cos(a) * r, d.y + Math.sin(a) * r]); }
+  roads.polyline([...chaikin(loop, 2), chaikin(loop, 2)[0]], RC.Collector, 0, 0.5);
+  // two spokes from the centre to the loop
+  for (const k of [0, Math.floor(n / 2)]) roads.grow(centre, loop[k][0], loop[k][1], RC.Collector, 0);
+  // crescents and cul-de-sacs off the loop: each curves away over three points
+  for (let k = 0; k < n; k++) {
+    if (rng.next() < 0.3) continue;
+    const a = d.ang + (k / n) * Math.PI * 2, turn = (rng.next() < 0.5 ? 1 : -1) * rng.range(0.25, 0.55);
+    let x = loop[k][0], y = loop[k][1], h = a;
+    const pts: [number, number][] = [[x, y]];
+    for (let s = 0; s < 3; s++) { h += turn * 0.5; x += Math.cos(h) * 1.5; y += Math.sin(h) * 1.5; pts.push([x, y]); }
+    roads.polyline(chaikin(pts, 1), RC.Local, 0, 0.5);
+  }
+}
+
 /** Initial road network and buildings: quarter skeletons by style, arterials between them, the old industrial site's road. */
 export function layoutTown(c: TownCtx) {
   const { g, roads, lots, rng } = c;
   const cp = c.city;
   c.districts = g.villages.map((v) => {
-    const q = quarterProfiles(v.kind, cp.origin);
+    const q = quarterProfiles(v.kind, cp.origin, v.cause);
     const ang = rng.range(0, Math.PI / 2);
-    return { x: v.x + 0.5, y: v.y + 0.5, ang, style: v.style, kind: v.kind, core: PROFILE_INDEX[q.core], mid: PROFILE_INDEX[q.mid], outer: PROFILE_INDEX[q.outer], coreR: q.coreR, midR: q.midR };
+    return { x: v.x + 0.5, y: v.y + 0.5, ang, style: v.style, kind: v.kind, cause: v.cause, core: PROFILE_INDEX[q.core], mid: PROFILE_INDEX[q.mid], outer: PROFILE_INDEX[q.outer], coreR: q.coreR, midR: q.midR };
   });
   const tz = staticTerritories(c);   // working port / yards, heavy industry and the workers' terraces follow the harbour, the rail and the open land
   const centres: number[] = [];
@@ -216,9 +240,13 @@ export function layoutTown(c: TownCtx) {
       if (o && o !== d && cp.planningStrength > 0.15) d.ang = Math.round(Math.atan2(o.y - d.y, o.x - d.x) / (Math.PI / 4)) * (Math.PI / 4);
       skeletonPlanned(c, d, centres, true);
     } else if (d.style === 'rail') {
-      const line = g.rail[0];
+      // the rail line nearest to the quarter sets its grid direction (a satellite's own spur, or the main line through the origin)
+      let line = g.rail[0], bd = Infinity;
+      for (const ln of g.rail) for (const p of ln) { const dd = Math.hypot(p[0] - d.x, p[1] - d.y); if (dd < bd) { bd = dd; line = ln; } }
       if (line && line.length > 1) d.ang = Math.atan2(line[line.length - 1][1] - line[0][1], line[line.length - 1][0] - line[0][0]);
       skeletonPlanned(c, d, centres, false);
+    } else if (d.style === 'curvi') {
+      skeletonCurvi(c, d, centres);
     } else if (d.style === 'terraces') skeletonTerraces(c, d, centres);
     else if (d.style === 'radial') skeletonRadial(c, d, centres);
     else skeletonOrganic(c, d, centres);
@@ -232,7 +260,15 @@ export function layoutTown(c: TownCtx) {
   roads.rasterize(g.road);
   // arterials: least-cost paths between villages (each to its nearest earlier one), then off the north edge
   const link = (a: [number, number], b: [number, number], extra?: (cell: number) => number) => {
-    for (const run of arterialPath(g, g.road, a, b, extra)) roads.polyline(run, RC.Arterial, 0);
+    const trace: number[] = [];
+    for (const run of arterialPath(g, g.road, a, b, extra, trace)) roads.polyline(run, RC.Arterial, 0);
+    // the stretches of the route that follow existing streets become arterials too, so a spine is continuous from town to town
+    const onRoute = new Set(trace);
+    for (const e of roads.aliveEdges()) {
+      if (roads.ecls[e] === RC.Arterial) continue;
+      const mx = (roads.nx[roads.ea[e]] + roads.nx[roads.eb[e]]) / 2, my = (roads.ny[roads.ea[e]] + roads.ny[roads.eb[e]]) / 2;
+      if (onRoute.has(Math.floor(my) * N + Math.floor(mx)) && roads.edgeLen(e) > 0.4) roads.ecls[e] = RC.Arterial;
+    }
     roads.rasterize(g.road);
   };
   for (let k = 1; k < c.districts.length; k++) {
@@ -243,6 +279,8 @@ export function layoutTown(c: TownCtx) {
     }
     link([c.districts[k].x, c.districts[k].y], [c.districts[bj].x, c.districts[bj].y]);
   }
+  // a factory town is tied to the industrial district as well as to its nearest neighbour
+  if (tz.industry) for (const d of c.districts) if (d.cause === 'factory') link([d.x, d.y], tz.industry);
   const north = c.districts.slice().sort((a, b) => a.y - b.y)[0];
   if (north) {
     let tx = Math.floor(north.x);
@@ -251,6 +289,36 @@ export function layoutTown(c: TownCtx) {
   }
   // the freight corridor: an arterial from the port (or yards) to the industrial district
   if (tz.port && tz.industry) link(tz.industry, tz.port);
+  // the spines must really join: a route that followed parallel streets can leave a town cut off, so any piece of the network that is not
+  // connected to the old town gets its own arterial to the nearest street of the main piece (a bridge if the land demands one)
+  for (let pass = 0; pass < 8; pass++) {
+    const nn = roads.nx.length, comp = new Int32Array(nn).fill(-1);
+    let nc = 0;
+    for (let n = 0; n < nn; n++) {
+      if (comp[n] >= 0 || !roads.adj[n].length) continue;
+      const st = [n]; comp[n] = nc;
+      while (st.length) { const u = st.pop()!; for (const e of roads.adj[u]) { const o = roads.other(e, u); if (comp[o] < 0) { comp[o] = nc; st.push(o); } } }
+      nc++;
+    }
+    if (nc <= 1) break;
+    const o0 = c.districts[0];
+    let home = -1, hd = Infinity;
+    for (let n = 0; n < nn; n++) if (roads.adj[n].length) { const d = Math.hypot(roads.nx[n] - o0.x, roads.ny[n] - o0.y); if (d < hd) { hd = d; home = comp[n]; } }
+    const size = new Map<number, number>();
+    for (const cc of comp) if (cc >= 0) size.set(cc, (size.get(cc) ?? 0) + 1);
+    let joined = false;
+    for (const [cc, sz] of size) {
+      if (cc === home || sz < 3) continue;
+      let ba = -1, bb = -1, bd = Infinity;
+      for (let a = 0; a < nn; a++) if (comp[a] === cc) for (let b = 0; b < nn; b++) if (comp[b] === home) { const d = Math.hypot(roads.nx[a] - roads.nx[b], roads.ny[a] - roads.ny[b]); if (d < bd) { bd = d; ba = a; bb = b; } }
+      if (ba < 0) continue;
+      for (const run of arterialPath(g, new Uint8Array(N * N), [roads.nx[ba], roads.ny[ba]], [roads.nx[bb], roads.ny[bb]])) roads.polyline(run, RC.Arterial, 0);
+      joined = true;
+      break;   // one join per pass: the components are recomputed
+    }
+    roads.rasterize(g.road);
+    if (!joined) break;
+  }
   // the docks: a waterfront road along the strip, joined to the harbour village
   if (g.docksCells.length > 4) {
     const dc = g.docksCells.filter((i) => g.distWater[i] === 2);
@@ -281,6 +349,7 @@ export function layoutTown(c: TownCtx) {
       if (l.type || (l.flags & Flag.Docks)) continue;
       const dist = Math.hypot(l.x - d.x, l.y - d.y);
       if (dist > 9.5 || rng.next() > ((dist < 6.2 ? 1.3 : 1.08) - dist * 0.085) * (dist < 4.6 ? (l.back ? 0.45 : 0.9) : (l.back ? 0.15 : 0.55)) * (d.kind === 'garden' ? 0.3 : 1)) continue;
+      if (c.terr[l.cell] === T.Industry) { l.type = BT.Ind; l.level = rng.next() < 0.5 ? 2 : 1; l.age = 40; continue; }   // the works of a factory town
       if (!parkDone && dist < 4 && rng.next() < 0.25) { l.type = BT.Park; l.level = 1; parkDone = true; continue; }
       if (dist < 2.6 && rng.next() < 0.6) { l.type = BT.Com; l.level = 1; }
       else { l.type = BT.Res; l.level = 1; }
@@ -313,7 +382,7 @@ export function layoutTown(c: TownCtx) {
       lots.ensureSize(l, def.size[0], def.size[1], (o) => !o.lm && !o.back === !l.back && (!o.type || o.type === BT.Res || o.type === BT.Com) && !(o.flags & Flag.Docks));
       if (def.id === 'cityhall') l.flags |= Flag.Civic;
     };
-    if (ch) grow(ch, civicQuarter ? 'cityhall' : 'cathedral');
+    if (ch && d.kind !== 'satellite') grow(ch, civicQuarter ? 'cityhall' : 'cathedral');
     // the origin town also gets a city hall and a market hall near its square
     if (d.kind === 'origin' && sq) {
       const used = new Set([sq, ch]);
@@ -384,7 +453,7 @@ function alignToGrid(c: TownCtx, x: number, y: number, a: number): number {
   const reg = regularityAt(c, x, y);
   const signed = Math.atan2(Math.sin(a - best), Math.cos(a - best));
   // strict outside the core: every new street lies on the district grid (no diagonals)
-  if (HIER.on && !inCoreXY(c, x, y)) return best + signed * 0.08;
+  if (HIER.on && !freeformXY(c, x, y)) return best + signed * 0.08;
   if (bd >= 0.35 + 0.4 * reg) return a;
   return best + signed * 0.5 * (1 - reg);
 }

@@ -3,12 +3,17 @@ import { Rng, fbm, hash2 } from './rng';
 import { bestRoute, ROUTE_CAP } from './relief';
 import type { CityProfile } from './cityprofile';
 
-export type QuarterStyle = 'organic' | 'planned' | 'terraces' | 'radial' | 'rail';
+export type QuarterStyle = 'organic' | 'planned' | 'terraces' | 'radial' | 'rail' | 'curvi';
+/** Why a settlement exists: an older village, a railway town on a spur, a factory town by the works, a commuter suburb (the garden-suburb era). */
+/** dev switch: false = no railway / factory satellites and organic garden suburbs (the state before step 7) */
+export const SAT = { on: true };
+export type SatelliteCause = 'hist' | 'rail' | 'factory' | 'commuter';
 /** An original settlement / quarter centre. villages[0] is the origin of the city. */
 export interface Village {
   x: number; y: number; name: string;
-  kind?: 'origin' | 'village' | 'planned' | 'garden';
+  kind?: 'origin' | 'village' | 'planned' | 'garden' | 'satellite';
   style?: QuarterStyle;
+  cause?: SatelliteCause;
 }
 
 export interface Grid {
@@ -364,7 +369,7 @@ function placeSettlements(g: Grid, cp: CityProfile, rng: Rng) {
     }
     return best;
   };
-  const add = (i: number, kind: Village['kind'], style: QuarterStyle) => { g.villages.push({ x: i % N, y: (i / N) | 0, name: takeName(), kind, style }); };
+  const add = (i: number, kind: Village['kind'], style: QuarterStyle, cause?: SatelliteCause) => { g.villages.push({ x: i % N, y: (i / N) | 0, name: takeName(), kind, style, cause }); };
 
   // ---- origin
   const hasSea = cp.terrain === 'coast';
@@ -431,7 +436,7 @@ function placeSettlements(g: Grid, cp: CityProfile, rng: Rng) {
       if (minD < 32) return null;
       return -Math.abs(minD - 40) * 0.3 - distWater[i] * 0.2 + rng.next() * 6;
     }, 12, N - 12, 12, N - 12);
-    if (bi >= 0) add(bi, 'village', cp.origin === 'mining' ? 'terraces' : cp.origin === 'planned-capital' ? 'organic' : 'organic');
+    if (bi >= 0) add(bi, 'village', cp.origin === 'mining' ? 'terraces' : cp.origin === 'planned-capital' ? 'organic' : 'organic', 'hist');
   }
 
   // ---- hill country: a ridge rises between the old town and its nearest neighbour, splitting the city into two basins (a pass or a tunnel joins them)
@@ -490,7 +495,7 @@ function placeSettlements(g: Grid, cp: CityProfile, rng: Rng) {
         if (d < 22 || d > 48) return null;
         return openness(x, y, 6) * 8 - Math.abs(d - 34) * 0.2 + rng.next() * 4;
       }, 12, N - 12, 12, N - 12);
-      if (bi >= 0) add(bi, 'garden', 'organic');
+      if (bi >= 0) add(bi, 'garden', SAT.on ? 'curvi' : 'organic', 'commuter');
     }
   }
 
@@ -549,5 +554,42 @@ function placeSettlements(g: Grid, cp: CityProfile, rng: Rng) {
       if (Math.hypot(x - g.mine.x, y - g.mine.y) <= 3.6) { flags[i] |= Flag.Docks; g.docksCells.push(i); }
     }
     if (g.docksCells.length < 6) cp.site = 'railyard';
+  }
+
+  // ---- satellites with a cause, each tied to the city's history: a railway town on a spur (the railway reached the countryside) and a factory
+  // town by the works (industrial cities). The older villages and the garden / commuter suburbs were placed above.
+  const o = g.villages[0];
+  const want: SatelliteCause[] = [];
+  if (SAT.on && (cp.origin === 'rail-junction' || cp.history.some((h) => h.kind === 'industrial'))) want.push('rail');
+  if (SAT.on && (cp.origin === 'mining' || cp.dominant.ind > 0.55)) want.push('factory');
+  for (const cause of want) {
+    const bi = bestCell((x, y, i) => {
+      if (distWater[i] < (cause === 'factory' ? 3 : 4) || (cause === 'factory' && distWater[i] > 10) || !farFrom(x, y, 19) || (flags[i] & (Flag.Flood | Flag.Docks))) return null;
+      const d = Math.hypot(x - o.x, y - o.y);
+      if (d < 24 || d > 46) return null;
+      if (cause === 'rail') {
+        // the spur must not need a long bridge
+        let wet = 0;
+        for (let t = 0; t <= 1; t += 0.05) { const xx = Math.round(o.x + (x - o.x) * t), yy = Math.round(o.y + (y - o.y) * t); if (water[idx(xx, yy)]) wet++; }
+        if (wet > 3) return null;
+      }
+      return openness(x, y, 5) * 8 - Math.abs(d - 33) * 0.25 + hash2(x, y, g.seed + cause.length * 13) * 3;
+    }, 10, N - 10, 10, N - 10);
+    if (bi < 0) continue;
+    add(bi, 'satellite', cause === 'rail' ? 'rail' : 'terraces', cause);
+    if (cause === 'rail') {
+      // the spur: from the old town's edge to just short of the new town's centre, with a gentle sway
+      const v = g.villages[g.villages.length - 1];
+      const dx = v.x - o.x, dy = v.y - o.y, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+      const pts: [number, number][] = [];
+      for (let t = 8; t <= L - 4; t += 4) pts.push([o.x + ux * t - uy * Math.sin(t * 0.15) * 1.6, o.y + uy * t + ux * Math.sin(t * 0.15) * 1.6]);
+      if (pts.length > 3) {
+        g.rail.push(pts);
+        for (let k = 0; k + 1 < pts.length; k++) {
+          const [ax, ay] = pts[k], [bx, by] = pts[k + 1], n = Math.ceil(Math.hypot(bx - ax, by - ay) * 2);
+          for (let s = 0; s <= n; s++) { const x = Math.floor(ax + (bx - ax) * s / n), y = Math.floor(ay + (by - ay) * s / n); if (inb(x, y) && !water[idx(x, y)]) flags[idx(x, y)] |= Flag.Rail; }
+        }
+      }
+    }
   }
 }

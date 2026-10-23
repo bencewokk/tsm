@@ -1,0 +1,70 @@
+== seed 4821 coast/port (history: industrial, transit) homes 12293
+   hist            organic   at 28,110  41 cells from the old town  link: arterial/collector  homes 2346
+   hist            organic   at 104,113  40 cells from the old town  link: arterial/collector  homes 485
+   rail            rail      at 39,81  33 cells from the old town  link: arterial/collector + rail  homes 1083
+== seed 187 hills/rail-junction (history: planned, garden, transit) homes 17608
+   hist            organic   at 76,26  41 cells from the old town  link: arterial/collector  homes 837
+   hist            organic   at 75,101  40 cells from the old town  link: arterial/collector  homes 217
+   planned quarter planned   at 32,55  30 cells from the old town  link: arterial/collector  homes 3154
+   commuter        curvi     at 52,33  32 cells from the old town  link: local streets only  homes 378
+   rail            rail      at 28,74  34 cells from the old town  link: arterial/collector + rail  homes 525
+   factory         terraces  at 94,54  34 cells from the old town  link: arterial/collector + rail  homes 51
+== seed 304 coast/planned-capital (history: industrial) homes 16444
+   hist            organic   at 82,96  39 cells from the old town  link: arterial/collector  homes 1578
+   hist            organic   at 39,105  42 cells from the old town  link: arterial/collector  homes 1857
+   rail            rail      at 23,70  33 cells from the old town  link: arterial/collector + rail  homes 1151
+   factory         terraces  at 84,50  33 cells from the old town  link: arterial/collector  homes 348
+== seed 57 river/market-town (history: garden, transit) homes 14487
+   hist            organic   at 74,26  41 cells from the old town  link: arterial/collector  homes 852
+   hist            organic   at 65,106  39 cells from the old town  link: arterial/collector  homes 820
+   commuter        curvi     at 57,43  28 cells from the old town  link: arterial/collector  homes 243
+== seed 83 coast/mining (history: planned, garden) homes 16618
+   hist            terraces  at 82,45  42 cells from the old town  link: arterial/collector  homes 991
+   planned quarter planned   at 41,60  30 cells from the old town  link: arterial/collector  homes 7724
+   commuter        curvi     at 16,54  36 cells from the old town  link: arterial/collector  homes 64
+   factory         terraces  at 66,58  36 cells from the old town  link: arterial/collector  homes 1588
+== seed 252 plain/market-town (history: industrial, planned) homes 17612
+   hist            organic   at 74,29  40 cells from the old town  link: arterial/collector  homes 967
+   hist            organic   at 68,108  39 cells from the old town  link: arterial/collector  homes 1075
+   planned quarter planned   at 41,66  30 cells from the old town  link: arterial/collector + rail  homes 971
+   rail            rail      at 42,85  33 cells from the old town  link: arterial/collector + rail  homes 1086
+   factory         terraces  at 87,98  33 cells from the old town  link: arterial/collector  homes 226
+== seed 369 hills/port (history: industrial) homes 12893
+   hist            organic   at 98,112  39 cells from the old town  link: arterial/collector  homes 294
+   hist            organic   at 82,33  42 cells from the old town  link: arterial/collector  homes 681
+   rail            rail      at 59,60  33 cells from the old town  link: arterial/collector + rail  homes 873
+   factory         terraces  at 77,53  24 cells from the old town  link: arterial/collector  homes 1502
+== seed 421 plain/mining (history: industrial, planned, garden) homes 18708
+   hist            terraces  at 87,45  40 cells from the old town  link: arterial/collector  homes 744
+   hist            terraces  at 107,81  74 cells from the old town  link: local streets only  homes 157
+   planned quarter planned   at 19,30  30 cells from the old town  link: local streets only  homes 1127
+   commuter        curvi     at 73,14  34 cells from the old town  link: arterial/collector  homes 431
+   rail            rail      at 51,70  33 cells from the old town  link: arterial/collector + rail  homes 803
+   factory         terraces  at 80,63  41 cells from the old town  link: local streets only  homes 604
+== seed 11 coast/rail-junction (history: planned, transit) homes 16978
+   hist            organic   at 83,99  41 cells from the old town  link: arterial/collector  homes 633
+   hist            organic   at 44,101  39 cells from the old town  link: local streets only  homes 854
+   planned quarter planned   at 38,44  30 cells from the old town  link: arterial/collector  homes 1592
+   rail            rail      at 28,71  33 cells from the old town  link: local streets only + rail  homes 945
+   factory         terraces  at 81,43  30 cells from the old town  link: arterial/collector  homes 546
+== seed 23 coast/planned-capital (history: garden, transit) homes 15438
+   hist            organic   at 76,107  39 cells from the old town  link: arterial/collector  homes 1010
+   hist            organic   at 45,35  39 cells from the old town  link: arterial/collector  homes 265
+   commuter        curvi     at 29,69  34 cells from the old town  link: arterial/collector  homes 400
+== seed 7 hills/port (history: planned, garden) homes 11888
+   hist            organic   at 16,112  39 cells from the old town  link: arterial/collector  homes 254
+   hist            organic   at 42,39  38 cells from the old town  link: arterial/collector  homes 842
+   planned quarter planned   at 47,111  43 cells from the old town  link: arterial/collector  homes 826
+   commuter        curvi     at 62,53  42 cells from the old town  link: local streets only  homes 235
+   factory         terraces  at 21,40  34 cells from the old town  link: arterial/collector  homes 88
+== seed 20 hills/port (history: planned) homes 12276
+   hist            organic   at 63,114  41 cells from the old town  link: arterial/collector  homes 695
+   planned quarter planned   at 92,51  30 cells from the old town  link: arterial/collector  homes 2154
+   factory         terraces  at 64,43  34 cells from the old town  link: arterial/collector  homes 531
+
+== summary over seeds
+   hist            22 settlements, 20 joined to the old town by arterials / collectors, 0 with a rail spur, mean 839 homes within 9 cells at the end
+   rail            7 settlements, 6 joined to the old town by arterials / collectors, 7 with a rail spur, mean 924 homes within 9 cells at the end
+   planned quarter 7 settlements, 6 joined to the old town by arterials / collectors, 1 with a rail spur, mean 2507 homes within 9 cells at the end
+   commuter        6 settlements, 4 joined to the old town by arterials / collectors, 0 with a rail spur, mean 292 homes within 9 cells at the end
+   factory         9 settlements, 8 joined to the old town by arterials / collectors, 1 with a rail spur, mean 609 homes within 9 cells at the end

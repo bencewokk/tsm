@@ -360,7 +360,7 @@ function valleyness(height: Float32Array): Float32Array {
   return v;
 }
 
-export function arterialPath(t: TerrainView, road: Uint8Array, a: [number, number], b: [number, number], extra?: (cell: number) => number): [number, number][][] {
+export function arterialPath(t: TerrainView, road: Uint8Array, a: [number, number], b: [number, number], extra?: (cell: number) => number, trace?: number[]): [number, number][][] {
   const valley = valleyness(t.height);
   const D8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const S = N * N * 8;
@@ -398,6 +398,7 @@ export function arterialPath(t: TerrainView, road: Uint8Array, a: [number, numbe
   const cells: number[] = [];
   for (let s = found; s >= 0; s = prev[s]) cells.push(s >> 3);
   cells.reverse();
+  if (trace) trace.push(...cells);
   // split into runs off the existing network (with one cell of overlap to join it)
   const runs: [number, number][][] = [];
   let cur: number[] = [];

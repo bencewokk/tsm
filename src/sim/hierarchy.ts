@@ -32,6 +32,13 @@ export function inCoreXY(c: TownCtx, x: number, y: number, scale = 1): boolean {
   return false;
 }
 
+/** Free-form street zones: the old core and the commuter suburbs' curvilinear quarters (their curves and cul-de-sacs are the design). */
+export function freeformXY(c: TownCtx, x: number, y: number): boolean {
+  if (inCoreXY(c, x, y)) return true;
+  for (const d of c.districts) if (d.style === 'curvi' && Math.hypot(d.x - x, d.y - y) < 13) return true;
+  return false;
+}
+
 /** Arterials end at the core: inside it they are main streets (collectors). A ring road on the old walls takes their traffic. */
 export function shapeHierarchy(c: TownCtx) {
   if (!HIER.on) return;
@@ -125,7 +132,7 @@ export function pruneRoads(sim: Sim, budget = 10): number {
     if (R.ecls[e] === RC.Arterial) continue;
     const a = R.ea[e], b = R.eb[e];
     const mx = (R.nx[a] + R.nx[b]) / 2, my = (R.ny[a] + R.ny[b]) / 2;
-    if (inCoreXY(c, mx, my)) continue;
+    if (freeformXY(c, mx, my)) continue;
     const L = R.edgeLen(e);
     const lots = (sim.lots.byEdge.get(e) ?? []).filter((l) => l.alive);
     if (lots.some((l) => l.type || l.constr || l.demo || l.asm || l.lm || (l.flags & (Flag.Docks | Flag.Planned | Flag.Core)))) continue;

@@ -17,7 +17,7 @@ export const FIELD = {
   cbdOffset: 3.4,      // cells from the old town's centre to the business district's centre
   mainR0: 6.0,         // cells: radius of the main centre's influence at the start
   mainGrow: 0.4,       // extra cells per sqrt(thousand people)
-  subW: { origin: 1, village: 0.42, planned: 0.5, garden: 0.3 } as Record<string, number>,
+  subW: { origin: 1, village: 0.42, planned: 0.5, garden: 0.3, satellite: 0.4 } as Record<string, number>,
   subR: 4.2,
   jobsRef: 35,         // mean jobs per cell (5x5 blur) that count as full job concentration
   accRef: 0.12,        // station accessibility (share of the city's jobs reached) that counts as full

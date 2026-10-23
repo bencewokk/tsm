@@ -96,6 +96,24 @@ export function staticTerritories(c: TownCtx): { port: [number, number] | null; 
       else if (e <= 2.6 && terr[j] === 0 && !inCoreXY(c, x + 0.5, y + 0.5, 1.1)) terr[j] = T.Workers;
     }
   }
+  // the works of each factory town: a small industrial stamp on the side facing the water, workers' terraces round the town
+  for (const d of c.districts) {
+    if (d.cause !== 'factory') continue;
+    let bx = d.x + 4.5, by = d.y, bw = 1e9;
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2, x = d.x + Math.cos(a) * 5, y = d.y + Math.sin(a) * 5, i = Math.floor(y) * N + Math.floor(x);
+      if (x < 2 || y < 2 || x > N - 2 || y > N - 2 || !buildable(c, i)) continue;
+      const w = g.distWater[i] + hash2(g.seed, k, 41) * 0.5;
+      if (w < bw) { bw = w; bx = x; by = y; }
+    }
+    for (let y = Math.floor(d.y - 9); y <= d.y + 9; y++) for (let x = Math.floor(d.x - 9); x <= d.x + 9; x++) {
+      if (x < 0 || y < 0 || x >= N || y >= N) continue;
+      const j = y * N + x;
+      if (!buildable(c, j) || terr[j] === T.Port) continue;
+      if (Math.hypot(x + 0.5 - bx, y + 0.5 - by) <= 3.3) terr[j] = T.Industry;
+      else if (terr[j] === 0 && Math.hypot(x + 0.5 - d.x, y + 0.5 - d.y) <= 8.5) terr[j] = T.Workers;
+    }
+  }
   return { port: hasPort ? [px, py] : null, industry: ax >= 0 ? [ax, ay] : null };
 }
 
