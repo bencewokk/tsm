@@ -289,8 +289,8 @@ export class Sim {
       case 'log': this.say(e.text); break;
       case 'docksDeal': {
         const d = { ...e.deal, name: fill(e.deal.name, this.eventVars()) };
-        // the old port is bought up, fenced and demolished block by block first (about 5 months), then the planned blocks are staked out
-        this.docks = { state: 'active', deal: d, start: this.month, deadline: d.deadline ? this.month + d.deadline + 5 : 0, roadRelief: false, lateLogged: false };
+        // the old port is bought up, fenced and demolished block by block first (about 8 months), then the planned blocks are staked out
+        this.docks = { state: 'active', deal: d, start: this.month, deadline: d.deadline ? this.month + d.deadline + 8 : 0, roadRelief: false, lateLogged: false };
         for (const l of this.docksLots()) {
           const r = this.rng.next();
           let t: number = BT.Res, lv = 1;
@@ -380,7 +380,7 @@ export class Sim {
       if (!l.planLevel) continue;
       planned++;
       if (l.flags & Flag.CarLocked) locked++;
-      if (!(l.flags & Flag.Planned)) built++;
+      if (!(l.flags & Flag.Planned) && !l.asm) built++;  // staked-out blocks are Planned until built; while the old port is still being cleared (assembly) nothing is built
       if (d.state === 'active' && this.walkToStation(l.cell) <= TUNE.serveWalk) served++;
     }
     const deal = d.deal;
