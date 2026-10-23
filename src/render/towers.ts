@@ -1,5 +1,6 @@
 import { Quad, chamfer, lerpP, rotatePoly, scalePoly, shiftPoly, circle, type Pt } from './poly';
 import { PAL, pick } from './forms';
+import { hash01, lerpRange } from '../sim/profiles';
 import type { Ctx } from './buildings';
 import { block, FOOT, tree } from './buildings';
 
@@ -105,7 +106,7 @@ function deco(c: Ctx, H: number) {
 
 function intl(c: Ctx, H: number, tall = false) {
   const { mb, g, r } = c;
-  const col = pick(GLASS.intl, r(7));
+  const col = pick(c.pal.glass, r(7));
   const fp = shaftFootprint(c, 24, 20, c.dens > 0);
   block(c, fp, H, col, { mat: 'glass', roof: 'flat', roofColor: 0xcfd3d6 });
   plantBox(c, fp, g + H + 0.7, 9);
@@ -181,7 +182,7 @@ function supertall(c: Ctx, H: number) {
 function resi(c: Ctx, H: number) {
   const { mb, g, r } = c;
   H = Math.min(H, 62 + r(2) * 18);
-  const col = pick(PAL.apart, r(7)), stripe = pick([0xe6e1d6, 0xb88c78, 0x9bb0a3, 0xd9b27a], r(8));
+  const col = pick(c.pal.mid, r(7)), stripe = pick([0xe6e1d6, 0xb88c78, 0x9bb0a3, 0xd9b27a], r(8));
   const fp = shaftFootprint(c, 21, 17, c.dens > 0);
   // staggered: a lower mass and a shifted upper mass
   const split = 0.55 + r(9) * 0.15;
@@ -203,8 +204,7 @@ function resi(c: Ctx, H: number) {
 export function designTower(c: Ctx, cbd: boolean) {
   const { Q, r } = c;
   let H = cbd ? 80 + r(4) * 85 : 34 + r(4) * 40;
-  if (c.dens === 2) H *= 1.08;
-  if (c.dens === 0) H *= 0.82;
+  H *= lerpRange(c.prof.buildingHeightRange, hash01(c.id, c.wave)); // each construction wave varies a little
   const style = chooseStyle(c, cbd);
   // street-wall podium for dense plots (the tower sits back above it)
   const pw = style === 'deco' || style === 'brut' || style === 'post' || style === 'super';

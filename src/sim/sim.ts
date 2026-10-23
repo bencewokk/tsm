@@ -7,6 +7,7 @@ import { Metro } from './metro';
 import { EVENTS, fill, type EventDef, type Variant, type Effect, type DocksDeal } from './events';
 import { RoadGraph, RC, ROAD_HALF } from './roads';
 import { LotStore, LOT_W, type Lot } from './lots';
+import { PROFILE_INDEX, PROFILES, ZONING } from './profiles';
 import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './town';
 import { MinHeap } from './heap';
 
@@ -111,8 +112,9 @@ export class Sim {
     this.g = generateTerrain(seed, this.rng);
     this.roads = new RoadGraph(this.g);
     this.lots = new LotStore(this.g.water, this.g.flags, this.roads);
-    this.lots.tierAt = (x, y) => this.tierAt(x, y);
+    this.lots.profileAt = (x, y) => this.profileAt(x, y);
     this.town = { g: this.g, roads: this.roads, lots: this.lots, rng: this.rng, districts: [] };
+    this.town.profileAt = (x, y) => this.profileAt(x, y);
     layoutTown(this.town);
     this.roads.blockFlags = Flag.Docks;
     this.roads.corridor = {
@@ -396,17 +398,22 @@ export class Sim {
   lotHomes(l: Lot) { return l.type === BT.Res ? Math.round(HOMES[l.level] * this.capOf(l)) : 0; }
   lotJobs(l: Lot) { return l.type === BT.Com ? Math.round(COM_JOBS[l.level] * this.capOf(l)) : l.type === BT.Ind ? Math.round(IND_JOBS[l.level] * this.capOf(l)) : 0; }
 
-  /** Density tier for new street frontage: 2 old-town core / next to busy stations / very high land value, 1 mid, 0 detached edge. */
-  tierAt(x: number, y: number): number {
+  /** District profile for new street frontage: docks, old-town core, downtown (stations / high value), mid-density terraces, suburb. */
+  profileAt(x: number, y: number): number {
+    const gx = Math.floor(x), gy = Math.floor(y);
+    if (gx >= 0 && gy >= 0 && gx < N && gy < N && (this.g.flags[gy * N + gx] & Flag.Docks)) return PROFILE_INDEX.docks;
     let dc = Infinity;
     for (const d of this.town.districts) dc = Math.min(dc, Math.hypot(d.x - x, d.y - y));
     let ds = Infinity;
     for (const st of this.metro.stations) ds = Math.min(ds, Math.hypot(st.x - x, st.y - y));
     const lv = this.lvS ? this.fieldAt(this.lvS, x, y) : 0;
-    if (dc < 7.5 || ds < 3.2 || lv > 0.66) return 2;
-    if (dc < 13 || ds < 6.5 || lv > 0.46) return 1;
-    return 0;
+    const Z = ZONING;
+    if (dc < Z.coreRadius) return PROFILE_INDEX.oldTown;
+    if (ds < Z.stationCore || lv > Z.valueCore) return PROFILE_INDEX.downtown;
+    if (dc < Z.midRadius || ds < Z.stationMid || lv > Z.valueMid) return PROFILE_INDEX.terraces;
+    return PROFILE_INDEX.suburb;
   }
+
   homesAt(i: number) { return this.cHomes[i]; }
   jobsAt(i: number) { return this.cJobs[i]; }
   zoneOf(i: number) { return (((i / N) | 0) / ZONE | 0) * NZ + ((i % N) / ZONE | 0); }
@@ -717,13 +724,14 @@ export class Sim {
       if (l.flags & Flag.Planned) continue;
       const v = this.fieldAt(this.lvS, l.x, l.y), t = l.type, lv = l.level;
       const jit = this.rng.next() * 0.12;
+      const pf = PROFILES[l.prof], fr = (0.5 + pf.landUseMix.res) * pf.growthRate, fc = (0.5 + pf.landUseMix.com) * pf.growthRate, fi = (0.5 + pf.landUseMix.ind) * pf.growthRate;
       if (t === BT.None) {
         if (v < Math.min(spawnR, spawnC)) continue;
         const pull = this.stationPull(l.cell);
         const front = l.cls === RC.Arterial ? 0.1 : l.cls === RC.Collector ? 0.05 : 0;
-        if (v >= spawnR) res.push({ l, s: v + jit, kind: BT.Res, to: 1 });
-        if (v >= spawnC) com.push({ l, s: v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12, kind: BT.Com, to: 1 });
-        ind.push({ l, s: 0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit, kind: BT.Ind, to: 1 });
+        if (v >= spawnR) res.push({ l, s: (v + jit) * fr, kind: BT.Res, to: 1 });
+        if (v >= spawnC) com.push({ l, s: (v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12) * fc, kind: BT.Com, to: 1 });
+        ind.push({ l, s: (0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit) * fi, kind: BT.Ind, to: 1 });
       } else if (t === BT.Res && lv < 3) {
         const cap = l.flags & Flag.CarLocked ? 2 : 3;
         if (lv + 1 > cap) continue;
@@ -1025,9 +1033,9 @@ export class Sim {
     const n = ls.length;
     const f = () => new Float32Array(n), u = () => new Uint8Array(n);
     const m: LotsMsg = { n, id: new Int32Array(n), x: f(), y: f(), ang: f(), w: f(), d: f(), type: u(), level: u(), target: u(), constr: u(), constrTotal: u(), flags: u(), planType: u(), planLevel: u(), served: u(),
-      poly: new Float32Array(n * 8), dens: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u() };
+      poly: new Float32Array(n * 8), dens: u(), prof: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u() };
     ls.forEach((l, k) => {
-      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype;
+      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.prof[k] = l.prof; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype;
       m.id[k] = l.id; m.x[k] = l.x; m.y[k] = l.y; m.ang[k] = l.ang; m.w[k] = l.w; m.d[k] = l.d;
       m.type[k] = l.type; m.level[k] = l.level; m.target[k] = l.target; m.constr[k] = l.constr; m.constrTotal[k] = l.constrTotal;
       m.flags[k] = l.flags; m.planType[k] = l.planType; m.planLevel[k] = l.planLevel;

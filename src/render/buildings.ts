@@ -1,6 +1,7 @@
 import { MB, Quad, chamfer, circle, lerpP, scalePoly, centroid, type Pt } from './poly';
 import { PAL, GROUND, pick, type Kind } from './forms';
 import { vhash } from './common';
+import type { DistrictProfile, Palette } from '../sim/profiles';
 import { designTower } from './towers';
 
 export interface Tree { x: number; z: number; size: number; h: number; pine: boolean; seed: number }
@@ -13,6 +14,9 @@ export interface Ctx {
   lv: number;                    // land value 0..1
   trees: Tree[];
   r: (k: number) => number;
+  prof: DistrictProfile;         // district profile of the plot
+  pal: Palette;                  // its palette
+  wave: number;                  // construction wave (built month / 24)
   style?: string;                // force a tower style (gallery / tests)
 }
 
@@ -95,8 +99,8 @@ function designHouse(c: Ctx) {
   const { Q, r } = c;
   if (c.dens === 0) {
     // detached house(s) with a front garden, lawn and trees
-    pad(c, GROUND.house, 0.6, 0.3);
-    const wall = pick(PAL.houseWall, r(1)), roof = pick(PAL.houseRoof, r(2));
+    pad(c, c.pal.ground, 0.6, 0.3);
+    const wall = pick(c.pal.wall, r(1)), roof = pick(c.pal.roof, r(2));
     const two = r(6) < 0.5;
     const place = (s: number, wm: number, dm: number, h: number, wc: number) => {
       const ws = wm / Q.W / 2, tt0 = (7 + r(4) * 2) / Q.D;
@@ -106,7 +110,7 @@ function designHouse(c: Ctx) {
     };
     if (two) {
       place(0.27 + r(7) * 0.05, 11 + r(8) * 2, 9 + r(9) * 2, 5.5 + r(10), wall);
-      place(0.74 - r(11) * 0.05, 11 + r(12) * 2, 9 + r(13) * 2, 5.5 + r(14), pick(PAL.houseWall, r(15)));
+      place(0.74 - r(11) * 0.05, 11 + r(12) * 2, 9 + r(13) * 2, 5.5 + r(14), pick(c.pal.wall, r(15)));
       tree(c, Q.at(0.25, 0.8), 6 + r(17) * 2, 18);
       tree(c, Q.at(0.76, 0.85), 5.5 + r(20) * 2, 21);
     } else {
@@ -120,15 +124,15 @@ function designHouse(c: Ctx) {
     return;
   }
   // terraced / semi-detached row: continuous street wall, separate houses
-  pad(c, GROUND.core, 0.2, 0.3);
+  pad(c, c.pal.ground, 0.2, 0.3);
   const n = Math.max(2, Math.round(Q.W / 7));
   const cs = cuts(c, n, 0.4);
   const bd = 10 + r(2) * 3;
   for (let i = 0; i < n; i++) {
     const poly = Q.strip(cs[i], cs[i + 1], 0, bd / Q.D);
     const h = 7.5 + r(10 + i) * 3.5;
-    const wall = r(40 + i) < 0.55 ? pick(PAL.brick, r(30 + i)) : pick(PAL.houseWall, r(20 + i));
-    block(c, poly, h, wall, { roof: r(50 + i) < 0.7 ? 'gableT' : 'gableS', rh: 3 + r(60 + i) * 2, roofColor: r(70 + i) < 0.5 ? pick(PAL.houseRoof, r(71 + i)) : pick(PAL.coreRoof, r(72 + i)) });
+    const wall = pick(c.pal.wall, r(30 + i));
+    block(c, poly, h, wall, { roof: r(50 + i) < 0.7 ? 'gableT' : 'gableS', rh: 3 + r(60 + i) * 2, roofColor: pick(c.pal.roof, r(71 + i)) });
   }
   // back gardens
   if (r(80) < 0.8) tree(c, Q.at(0.3, 0.8), 5 + r(81) * 2, 82);
@@ -137,7 +141,7 @@ function designHouse(c: Ctx) {
 
 function designCore(c: Ctx) {
   const { Q, r } = c;
-  pad(c, GROUND.core, 0.1, 0.3);
+  pad(c, c.pal.ground, 0.1, 0.3);
   const n = Math.max(1, Math.round(Q.W / 8.6));
   const cs = cuts(c, n, 0.5);
   const lvl = c.level;
@@ -146,8 +150,8 @@ function designCore(c: Ctx) {
   for (let i = 0; i < n; i++) {
     let poly = Q.strip(cs[i], cs[i + 1], 0, (13 + r(50 + i) * 4) / Q.D);
     const h = baseH + (r(40 + i) - 0.3) * (lvl === 1 ? 3 : 5);
-    const wall = pick(PAL.coreWall, r(60 + i));
-    const roofC = pick(PAL.coreRoof, r(80 + i));
+    const wall = pick(c.pal.wall, r(60 + i));
+    const roofC = pick(c.pal.roof, r(80 + i));
     const rr = r(90 + i);
     const roof = rr < 0.5 ? 'gableT' : rr < 0.78 ? 'gableS' : lvl >= 3 && rr < 0.9 ? 'mansard' : 'hip';
     const corner = (i === 0 && cornerStart(c)) || (i === n - 1 && cornerEnd(c));
@@ -172,14 +176,14 @@ function designCore(c: Ctx) {
       // ground-floor shopfront and awning
       const shop = Q.strip(cs[i] + 0.004, cs[i + 1] - 0.004, 0, 0.5 / Q.D * 1.0);
       void shop;
-      awning(c, cs[i], cs[i + 1], 3.3, 1.6, pick(PAL.awning, r(110 + i)));
+      awning(c, cs[i], cs[i + 1], 3.3, 1.6, pick(c.pal.accent, r(110 + i)));
     }
     last = poly;
   }
   // rear range around a courtyard
   if (lvl >= 2 && Q.D > 24 && r(3) < 0.75) {
     const poly = Q.strip(0.08, 0.92, 1 - 9 / Q.D, 0.97);
-    block(c, poly, 8 + r(4) * 4, pick(PAL.coreWall, r(5)), { roof: 'gableS', rh: 3.4, roofColor: pick(PAL.coreRoof, r(6)) });
+    block(c, poly, 8 + r(4) * 4, pick(c.pal.wall, r(5)), { roof: 'gableS', rh: 3.4, roofColor: pick(c.pal.roof, r(6)) });
   }
   if (lvl === 1 && r(7) < 0.6) tree(c, Q.at(0.5, 0.82), 5 + r(8) * 2, 9);
   void last;
@@ -188,7 +192,7 @@ function designCore(c: Ctx) {
 function designApart(c: Ctx) {
   const { Q, r } = c;
   pad(c, GROUND.apart, 0.3, 0.3);
-  const col = pick(PAL.apart, r(1));
+  const col = pick(c.pal.mid, r(1));
   const floors = 4 + Math.floor(r(2) * 4) + (c.dens === 2 ? 1 : 0);
   const H = floors * 3.3;
   if (c.dens === 0) {
@@ -210,7 +214,7 @@ function designApart(c: Ctx) {
   if (roofType === 'flat') plant(c, poly, c.g + H, 8);
   balconies(c, 0, 1, H, floors, 0xe2ddd2);
   // wings enclose a courtyard where the plot is deep enough
-  if (Q.D >= 26 && (c.dens === 2 || r(9) < 0.5)) {
+  if (Q.D >= 26 && r(9) < c.prof.courtyardChance * (c.dens === 2 ? 1.6 : 1)) {
     const wd = Math.min(Q.W * 0.28, 10) / Q.W;
     const wh = H * (0.75 + r(10) * 0.2);
     const both = r(11) < 0.6;
@@ -226,11 +230,11 @@ function designApart(c: Ctx) {
 function designShop(c: Ctx) {
   const { Q, r } = c;
   if (c.dens === 0) {
-    pad(c, GROUND.shop, 0.4, 0.3);
+    pad(c, c.pal.ground, 0.4, 0.3);
     const d = 15 + r(1) * 3, h = 5 + r(2) * 2.5;
     const poly = Q.strip(0.08, 0.92, 2 / Q.D, 2 / Q.D + d / Q.D);
-    block(c, poly, h, pick(PAL.shop, r(4)), { roof: 'flat' });
-    awning(c, 0.08, 0.92, 3.2, 1.2, pick(PAL.awning, r(5)));
+    block(c, poly, h, pick(c.pal.shop, r(4)), { roof: 'flat' });
+    awning(c, 0.08, 0.92, 3.2, 1.2, pick(c.pal.accent, r(5)));
     if (r(6) < 0.5) plant(c, poly, c.g + h, 7);
     return;
   }
@@ -241,7 +245,7 @@ function designShop(c: Ctx) {
     let poly = Q.strip(cs[i], cs[i + 1], 0, (14 + r(10 + i) * 3) / Q.D);
     const floors = 3 + Math.floor(r(20 + i) * 2.4);
     const h = floors * 3.4 + 0.6;
-    const wall = r(30 + i) < 0.4 ? pick(PAL.brick, r(31 + i)) : pick(PAL.shop, r(32 + i));
+    const wall = r(30 + i) < 0.4 ? pick(c.pal.wall, r(31 + i)) : pick(c.pal.shop, r(32 + i));
     if (i === 0 && cornerStart(c)) poly = chamfer(poly, 0, 3);
     if (i === n - 1 && cornerEnd(c)) poly = chamfer(poly, 1, 3);
     const rr = r(40 + i);
@@ -249,7 +253,7 @@ function designShop(c: Ctx) {
     // glazed shopfront band + awning
     const sf = Q.strip(cs[i] + 0.006, cs[i + 1] - 0.006, 0, 0.9 / Q.D);
     c.mb.prism('glass', sf, c.g, c.g + 3.6, 0x8aa0ae, 0x8aa0ae);
-    awning(c, cs[i], cs[i + 1], 3.7, 1.8, pick(PAL.awning, r(50 + i)));
+    awning(c, cs[i], cs[i + 1], 3.7, 1.8, pick(c.pal.accent, r(50 + i)));
     if (r(60 + i) < 0.5) plant(c, poly, c.g + h, 61 + i);
   }
 }
@@ -257,7 +261,7 @@ function designShop(c: Ctx) {
 function designOffice(c: Ctx) {
   const { Q, r } = c;
   pad(c, GROUND.office, 0.1, 0.3);
-  const col = pick(PAL.office, r(1));
+  const col = pick(c.pal.office, r(1));
   const h = 22 + r(2) * 16 + (c.dens === 2 ? 4 : 0);
   const full = c.dens > 0;
   const poly = full ? Q.strip(0, 1, 0, 0.78) : Q.strip(0.08, 0.92, 0.1, 0.75);
@@ -399,7 +403,7 @@ function designYard(c: Ctx) {
   const { Q, r } = c;
   // vacant plot in a built-up area: a quiet lawn (back yards are gravelled), a few trees
   pad(c, c.back ? 0xcfc6b0 : GROUND.yard, 0.5, 0.18);
-  const n = Math.floor(r(1) * 3);
+  const n = Math.floor(r(1) * (1 + 3 * c.prof.yardChance));
   for (let i = 0; i < n; i++) tree(c, Q.at(0.2 + r(10 + i) * 0.6, 0.2 + r(20 + i) * 0.6), 5 + r(30 + i) * 3, 40 + i);
 }
 

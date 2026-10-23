@@ -4,6 +4,7 @@ import { RoadGraph, RC, arterialPath, RULES } from './roads';
 import { LotStore } from './lots';
 import { angDiff, lineDiff } from './geom';
 import type { Grid } from './terrain';
+import { PROFILES } from './profiles';
 
 /** Each village/district has its own street orientation; noise bends it, and districts meet irregularly. */
 export interface District { x: number; y: number; ang: number }
@@ -14,6 +15,8 @@ export interface TownCtx {
   lots: LotStore;
   rng: Rng;
   districts: District[];
+  /** district profile index at a point (street regularity etc.) */
+  profileAt?: (x: number, y: number) => number;
 }
 
 export function orientationAt(c: TownCtx, x: number, y: number): number {
@@ -22,7 +25,13 @@ export function orientationAt(c: TownCtx, x: number, y: number): number {
     const dd = Math.hypot(d.x - x, d.y - y);
     if (dd < bd) { bd = dd; best = d; }
   }
-  return (best?.ang ?? 0) + (fbm(x * 0.06, y * 0.06, c.g.seed + 71, 3) - 0.5) * 0.7;
+  const reg = regularityAt(c, x, y);
+  return (best?.ang ?? 0) + (fbm(x * 0.06, y * 0.06, c.g.seed + 71, 3) - 0.5) * 1.4 * (1 - reg);
+}
+
+/** Street regularity of the district at a point (profile.roadRegularity): 0 organic .. 1 planned. */
+export function regularityAt(c: TownCtx, x: number, y: number): number {
+  return c.profileAt ? PROFILES[c.profileAt(x, y)].roadRegularity : 0.5;
 }
 
 /** Initial road network and buildings: village grids at their own angle, arterials between them, the docks road. */
@@ -191,9 +200,10 @@ function alignToGrid(c: TownCtx, x: number, y: number, a: number): number {
     const d = angDiff(a, g);
     if (d < bd) { bd = d; best = g; }
   }
-  if (bd >= 0.55) return a;
+  const reg = regularityAt(c, x, y);
+  if (bd >= 0.35 + 0.4 * reg) return a;
   const signed = Math.atan2(Math.sin(a - best), Math.cos(a - best));
-  return best + signed * 0.25;
+  return best + signed * 0.5 * (1 - reg);
 }
 
 /**

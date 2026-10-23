@@ -4,6 +4,7 @@ import { MB, Quad, type Pt } from '../src/render/poly';
 import { designLot, massing, pad } from '../src/render/buildings';
 import { kindOf, type Kind } from '../src/render/forms';
 import { vhash } from '../src/render/common';
+import { PROFILES, PALETTES } from '../src/sim/profiles';
 
 declare const process: { argv: string[] };
 const sim = new Sim(4821);
@@ -32,7 +33,7 @@ for (let k = 0; k < L.n; k++) {
   const seed = L.seed[k];
   const t0 = performance.now();
   const trees: any[] = [];
-  const c: any = { mb, Q, id: L.id[k], seed, g: 5, kind, level: L.level[k] || L.target[k], dens: L.dens[k], sides: L.sides[k], back: L.back[k], isCom: L.type[k] === BT.Com, flags: L.flags[k], era: Math.min(1, L.built[k] / 96), lv: 0.5, trees, r: (j: number) => vhash(seed >>> 3, j) };
+  const c: any = { mb, Q, id: L.id[k], seed, g: 5, kind, level: L.level[k] || L.target[k], dens: L.dens[k], sides: L.sides[k], back: L.back[k], isCom: L.type[k] === BT.Com, flags: L.flags[k], era: 0.3, lv: 0.5, trees, prof: PROFILES[L.prof[k]], pal: PALETTES[PROFILES[L.prof[k]].palette], wave: 0, r: (j: number) => vhash(seed >>> 3, j) };
   designLot(c);
   massing(c);
   const dt = performance.now() - t0;

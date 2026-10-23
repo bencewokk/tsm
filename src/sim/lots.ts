@@ -1,6 +1,7 @@
 import { N, Flag, BT } from './constants';
 import { quadsOverlap, pointSeg, polyArea, isConvex } from './geom';
 import { RoadGraph, ROAD_HALF } from './roads';
+import { PROFILES, densClass, hash01, lerpRange } from './profiles';
 
 /**
  * A building plot along street frontage: a convex quad [F0, F1, B1, B0] (cell units).
@@ -20,7 +21,8 @@ export interface Lot {
   planType: number; planLevel: number;
   alive: boolean;
   poly: number[];             // [F0, F1, B1, B0]
-  dens: number;               // 0 detached, 1 terraced / mid, 2 dense core
+  dens: number;               // 0 detached, 1 terraced / mid, 2 dense core (class of the profile)
+  prof: number;               // district profile index (profiles.ts)
   sides: number;              // bit0: start side (B0-F0) faces a cross street, bit1: end side (F1-B1) faces one
   back: number;               // 1 for back-row (backland) plots
   demo: number;               // months of demolition left before construction starts
@@ -36,13 +38,6 @@ export const LOT_W = 0.78;   // ~39 m frontage (detached tier)
 export const LOT_D = 0.7;    // ~35 m deep
 export const SETBACK = 0.1;  // ~5 m from the kerb
 
-/** Plot geometry per density tier (cells). */
-export const TIERS = [
-  { w: LOT_W, d: LOT_D, sb: SETBACK, gap: 0.07, rows: 0 },
-  { w: 0.56, d: 0.62, sb: 0.06, gap: 0, rows: 1 },
-  { w: 0.46, d: 0.56, sb: 0.04, gap: 0, rows: 2 },
-] as const;
-
 interface Cut { tAt: (o: number) => number; street: boolean }
 
 const norm = (a: number) => { const t = a % (Math.PI * 2); return t < 0 ? t + Math.PI * 2 : t; };
@@ -50,9 +45,9 @@ const norm = (a: number) => { const t = a % (Math.PI * 2); return t < 0 ? t + Ma
 export class LotStore {
   lots: Lot[] = [];
   private hash = new Map<number, number[]>();
-  private epCache = new Map<number, { tier: number; w: number; d: number; sb: number; gap: number }>();
-  /** density tier at a point (set by the sim: distance to old centres, stations, land value) */
-  tierAt: (x: number, y: number) => number = () => 0;
+  private epCache = new Map<number, { prof: number; tier: number; w: number; d: number; sb: number; gap: number; rows: number }>();
+  /** district profile at a point (set by the sim: zoning around old centres, stations, land value, docks) */
+  profileAt: (x: number, y: number) => number = () => 0;
 
   constructor(private water: Uint8Array, private flags: Uint8Array, private roads: RoadGraph) {}
 
@@ -95,7 +90,7 @@ export class LotStore {
   }
 
   /** Try to place a convex quad plot; checks water/steep, overlap with plots (spatial hash + SAT) and with roads. */
-  tryAddQuad(q: number[], cls: number, dens: number, sides: number, back = 0): Lot | null {
+  tryAddQuad(q: number[], cls: number, prof: number, sides: number, back = 0): Lot | null {
     if (!isConvex(q)) return null;
     const area = Math.abs(polyArea(q));
     if (area < 0.12) return null;
@@ -125,7 +120,7 @@ export class LotStore {
     }
     const l: Lot = {
       id: this.lots.length, x: 0, y: 0, ang: 0, w: 0, d: 0, cell: 0, cls, type: BT.None, level: 0, target: 0, constr: 0, constrTotal: 0, age: 0, low: 0,
-      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens, sides, back, demo: 0, seed: 0, built: 0, ntype: 0,
+      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(PROFILES[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0,
     };
     this.setGeom(l, q);
     l.flags = this.flags[l.cell] & Flag.Docks;
@@ -136,16 +131,19 @@ export class LotStore {
   }
 
   // ---------------------------------------------------------------- frontage generation
+  /** Plot parameters of a street: its district's profile, varied a little per street (edge) inside the profile's ranges. */
   edgeParams(e: number) {
     let p = this.epCache.get(e);
     if (p) return p;
     const g = this.roads;
     const mx = (g.nx[g.ea[e]] + g.nx[g.eb[e]]) / 2, my = (g.ny[g.ea[e]] + g.ny[g.eb[e]]) / 2;
-    let tier = this.tierAt(mx, my);
-    const gx = Math.floor(mx), gy = Math.floor(my);
-    if (gx >= 0 && gy >= 0 && gx < N && gy < N && (this.flags[gy * N + gx] & Flag.Docks)) tier = Math.max(tier, 1);
-    const T = TIERS[tier];
-    p = { tier, w: T.w, d: T.d, sb: T.sb, gap: T.gap };
+    const prof = this.profileAt(mx, my);
+    const P = PROFILES[prof];
+    p = {
+      prof, tier: densClass(P), rows: P.backRows,
+      w: lerpRange(P.lotWidthRange, hash01(e, 1)), d: lerpRange(P.lotDepthRange, hash01(e, 2)),
+      sb: lerpRange(P.setbackRange, hash01(e, 3)), gap: (1 - P.frontageContinuity) * 0.07,
+    };
     this.epCache.set(e, p);
     return p;
   }
@@ -231,7 +229,7 @@ export class LotStore {
         const lerp = (p: [number, number], q: [number, number], t: number) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
         const f0 = lerp(F0, F1, s0), f1 = lerp(F0, F1, s1), b1 = lerp(B0, B1, s1), b0 = lerp(B0, B1, s0);
         const sides = (k === 0 && c0.street ? 1 : 0) | (k === n - 1 && c1.street ? 2 : 0);
-        const l = this.tryAddQuad([f0[0], f0[1], f1[0], f1[1], b1[0], b1[1], b0[0], b0[1]], g.ecls[e], P.tier, sides);
+        const l = this.tryAddQuad([f0[0], f0[1], f1[0], f1[1], b1[0], b1[1], b0[0], b0[1]], g.ecls[e], P.prof, sides);
         if (l) out.push(l);
       }
     }
@@ -241,17 +239,17 @@ export class LotStore {
   /** Back-row plots behind the front rows (dense tiers): interior courtyards and rear ranges fill the blocks. */
   backland(parents: Lot[]): Lot[] {
     const out: Lot[] = [];
-    let cur = parents.filter((l) => l.dens > 0 && !l.back);
-    for (let row = 1; row <= 2 && cur.length; row++) {
+    let cur = parents.filter((l) => PROFILES[l.prof].backRows > 0 && !l.back);
+    for (let row = 1; row <= 3 && cur.length; row++) {
       const next: Lot[] = [];
       for (const p of cur) {
-        if (TIERS[p.dens].rows < row || (p.flags & Flag.Docks)) continue;
+        if (PROFILES[p.prof].backRows < row) continue;
         const q = p.poly;
         // extend from the rear line away from the street by the same depth; front of the new plot = the parent's rear line
         const b0x = q[6], b0y = q[7], b1x = q[4], b1y = q[5];
         const r0x = b0x + (b0x - q[0]), r0y = b0y + (b0y - q[1]);
         const r1x = b1x + (b1x - q[2]), r1y = b1y + (b1y - q[3]);
-        const l = this.tryAddQuad([b0x, b0y, b1x, b1y, r1x, r1y, r0x, r0y], p.cls, p.dens, 0, 1);
+        const l = this.tryAddQuad([b0x, b0y, b1x, b1y, r1x, r1y, r0x, r0y], p.cls, p.prof, 0, 1);
         if (l) { l.flags |= p.flags & Flag.Docks; next.push(l); out.push(l); }
       }
       cur = next;

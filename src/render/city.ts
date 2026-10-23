@@ -8,6 +8,7 @@ import { Layer, unitGeos } from './layers';
 import { kindOf, SITE, PAL, type Kind } from './forms';
 import { Harbour } from './harbour';
 import { MB, Quad, type Pt, type Mat } from './poly';
+import { PROFILES, PALETTES } from '../sim/profiles';
 import { designLot, massing, pad, tree as ctxTree, FOOT, type Ctx, type Tree } from './buildings';
 
 // road widths (m) by class, and the narrow cobbled lanes of the old cores
@@ -216,7 +217,7 @@ export class CityView {
   }
 
   private sigOf(L: LotsMsg, k: number): number {
-    let h = imul(L.id[k] + 1, 2654435761);
+    let h = imul(L.id[k] + 1, 2654435761) ^ imul(L.prof[k] + 5, 7919);
     h ^= imul(L.type[k] * 31 + L.level[k] * 7 + L.dens[k] * 977 + L.sides[k] * 53 + L.back[k] * 13, 40503);
     h ^= imul((L.flags[k] & 23) * 131 + L.planType[k] * 17 + L.planLevel[k] * 19 + L.served[k] * 23 + L.built[k] * 3, 69069);
     for (let i = 0; i < 8; i++) h = imul(h ^ Math.round(L.poly[k * 8 + i] * 200), 16777619);
@@ -231,7 +232,8 @@ export class CityView {
     const dens = L.dens[k];
     return {
       mb, Q, id: L.id[k], seed, g, kind, level, dens, sides: L.sides[k], back: L.back[k], isCom: L.type[k] === BT.Com, flags: L.flags[k],
-      era: Math.min(1, L.built[k] / 96), lv: dens === 2 ? 0.8 : dens === 1 ? 0.5 : 0.3, trees,
+      prof: PROFILES[L.prof[k]], pal: PALETTES[PROFILES[L.prof[k]].palette], wave: Math.floor(L.built[k] / 24),
+      era: Math.min(1, PROFILES[L.prof[k]].era * 0.3 + (L.built[k] / 96) * 0.8), lv: dens === 2 ? 0.8 : dens === 1 ? 0.5 : 0.3, trees,
       r: (j: number) => vhash(seed >>> 3, j),
     };
   }
@@ -334,7 +336,8 @@ export class CityView {
       const Q = new Quad([x - 21, cz], [x + 21, cz], [x + 21, cz + 40], [x - 21, cz + 40]);
       mb.baseY = g; mb.seed = i;
       const seed = 1000 + i * 77;
-      const c: Ctx = { mb, Q, id: i, seed, g, kind: 'cbd', level: 3, dens: 2, sides: 0, back: 0, isCom: true, flags: 0, era: 0.5, lv: 0.9, trees, r: (j: number) => vhash(seed, j), style: st };
+      const prof = PROFILES[3];
+      const c: Ctx = { mb, Q, id: i, seed, g, kind: 'cbd', level: 3, dens: 2, sides: 0, back: 0, isCom: true, flags: 0, era: 0.5, lv: 0.9, trees, r: (j: number) => vhash(seed, j), style: st, prof, pal: PALETTES[prof.palette], wave: 2 };
       designLot(c);
       void heights;
     });
