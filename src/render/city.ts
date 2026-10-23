@@ -1,12 +1,14 @@
 import * as THREE from 'three';
-import { N, CELL, Flag } from '../sim/constants';
+import { N, CELL, Flag, BT } from '../sim/constants';
 import type { StateMsg, LotsMsg, RoadsMsg } from '../sim/protocol';
 import type { Village } from '../sim/terrain';
 import { vhash } from './common';
 import { patchBuildingMaterial } from './look';
 import { Layer, unitGeos } from './layers';
-import { kindOf, partsFor, GROUND, SITE, PAL, type Part, type Kind } from './forms';
+import { kindOf, SITE, PAL, type Kind } from './forms';
 import { Harbour } from './harbour';
+import { MB, Quad, type Pt, type Mat } from './poly';
+import { designLot, massing, pad, tree as ctxTree, FOOT, type Ctx, type Tree } from './buildings';
 
 // road widths (m) by class, and the narrow cobbled lanes of the old cores
 const ROAD_W = [16, 11, 8];
@@ -15,60 +17,74 @@ const ASPHALT = [new THREE.Color(0x7d8186), new THREE.Color(0x8c8f93), new THREE
 const COBBLE = new THREE.Color(0xbfae94);
 const KERB = new THREE.Color(0xd9d5cb);
 
-interface Anim { lot: number; parts: { layer: Layer; i: number }[] }
+const CHUNK = 16; // cells per chunk side (800 m)
+const MATS: Mat[] = ['wall', 'glass', 'plain', 'ghost', 'lamp'];
+
+interface Chunk { sig: number; meshes: THREE.Mesh[]; trees: Tree[] }
+
+/** A plot being demolished or built: its own small meshes, scaled in y as the work progresses. */
+interface Grow {
+  sig: number;
+  lot: number;            // lot id
+  mode: 'build' | 'demo';
+  group: THREE.Group;
+  bodies: THREE.Object3D[]; // scaled in y
+  crane: { x: number; y: number; z: number; h: number; k: number } | null;
+}
+
+const imul = Math.imul;
 
 export class CityView {
   group = new THREE.Group();
   wallMat: THREE.MeshStandardMaterial;
   glassMat: THREE.MeshStandardMaterial;
   plainMat: THREE.MeshStandardMaterial;
+  ghostMat: THREE.MeshStandardMaterial;
+  lampMat: THREE.MeshBasicMaterial;
   treeMat: THREE.MeshStandardMaterial;
   roadMat: THREE.MeshStandardMaterial;
-  ghostMat: THREE.MeshStandardMaterial;
   craneMat: THREE.MeshStandardMaterial;
+  scafMat: THREE.LineBasicMaterial;
   roads: THREE.Mesh;
   private L: Record<string, Layer>;
-  private ghosts: Layer;
-  private pads: Layer;
   private craneMast: Layer;
   private craneJib: Layer;
+  private polyMats: Record<Mat, THREE.Material>;
   harbour: Harbour;
   get surfaceMats(): THREE.Material[] {
     return [this.wallMat, this.glassMat, this.plainMat, this.treeMat, this.roadMat, this.craneMat];
   }
-  private anims: Anim[] = [];
+  private chunks = new Map<number, Chunk>();
+  private chunkGroup = new THREE.Group();
+  private grows = new Map<number, Grow>();
+  private growGroup = new THREE.Group();
   private cranes: { x: number; y: number; z: number; h: number; k: number }[] = [];
   private lots: LotsMsg | null = null;
   private roadVersion = -1;
   private occ = new Uint8Array(N * 4 * N * 4); // 12.5 m occupancy grid (roads) for wild tree placement
   private coreEdge = new Set<number>();
   private streetTrees: { x: number; z: number; s: number; seed: number }[] = [];
+  stats = { chunksBuilt: 0, lots: 0, grows: 0 };
 
   constructor(private water: Uint8Array, private flags: Uint8Array, private villages: Village[], private sample: (x: number, z: number) => number) {
     const g = unitGeos();
-    this.wallMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0 });
-    patchBuildingMaterial(this.wallMat, false);
-    this.glassMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0.25, envMapIntensity: 1 });
-    patchBuildingMaterial(this.glassMat, true);
-    this.plainMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0 });
+    this.wallMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, vertexColors: true });
+    patchBuildingMaterial(this.wallMat, false, true);
+    this.glassMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0.25, envMapIntensity: 1, vertexColors: true });
+    patchBuildingMaterial(this.glassMat, true, true);
+    this.plainMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0, vertexColors: true });
+    this.ghostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.5, depthWrite: false, emissive: 0x404040, emissiveIntensity: 0.4, vertexColors: true });
+    this.lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true });
+    this.polyMats = { wall: this.wallMat, glass: this.glassMat, plain: this.plainMat, ghost: this.ghostMat, lamp: this.lampMat };
     this.treeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true });
     this.craneMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
-    this.ghostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.5, depthWrite: false, emissive: 0x404040, emissiveIntensity: 0.4 });
+    this.scafMat = new THREE.LineBasicMaterial({ color: 0xb59b5f, transparent: true, opacity: 0.9 });
+    const plainInst = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });
     this.L = {
-      wall: new Layer(g.box, this.wallMat, 40000),
-      glass: new Layer(g.box, this.glassMat, 8000),
-      plain: new Layer(g.box, this.plainMat, 40000),
-      gable: new Layer(g.gable, this.plainMat, 30000),
-      saw: new Layer(g.saw, this.plainMat, 4000),
-      pyr: new Layer(g.pyr, this.plainMat, 2000),
-      cyl: new Layer(g.cyl, this.plainMat, 6000),
-      leaf: new Layer(g.sphere, this.treeMat, 40000),
-      pine: new Layer(g.cone, this.treeMat, 12000),
-      trunk: new Layer(g.cyl, this.plainMat, 20000, false),
+      leaf: new Layer(g.sphere, this.treeMat, 60000),
+      pine: new Layer(g.cone, this.treeMat, 20000),
+      trunk: new Layer(g.cyl, plainInst, 40000, false),
     };
-    this.pads = new Layer(g.box, this.plainMat, 12000, false);
-    this.ghosts = new Layer(g.box, this.ghostMat, 6000, false);
-    this.ghosts.mesh.renderOrder = 5;
     this.craneMast = new Layer(g.box, this.craneMat, 2000);
     const jib = new THREE.BoxGeometry(1, 1, 1);
     jib.translate(0.3, 0, 0);
@@ -79,8 +95,8 @@ export class CityView {
     this.roads.receiveShadow = true;
     this.roads.frustumCulled = false;
 
-    this.harbour = new Harbour(water, flags, sample, this.plainMat);
-    this.group.add(this.roads, this.pads.mesh, ...Object.values(this.L).map((l) => l.mesh), this.ghosts.mesh, this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
+    this.harbour = new Harbour(water, flags, sample, plainInst);
+    this.group.add(this.roads, this.chunkGroup, this.growGroup, ...Object.values(this.L).map((l) => l.mesh), this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
   }
 
   private ground(x: number, z: number) {
@@ -192,72 +208,213 @@ export class CityView {
     this.roads.geometry = g;
   }
 
-  // ---------------------------------------------------------------- plots: ground, buildings, trees
+  // ---------------------------------------------------------------- plots: merged chunks of buildings, growing plots, trees
+  private quadOf(L: LotsMsg, k: number): Quad {
+    const p = L.poly, o = k * 8;
+    const P = (i: number): Pt => [p[o + i * 2] * CELL, p[o + i * 2 + 1] * CELL];
+    return new Quad(P(0), P(1), P(2), P(3));
+  }
+
+  private sigOf(L: LotsMsg, k: number): number {
+    let h = imul(L.id[k] + 1, 2654435761);
+    h ^= imul(L.type[k] * 31 + L.level[k] * 7 + L.dens[k] * 977 + L.sides[k] * 53 + L.back[k] * 13, 40503);
+    h ^= imul((L.flags[k] & 23) * 131 + L.planType[k] * 17 + L.planLevel[k] * 19 + L.served[k] * 23 + L.built[k] * 3, 69069);
+    for (let i = 0; i < 8; i++) h = imul(h ^ Math.round(L.poly[k * 8 + i] * 200), 16777619);
+    return h;
+  }
+
+  private ctxFor(L: LotsMsg, k: number, Q: Quad, mb: MB, kind: Kind, level: number, trees: Tree[]): Ctx {
+    const cx = L.x[k] * CELL, cz = L.y[k] * CELL;
+    const g = this.ground(cx, cz);
+    const seed = L.seed[k];
+    mb.baseY = g; mb.seed = L.id[k] % 4096;
+    const dens = L.dens[k];
+    return {
+      mb, Q, id: L.id[k], seed, g, kind, level, dens, sides: L.sides[k], back: L.back[k], isCom: L.type[k] === BT.Com, flags: L.flags[k],
+      era: Math.min(1, L.built[k] / 96), lv: dens === 2 ? 0.8 : dens === 1 ? 0.5 : 0.3, trees,
+      r: (j: number) => vhash(seed >>> 3, j),
+    };
+  }
+
   private rebuild(s: StateMsg) {
     const L = s.lots;
-    for (const l of Object.values(this.L)) l.reset();
-    this.pads.reset(); this.ghosts.reset(); this.craneMast.reset(); this.craneJib.reset();
-    this.anims = [];
-    this.cranes = [];
-    const lotOcc = this.occ.slice(), W4 = N * 4;
+    this.stats.lots = L.n;
+    const W4 = N * 4;
+    const lotOcc = this.occ.slice();
+    // per-chunk signatures over static plots
+    const sigs = new Map<number, number>();
+    const members = new Map<number, number[]>();
+    const grows = new Set<number>();
     for (let k = 0; k < L.n; k++) {
-      const building = L.constr[k] > 0;
-      const lvl = building ? L.target[k] : L.level[k];
-      const t = L.type[k];
-      const x = L.x[k] * CELL, z = L.y[k] * CELL, ang = L.ang[k];
-      const ca = Math.cos(ang), sa = Math.sin(ang);
-      const g = this.ground(x, z);
-      const planned = (L.flags[k] & Flag.Planned) !== 0 && !building;
-      const kind: Kind = kindOf(t, lvl, L.flags[k]);
-      const w = L.w[k] * CELL, d = L.d[k] * CELL;
       // keep wild trees off every plot
-      for (let u = -w / 2; u <= w / 2; u += 8) for (let v = -d / 2; v <= d / 2; v += 8) {
-        const gx = Math.floor((x + u * ca - v * sa) / 12.5), gz = Math.floor((z + u * sa + v * ca) / 12.5);
+      const Q = this.quadOf(L, k);
+      for (let a = 0; a <= 4; a++) for (let b = 0; b <= 4; b++) {
+        const p = Q.at(a / 4, b / 4);
+        const gx = Math.floor(p[0] / 12.5), gz = Math.floor(p[1] / 12.5);
         if (gx >= 0 && gz >= 0 && gx < W4 && gz < W4) lotOcc[gz * W4 + gx] = 1;
       }
-      // ground treatment by land use
-      const padC = building ? SITE : planned ? SITE : kind !== 'none' ? GROUND[kind] : 0;
-      if (padC) this.pads.add(x, g - 5, z, w - 1, 5.35, d - 1, -ang, padC);
-      if (kind !== 'none') {
-        const anim: Anim = { lot: k, parts: [] };
-        let top = 0;
-        for (const p of partsFor(L.id[k], kind, lvl)) {
-          const wx = x + p.u * ca - p.v * sa, wz = z + p.u * sa + p.v * ca;
-          const rot = -(ang + (p.r ?? 0));
-          if (p.s === 'tree' || p.s === 'pine') { this.tree(wx, g, wz, p.w, p.h, p.s === 'pine', L.id[k] * 31 + Math.round(p.u * 7 + p.v)); continue; }
-          const layer = this.L[p.s];
-          const yb = g - 2;
-          const yoff = p.y === 0 ? 0 : p.y + 2;
-          const h = p.y === 0 ? p.h + 2 : p.h;
-          const i = layer.add(wx, yb, wz, p.w, h, p.d, rot, p.c, yoff);
-          if (i >= 0 && building) anim.parts.push({ layer, i });
-          top = Math.max(top, p.y + p.h);
-        }
-        if (building) {
-          this.anims.push(anim);
-          if (lvl >= 2 && kind !== 'park' && kind !== 'square') this.cranes.push({ x: x + 16 * ca - 15 * sa, y: g - 2, z: z + 16 * sa + 15 * ca, h: Math.min(top + 10, 80), k: L.id[k] });
-        }
-      }
-      if (planned) {
-        const pk = kindOf(L.planType[k], L.planLevel[k], L.flags[k]);
-        const gc = (L.flags[k] & Flag.CarLocked) ? 0xd9785a : L.served[k] ? 0x6fb0e8 : 0xf2c46a;
-        for (const p of partsFor(L.id[k], pk, L.planLevel[k]) as Part[]) {
-          if (p.s !== 'wall' && p.s !== 'glass') continue;
-          const wx = x + p.u * ca - p.v * sa, wz = z + p.u * sa + p.v * ca;
-          this.ghosts.add(wx, g + p.y, wz, p.w, p.h, p.d, -ang, gc);
-        }
-      }
+      if (L.constr[k] > 0 || L.demo[k] > 0) { grows.add(k); continue; }
+      const key = Math.floor(L.y[k] / CHUNK) * 100 + Math.floor(L.x[k] / CHUNK);
+      sigs.set(key, (sigs.get(key) ?? 0) + this.sigOf(L, k));
+      let m = members.get(key); if (!m) members.set(key, (m = []));
+      m.push(k);
     }
-    for (const t of this.streetTrees) this.tree(t.x, this.sample(t.x, t.z), t.z, t.s, t.s * 1.15, vhash(t.seed, 7) < 0.12, t.seed);
+    // rebuild only chunks whose lots changed
+    for (const [key, sig] of sigs) {
+      const ch = this.chunks.get(key);
+      if (ch && ch.sig === sig) continue;
+      this.buildChunk(key, sig, members.get(key)!, s);
+    }
+    for (const [key, ch] of this.chunks) if (!sigs.has(key)) { this.disposeChunk(ch); this.chunks.delete(key); }
+    this.rebuildGrows(s, grows);
+    // trees: lot trees (cached per chunk), street trees, wild trees
+    for (const l of Object.values(this.L)) l.reset();
+    for (const ch of this.chunks.values()) for (const t of ch.trees) this.treeAt(t.x, this.ground(t.x, t.z), t.z, t.size, t.h, t.pine, t.seed);
+    for (const t of this.streetTrees) this.treeAt(t.x, this.sample(t.x, t.z), t.z, t.s, t.s * 1.15, vhash(t.seed, 7) < 0.12, t.seed);
     this.wildTrees(s, lotOcc);
     for (const l of Object.values(this.L)) l.finish();
-    this.pads.finish(); this.ghosts.finish();
+    // cranes over plots under construction
+    this.craneMast.reset(); this.craneJib.reset();
+    this.cranes = [];
+    for (const gr of this.grows.values()) if (gr.crane) this.cranes.push(gr.crane);
     for (const c of this.cranes) { this.craneMast.add(c.x, c.y, c.z, 1.6, c.h, 1.6, 0, 0xc9a24a); this.craneJib.add(c.x, c.y + c.h, c.z, 30, 1.4, 1.4, 0, 0xc9a24a); }
     this.craneMast.finish(); this.craneJib.finish();
     this.animate(0, 0);
   }
 
-  private tree(x: number, g: number, z: number, size: number, h: number, pine: boolean, seed: number) {
+  private disposeChunk(ch: Chunk) {
+    for (const m of ch.meshes) { this.chunkGroup.remove(m); m.geometry.dispose(); }
+  }
+
+  private buildChunk(key: number, sig: number, ks: number[], s: StateMsg) {
+    const old = this.chunks.get(key);
+    if (old) this.disposeChunk(old);
+    const L = s.lots;
+    const mb = new MB();
+    const trees: Tree[] = [];
+    for (const k of ks) {
+      const Q = this.quadOf(L, k);
+      const flags = L.flags[k], planned = (flags & Flag.Planned) !== 0;
+      const dens = L.dens[k];
+      let kind: Kind = kindOf(L.type[k], L.level[k], flags);
+      if (planned) {
+        const c = this.ctxFor(L, k, Q, mb, 'none', 0, trees);
+        pad(c, SITE, 0.4, 0.3);
+        const pk = kindOf(L.planType[k], L.planLevel[k], flags);
+        const m = massing({ ...c, kind: pk, level: L.planLevel[k] });
+        const gc = (flags & Flag.CarLocked) ? 0xd9785a : L.served[k] ? 0x6fb0e8 : 0xf2c46a;
+        mb.prism('ghost', m.poly, c.g, c.g + m.h, gc, gc);
+        continue;
+      }
+      if (kind === 'none') { if (dens >= 1 && L.type[k] === BT.None) kind = 'yard'; else continue; }
+      const c = this.ctxFor(L, k, Q, mb, kind, L.level[k], trees);
+      designLot(c);
+    }
+    const meshes: THREE.Mesh[] = [];
+    for (const m of MATS) {
+      const geo = mb.acc[m].build();
+      if (!geo) continue;
+      const mesh = new THREE.Mesh(geo, this.polyMats[m]);
+      mesh.castShadow = m !== 'ghost' && m !== 'lamp';
+      mesh.receiveShadow = m !== 'lamp';
+      if (m === 'ghost') mesh.renderOrder = 5;
+      this.chunkGroup.add(mesh);
+      meshes.push(mesh);
+    }
+    this.chunks.set(key, { sig, meshes, trees });
+    this.stats.chunksBuilt++;
+  }
+
+  // ---------------------------------------------------------------- plots under demolition / construction
+  private rebuildGrows(s: StateMsg, ids: Set<number>) {
+    const L = s.lots;
+    const keep = new Set<number>();
+    for (const k of ids) {
+      const id = L.id[k];
+      keep.add(id);
+      const mode = L.demo[k] > 0 ? 'demo' : 'build';
+      const sig = imul(this.sigOf(L, k) ^ (mode === 'demo' ? 77 : 0), 31) + L.target[k] + L.ntype[k] * 7;
+      const old = this.grows.get(id);
+      if (old && old.sig === sig) continue;
+      if (old) this.disposeGrow(old);
+      const gr = this.makeGrow(s, k, mode, sig);
+      if (gr) this.grows.set(id, gr); else this.grows.delete(id);
+    }
+    for (const [id, gr] of this.grows) if (!keep.has(id)) { this.disposeGrow(gr); this.grows.delete(id); }
+    this.stats.grows = this.grows.size;
+  }
+
+  private disposeGrow(gr: Grow) {
+    this.growGroup.remove(gr.group);
+    gr.group.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); });
+  }
+
+  private makeGrow(s: StateMsg, k: number, mode: 'build' | 'demo', sig: number): Grow | null {
+    const L = s.lots;
+    const Q = this.quadOf(L, k);
+    const flags = L.flags[k];
+    const kind = mode === 'demo' ? kindOf(L.type[k], L.level[k], flags) : kindOf(L.type[k], L.target[k], flags);
+    const level = mode === 'demo' ? L.level[k] : L.target[k];
+    const cx = L.x[k] * CELL, cz = L.y[k] * CELL, g = this.ground(cx, cz);
+    const group = new THREE.Group();
+    group.position.set(cx, g, cz);
+    const bodies: THREE.Object3D[] = [];
+    const mbBody = new MB();
+    mbBody.ox = cx; mbBody.oy = g; mbBody.oz = cz;
+    const trees: Tree[] = [];
+    const c = this.ctxFor(L, k, Q, mbBody, kind === 'none' ? 'yard' : kind, level, trees);
+    // site / rubble ground, not scaled
+    const mbSite = new MB();
+    mbSite.ox = cx; mbSite.oy = g; mbSite.oz = cz; mbSite.baseY = g;
+    const siteCol = mode === 'demo' ? 0xb4ab9b : SITE;
+    mbSite.prism('plain', Q.poly(0.4), g - FOOT, g + 0.28, siteCol, siteCol);
+    let crane: Grow['crane'] = null;
+    if (mode === 'demo') {
+      // rubble heaps
+      const r = c.r;
+      for (let i = 0; i < 7; i++) {
+        const s0 = 0.08 + r(300 + i) * 0.7, t0 = 0.08 + r(320 + i) * 0.7, ds = (4 + r(340 + i) * 6) / Q.W, dt = (3 + r(360 + i) * 5) / Q.D;
+        const col = [0x9b9488, 0x8a8278, 0xb0a79a, 0x7d766b][i % 4];
+        mbSite.prism('plain', Q.strip(s0, Math.min(0.96, s0 + ds), t0, Math.min(0.96, t0 + dt)), g + 0.2, g + 0.7 + r(380 + i) * 2.2, col, col);
+      }
+    }
+    if (kind !== 'none') designLot(c);
+    for (const m of ['wall', 'glass', 'plain', 'lamp'] as Mat[]) {
+      const geo = mbBody.acc[m].build();
+      if (!geo) continue;
+      const mesh = new THREE.Mesh(geo, this.polyMats[m]);
+      mesh.castShadow = m !== 'lamp'; mesh.receiveShadow = true;
+      group.add(mesh); bodies.push(mesh);
+    }
+    const sg = mbSite.acc.plain.build();
+    if (sg) { const mesh = new THREE.Mesh(sg, this.polyMats.plain); mesh.receiveShadow = true; mesh.castShadow = true; group.add(mesh); }
+    if (mode === 'build') {
+      // scaffold: a wire cage of the finished massing, scaled with the building
+      const ms = massing(c);
+      const pos: number[] = [];
+      const H = Math.min(95, ms.h + 6);
+      const P = ms.poly.map((p) => [p[0] - cx, p[1] - cz] as Pt);
+      const line = (a: Pt, ay: number, b: Pt, by: number) => pos.push(a[0], ay, a[1], b[0], by, b[1]);
+      for (let i = 0; i < 4; i++) {
+        const a = P[i], b = P[(i + 1) % 4];
+        const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        line(a, 0, a, H); line(mid, 0, mid, H);
+        for (let y = 3.4; y <= H; y += 3.4) line(a, y, b, y);
+        for (let y = 0; y + 6.8 <= H; y += 13.6) line(a, y, mid, y + 6.8);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      const lines = new THREE.LineSegments(geo, this.scafMat);
+      lines.frustumCulled = false;
+      group.add(lines); bodies.push(lines);
+      const q = Q.at(0.88, 0.3);
+      crane = { x: q[0], y: g - 1, z: q[1], h: Math.min(85, ms.h + 12), k: L.id[k] };
+    }
+    this.growGroup.add(group);
+    return { sig, lot: L.id[k], mode, group, bodies, crane };
+  }
+
+  private treeAt(x: number, g: number, z: number, size: number, h: number, pine: boolean, seed: number) {
     const c = pine ? PAL.pine[Math.floor(vhash(seed, 1) * PAL.pine.length)] : PAL.leaf[Math.floor(vhash(seed, 1) * PAL.leaf.length)];
     if (pine) { this.L.pine.add(x, g + 1, z, size, h, size, 0, c); this.L.trunk.add(x, g - 0.5, z, 1, 2, 1, 0, PAL.trunk); }
     else { this.L.trunk.add(x, g - 0.5, z, 1.1, 3.5, 1.1, 0, PAL.trunk); this.L.leaf.add(x, g + 2.4, z, size, h, size, vhash(seed, 2) * 6, c); }
@@ -287,19 +444,27 @@ export class CityView {
     }
   }
 
-  /** Rising buildings + cranes. frac = fraction of the current month elapsed. */
+  /** Demolition + rising buildings + cranes. frac = fraction of the current month elapsed. */
   animate(frac: number, time: number) {
     const L = this.lots;
     if (!L) return;
-    const touched = new Set<Layer>();
-    for (const a of this.anims) {
-      const tot = Math.max(1, L.constrTotal[a.lot]);
-      const done = tot - L.constr[a.lot];
-      let p = Math.min(1, (done + frac) / tot);
-      p = 1 - Math.pow(1 - p, 2);
-      for (const q of a.parts) { q.layer.set(q.i, p); touched.add(q.layer); }
+    if (this.grows.size) {
+      const idx = new Map<number, number>();
+      for (let k = 0; k < L.n; k++) if (L.constr[k] > 0 || L.demo[k] > 0) idx.set(L.id[k], k);
+      for (const gr of this.grows.values()) {
+        const k = idx.get(gr.lot);
+        if (k === undefined) continue;
+        let p: number;
+        if (gr.mode === 'demo') { const f = Math.min(1, frac * 1.2); p = 1 - 0.9 * f * f * (3 - 2 * f); }
+        else {
+          const tot = Math.max(1, L.constrTotal[k]);
+          const done = Math.max(0, tot - L.constr[k]);
+          p = Math.min(1, (done + frac) / tot);
+          p = Math.max(0.03, 1 - Math.pow(1 - p, 2));
+        }
+        for (const b of gr.bodies) b.scale.y = p;
+      }
     }
-    for (const l of touched) l.touch();
     if (!this.cranes.length) return;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
     for (let k = 0; k < this.cranes.length; k++) {
@@ -312,4 +477,3 @@ export class CityView {
     this.craneJib.touch();
   }
 }
-

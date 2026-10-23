@@ -17,9 +17,9 @@ export function unitGeos() {
   const pyr = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1);
   pyr.rotateY(Math.PI / 4);
   pyr.translate(0, 0.5, 0);
-  const cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 14);
+  const cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
   cyl.translate(0, 0.5, 0);
-  const sphere = new THREE.IcosahedronGeometry(0.5, 1);
+  const sphere = new THREE.IcosahedronGeometry(0.5, 0);
   sphere.translate(0, 0.5, 0);
   const cone = new THREE.ConeGeometry(0.5, 1, 7);
   cone.translate(0, 0.5, 0);

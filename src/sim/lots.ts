@@ -1,33 +1,58 @@
 import { N, Flag, BT } from './constants';
-import { rectCorners, quadsOverlap, pointSeg } from './geom';
+import { quadsOverlap, pointSeg, polyArea, isConvex } from './geom';
 import { RoadGraph, ROAD_HALF } from './roads';
 
-/** A building plot along road frontage: an oriented rectangle aligned to its street. */
+/**
+ * A building plot along street frontage: a convex quad [F0, F1, B1, B0] (cell units).
+ * F0->F1 is the street front, B1->B0 the rear; plots in a row share their side lines exactly (no gaps in dense zones).
+ * Corner plots are cut by the cross street's kerb line, so wedge and trapezoid plots fall out of the street geometry.
+ */
 export interface Lot {
   id: number;
-  x: number; y: number;       // centre, cell units
-  ang: number;                // along the street
-  w: number; d: number;       // frontage width, depth (cells)
+  x: number; y: number;       // centroid, cell units
+  ang: number;                // front direction (street on the plot's -v side)
+  w: number; d: number;       // mean frontage width, depth (cells)
   cell: number;               // raster cell of the centre (for the maths)
   cls: number;                // class of the fronting road
   type: number; level: number; target: number; constr: number; constrTotal: number;
   age: number; low: number;
-  flags: number;              // Flag.Planned | Flag.CarLocked | Flag.Docks
+  flags: number;              // Flag.Planned | Flag.CarLocked | Flag.Docks | Flag.Core
   planType: number; planLevel: number;
   alive: boolean;
-  poly: number[];
+  poly: number[];             // [F0, F1, B1, B0]
+  dens: number;               // 0 detached, 1 terraced / mid, 2 dense core
+  sides: number;              // bit0: start side (B0-F0) faces a cross street, bit1: end side (F1-B1) faces one
+  back: number;               // 1 for back-row (backland) plots
+  demo: number;               // months of demolition left before construction starts
+  seed: number;               // visual seed: stable per plot
+  built: number;              // month the current building was completed (0 = original)
+  ntype: number;              // type the plot becomes once the old building is demolished
 }
 
 const HB = 2; // hash bucket (cells)
 const hk = (x: number, y: number) => y * 1000 + x;
 
-export const LOT_W = 0.78;   // ~39 m frontage
+export const LOT_W = 0.78;   // ~39 m frontage (detached tier)
 export const LOT_D = 0.7;    // ~35 m deep
 export const SETBACK = 0.1;  // ~5 m from the kerb
+
+/** Plot geometry per density tier (cells). */
+export const TIERS = [
+  { w: LOT_W, d: LOT_D, sb: SETBACK, gap: 0.07, rows: 0 },
+  { w: 0.56, d: 0.62, sb: 0.06, gap: 0, rows: 1 },
+  { w: 0.46, d: 0.56, sb: 0.04, gap: 0, rows: 2 },
+] as const;
+
+interface Cut { tAt: (o: number) => number; street: boolean }
+
+const norm = (a: number) => { const t = a % (Math.PI * 2); return t < 0 ? t + Math.PI * 2 : t; };
 
 export class LotStore {
   lots: Lot[] = [];
   private hash = new Map<number, number[]>();
+  private epCache = new Map<number, { tier: number; w: number; d: number; sb: number; gap: number }>();
+  /** density tier at a point (set by the sim: distance to old centres, stations, land value) */
+  tierAt: (x: number, y: number) => number = () => 0;
 
   constructor(private water: Uint8Array, private flags: Uint8Array, private roads: RoadGraph) {}
 
@@ -56,61 +81,209 @@ export class LotStore {
     this.buckets(l, (k) => { const a = this.hash.get(k); if (a) { const i = a.indexOf(l.id); if (i >= 0) a.splice(i, 1); } });
   }
 
-  /** Try to place a plot; checks water/steep, overlap with plots (spatial hash + SAT) and with roads. */
-  tryAdd(x: number, y: number, ang: number, w: number, d: number, cls: number): Lot | null {
-    const poly = rectCorners(x, y, ang, w / 2, d / 2);
+  private setGeom(l: Lot, q: number[]) {
+    l.poly = q;
+    l.x = (q[0] + q[2] + q[4] + q[6]) / 4; l.y = (q[1] + q[3] + q[5] + q[7]) / 4;
+    const fw = Math.hypot(q[2] - q[0], q[3] - q[1]), bw = Math.hypot(q[4] - q[6], q[5] - q[7]);
+    const sd = Math.hypot(q[6] - q[0], q[7] - q[1]), ed = Math.hypot(q[4] - q[2], q[5] - q[3]);
+    l.w = (fw + bw) / 2; l.d = (sd + ed) / 2;
+    l.ang = Math.atan2(q[3] - q[1], q[2] - q[0]);
+    // street on the -v side: v = (-sin, cos); back centre must lie on +v
+    const bx = (q[4] + q[6]) / 2 - (q[0] + q[2]) / 2, by = (q[5] + q[7]) / 2 - (q[1] + q[3]) / 2;
+    if (-Math.sin(l.ang) * bx + Math.cos(l.ang) * by < 0) l.ang += Math.PI;
+    l.cell = Math.floor(l.y) * N + Math.floor(l.x);
+  }
+
+  /** Try to place a convex quad plot; checks water/steep, overlap with plots (spatial hash + SAT) and with roads. */
+  tryAddQuad(q: number[], cls: number, dens: number, sides: number, back = 0): Lot | null {
+    if (!isConvex(q)) return null;
+    const area = Math.abs(polyArea(q));
+    if (area < 0.12) return null;
+    const cx = (q[0] + q[2] + q[4] + q[6]) / 4, cy = (q[1] + q[3] + q[5] + q[7]) / 4;
     for (let k = -1; k < 4; k++) {
-      const px = k < 0 ? x : poly[k * 2], py = k < 0 ? y : poly[k * 2 + 1];
-      const cx = Math.floor(px), cy = Math.floor(py);
-      if (cx < 1 || cy < 1 || cx >= N - 1 || cy >= N - 1) return null;
-      const i = cy * N + cx;
+      const px = k < 0 ? cx : q[k * 2], py = k < 0 ? cy : q[k * 2 + 1];
+      const gx = Math.floor(px), gy = Math.floor(py);
+      if (gx < 1 || gy < 1 || gx >= N - 1 || gy >= N - 1) return null;
+      const i = gy * N + gx;
       if (this.water[i] || (this.flags[i] & Flag.Steep)) return null;
     }
-    for (const o of this.near(x, y, 1)) if (quadsOverlap(poly, o.poly)) return null;
+    for (const o of this.near(cx, cy, 1)) if (quadsOverlap(q, o.poly)) return null;
     // keep clear of every carriageway
-    for (const e of this.roads.edgesNear(x, y, 1.2)) {
-      const g = this.roads;
+    const g = this.roads;
+    for (const e of g.edgesNear(cx, cy, 1.2)) {
       const ax = g.nx[g.ea[e]], ay = g.ny[g.ea[e]], bx = g.nx[g.eb[e]], by = g.ny[g.eb[e]];
       const clear = ROAD_HALF[g.ecls[e]] + 0.03;
       for (let k = -1; k < 4; k++) {
-        const px = k < 0 ? x : poly[k * 2], py = k < 0 ? y : poly[k * 2 + 1];
+        const px = k < 0 ? cx : q[k * 2], py = k < 0 ? cy : q[k * 2 + 1];
         if (pointSeg(px, py, ax, ay, bx, by).d < clear) return null;
       }
       // an edge passing through the middle of the plot
-      if (pointSeg(x, y, ax, ay, bx, by).d < d / 2 + clear - 0.05 && Math.abs(pointSegAlong(x, y, ax, ay, bx, by)) < 0.2) return null;
+      for (const t of [0.25, 0.5, 0.75]) {
+        const px = (q[0] + q[2]) / 2 * (1 - t) + (q[6] + q[4]) / 2 * t, py = (q[1] + q[3]) / 2 * (1 - t) + (q[7] + q[5]) / 2 * t;
+        if (pointSeg(px, py, ax, ay, bx, by).d < clear) return null;
+      }
     }
-    const cell = Math.floor(y) * N + Math.floor(x);
-    const l: Lot = { id: this.lots.length, x, y, ang, w, d, cell, cls, type: BT.None, level: 0, target: 0, constr: 0, constrTotal: 0, age: 0, low: 0,
-      flags: this.flags[cell] & Flag.Docks, planType: 0, planLevel: 0, alive: true, poly };
+    const l: Lot = {
+      id: this.lots.length, x: 0, y: 0, ang: 0, w: 0, d: 0, cell: 0, cls, type: BT.None, level: 0, target: 0, constr: 0, constrTotal: 0, age: 0, low: 0,
+      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens, sides, back, demo: 0, seed: 0, built: 0, ntype: 0,
+    };
+    this.setGeom(l, q);
+    l.flags = this.flags[l.cell] & Flag.Docks;
+    l.seed = (l.id * 2654435761) >>> 0;
     this.lots.push(l);
     this.buckets(l, (k) => { let a = this.hash.get(k); if (!a) this.hash.set(k, (a = [])); a.push(l.id); });
     return l;
   }
 
-  /** Lay plots along both sides of an edge, set back from the kerb and aligned to it. */
+  // ---------------------------------------------------------------- frontage generation
+  edgeParams(e: number) {
+    let p = this.epCache.get(e);
+    if (p) return p;
+    const g = this.roads;
+    const mx = (g.nx[g.ea[e]] + g.nx[g.eb[e]]) / 2, my = (g.ny[g.ea[e]] + g.ny[g.eb[e]]) / 2;
+    let tier = this.tierAt(mx, my);
+    const gx = Math.floor(mx), gy = Math.floor(my);
+    if (gx >= 0 && gy >= 0 && gx < N && gy < N && (this.flags[gy * N + gx] & Flag.Docks)) tier = Math.max(tier, 1);
+    const T = TIERS[tier];
+    p = { tier, w: T.w, d: T.d, sb: T.sb, gap: T.gap };
+    this.epCache.set(e, p);
+    return p;
+  }
+
+  private owns(e: number, f: number) {
+    const g = this.roads;
+    return g.ecls[e] < g.ecls[f] || (g.ecls[e] === g.ecls[f] && e < f);
+  }
+
+  /** How the plot row on side `s` of edge `e` ends at node end `end` (0 = A, 1 = B). */
+  private cutFor(e: number, end: number, s: number, A: [number, number], ux: number, uy: number, L: number): Cut {
+    const g = this.roads;
+    const X = end === 0 ? g.ea[e] : g.eb[e];
+    const px = g.nx[X], py = g.ny[X];
+    const P = this.edgeParams(e);
+    const cap = (c: number): Cut => ({ tAt: () => (end === 0 ? c : L - c), street: false });
+    const sbMin = ROAD_HALF[g.ecls[e]] + P.sb;
+    const nbs = g.adj[X].filter((f) => f !== e);
+    if (!nbs.length) return cap(0.04);
+    const te = g.edgeAngle(e, X);
+    const sigma = end === 0 ? s : -s;
+    let best = -1, phi = Infinity;
+    for (const f of nbs) {
+      const d = norm(sigma * (g.edgeAngle(f, X) - te));
+      if (d > 1e-4 && d < phi) { phi = d; best = f; }
+    }
+    if (best < 0) return cap(sbMin);
+    const nxv = -uy * s, nyv = ux * s;
+    const mk = (Qx: number, Qy: number, Dx: number, Dy: number, street: boolean): Cut => {
+      const cr = ux * Dy - uy * Dx;
+      if (Math.abs(cr) < 0.12) return cap(sbMin + 0.02);
+      const t = (o: number) => ((Qx - A[0] - nxv * o) * Dy - (Qy - A[1] - nyv * o) * Dx) / cr;
+      // sanity: the cut must lie inside the edge's span at the front offset
+      const tf = t(sbMin);
+      const ok = end === 0 ? tf > -0.35 && tf < L - 0.2 : tf < L + 0.35 && tf > 0.2;
+      return ok ? { tAt: t, street } : cap(sbMin + 0.02);
+    };
+    const deg = (phi * 180) / Math.PI;
+    if (deg >= 135) {
+      // chain bend / straight-through: both edges share the bisector line through the node
+      const th = te + sigma * phi / 2;
+      return mk(px, py, Math.cos(th), Math.sin(th), false);
+    }
+    // corner against the neighbour `best`: the stronger street owns the corner plot
+    const tf = g.edgeAngle(best, X);
+    const Pf = this.edgeParams(best);
+    const th = tf - sigma * Math.PI / 2; // normal of the neighbour on the side that faces `e`
+    const nfx = Math.cos(th), nfy = Math.sin(th);
+    const half = ROAD_HALF[g.ecls[best]];
+    if (this.owns(e, best)) {
+      const o = half + Pf.sb;
+      return mk(px + nfx * o, py + nfy * o, Math.cos(tf), Math.sin(tf), true);
+    }
+    const o = half + Pf.sb + Pf.d;
+    return mk(px + nfx * o, py + nfy * o, Math.cos(tf), Math.sin(tf), false);
+  }
+
+  /** Plots along both sides of an edge, flush to each other and to the corner cuts. */
   frontage(e: number): Lot[] {
     const g = this.roads;
-    const ax = g.nx[g.ea[e]], ay = g.ny[g.ea[e]], bx = g.nx[g.eb[e]], by = g.ny[g.eb[e]];
+    if (!g.alive[e]) return [];
+    const a = g.ea[e], b = g.eb[e];
+    const ax = g.nx[a], ay = g.ny[a], bx = g.nx[b], by = g.ny[b];
     const L = Math.hypot(bx - ax, by - ay);
-    if (L < 1) return [];
+    if (L < 0.9) return [];
     const ux = (bx - ax) / L, uy = (by - ay) / L;
-    const ang = Math.atan2(uy, ux);
-    const off = ROAD_HALF[g.ecls[e]] + SETBACK + LOT_D / 2;
-    const usable = L - 0.5;
-    const n = Math.floor(usable / (LOT_W + 0.06));
-    if (n < 1) return [];
-    const pad = (L - n * (LOT_W + 0.06)) / 2 + (LOT_W + 0.06) / 2;
+    const P = this.edgeParams(e);
+    const of = ROAD_HALF[g.ecls[e]] + P.sb, ob = of + P.d;
     const out: Lot[] = [];
-    for (const side of [1, -1]) {
+    for (const s of [1, -1]) {
+      const nx = -uy * s, ny = ux * s;
+      const c0 = this.cutFor(e, 0, s, [ax, ay], ux, uy, L);
+      const c1 = this.cutFor(e, 1, s, [ax, ay], ux, uy, L);
+      const tf0 = c0.tAt(of), tb0 = c0.tAt(ob), tf1 = c1.tAt(of), tb1 = c1.tAt(ob);
+      const Lf = tf1 - tf0;
+      if (Lf < 0.4 * P.w || tb1 - tb0 < 0.25) continue;
+      const pt = (t: number, o: number): [number, number] => [ax + ux * t + nx * o, ay + uy * t + ny * o];
+      const F0 = pt(tf0, of), F1 = pt(tf1, of), B0 = pt(tb0, ob), B1 = pt(tb1, ob);
+      const n = Math.max(1, Math.round(Lf / P.w));
+      const dl = P.gap / 2 / Lf;
       for (let k = 0; k < n; k++) {
-        const t = pad + k * (LOT_W + 0.06);
-        const cx = ax + ux * t - uy * off * side, cy = ay + uy * t + ux * off * side;
-        // orient every plot so its street lies on its local -v side (the renderer builds street fronts there)
-        const l = this.tryAdd(cx, cy, side === 1 ? ang : ang + Math.PI, LOT_W, LOT_D, g.ecls[e]);
+        const s0 = k / n + dl, s1 = (k + 1) / n - dl;
+        const lerp = (p: [number, number], q: [number, number], t: number) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+        const f0 = lerp(F0, F1, s0), f1 = lerp(F0, F1, s1), b1 = lerp(B0, B1, s1), b0 = lerp(B0, B1, s0);
+        const sides = (k === 0 && c0.street ? 1 : 0) | (k === n - 1 && c1.street ? 2 : 0);
+        const l = this.tryAddQuad([f0[0], f0[1], f1[0], f1[1], b1[0], b1[1], b0[0], b0[1]], g.ecls[e], P.tier, sides);
         if (l) out.push(l);
       }
     }
     return out;
+  }
+
+  /** Back-row plots behind the front rows (dense tiers): interior courtyards and rear ranges fill the blocks. */
+  backland(parents: Lot[]): Lot[] {
+    const out: Lot[] = [];
+    let cur = parents.filter((l) => l.dens > 0 && !l.back);
+    for (let row = 1; row <= 2 && cur.length; row++) {
+      const next: Lot[] = [];
+      for (const p of cur) {
+        if (TIERS[p.dens].rows < row || (p.flags & Flag.Docks)) continue;
+        const q = p.poly;
+        // extend from the rear line away from the street by the same depth; front of the new plot = the parent's rear line
+        const b0x = q[6], b0y = q[7], b1x = q[4], b1y = q[5];
+        const r0x = b0x + (b0x - q[0]), r0y = b0y + (b0y - q[1]);
+        const r1x = b1x + (b1x - q[2]), r1y = b1y + (b1y - q[3]);
+        const l = this.tryAddQuad([b0x, b0y, b1x, b1y, r1x, r1y, r0x, r0y], p.cls, p.dens, 0, 1);
+        if (l) { l.flags |= p.flags & Flag.Docks; next.push(l); out.push(l); }
+      }
+      cur = next;
+    }
+    return out;
+  }
+
+  /** Front rows for a set of new edges, then back rows. */
+  frontageAll(edges: number[]): Lot[] {
+    const fronts: Lot[] = [];
+    for (const e of edges) for (const l of this.frontage(e)) fronts.push(l);
+    return [...fronts, ...this.backland(fronts)];
+  }
+
+  /** Merge plot b into its row-neighbour a (a bigger building replaces both). Returns true if merged. */
+  merge(a: Lot, b: Lot): boolean {
+    const qa = a.poly, qb = b.poly;
+    const close = (x1: number, y1: number, x2: number, y2: number) => Math.hypot(x1 - x2, y1 - y2) < 0.06;
+    let q: number[] | null = null;
+    let sides = 0;
+    if (close(qa[2], qa[3], qb[0], qb[1]) && close(qa[4], qa[5], qb[6], qb[7])) {
+      q = [qa[0], qa[1], qb[2], qb[3], qb[4], qb[5], qa[6], qa[7]]; sides = (a.sides & 1) | (b.sides & 2);
+    } else if (close(qb[2], qb[3], qa[0], qa[1]) && close(qb[4], qb[5], qa[6], qa[7])) {
+      q = [qb[0], qb[1], qa[2], qa[3], qa[4], qa[5], qb[6], qb[7]]; sides = (b.sides & 1) | (a.sides & 2);
+    }
+    if (!q || !isConvex(q)) return false;
+    this.remove(b);
+    this.buckets(a, (k) => { const arr = this.hash.get(k); if (arr) { const i = arr.indexOf(a.id); if (i >= 0) arr.splice(i, 1); } });
+    a.sides = sides;
+    this.setGeom(a, q);
+    this.buckets(a, (k) => { let arr = this.hash.get(k); if (!arr) this.hash.set(k, (arr = [])); arr.push(a.id); });
+    return true;
   }
 
   /** Plots touching a road corridor. */
@@ -124,9 +297,4 @@ export class LotStore {
     }
     return out;
   }
-}
-
-function pointSegAlong(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
-  const p = pointSeg(px, py, ax, ay, bx, by);
-  return p.t <= 0 || p.t >= 1 ? 1 : 0;
 }

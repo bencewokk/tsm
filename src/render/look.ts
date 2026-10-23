@@ -8,7 +8,7 @@ export const lookUniforms = {
  * Architect's-model building shader: matte boxes, a cheap ambient-occlusion darkening near the base,
  * faint window rows by day and warm lit windows at night (emissive, per-window random).
  */
-export function patchBuildingMaterial(mat: THREE.MeshStandardMaterial, glass = false) {
+export function patchBuildingMaterial(mat: THREE.MeshStandardMaterial, glass = false, poly = false) {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = lookUniforms.uNight;
     shader.vertexShader = shader.vertexShader
@@ -16,9 +16,17 @@ export function patchBuildingMaterial(mat: THREE.MeshStandardMaterial, glass = f
         varying vec3 vTsmPos;
         varying vec3 vTsmN;
         varying float vTsmY;
-        varying float vTsmSeed;`)
+        varying float vTsmSeed;
+        #ifdef TSM_POLY
+          attribute float aH;
+          attribute float aSeed;
+        #endif`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        #ifdef USE_INSTANCING
+        #ifdef TSM_POLY
+          mat4 tsmM = modelMatrix;
+          vTsmY = aH * length(modelMatrix[1].xyz);
+          vTsmSeed = aSeed;
+        #elif defined(USE_INSTANCING)
           mat4 tsmM = modelMatrix * instanceMatrix;
           vTsmY = transformed.y * length(instanceMatrix[1].xyz);
           vTsmSeed = float(gl_InstanceID);
@@ -70,5 +78,6 @@ export function patchBuildingMaterial(mat: THREE.MeshStandardMaterial, glass = f
         totalEmissiveRadiance += vec3(1.0, 0.76, 0.42) * tsmWin * tsmLit * uNight * 1.5;`);
   };
   if (glass) mat.defines = { ...(mat.defines ?? {}), TSM_GLASS: '' };
-  mat.customProgramCacheKey = () => (glass ? 'tsm-glass' : 'tsm-building');
+  if (poly) mat.defines = { ...(mat.defines ?? {}), TSM_POLY: '' };
+  mat.customProgramCacheKey = () => (glass ? 'tsm-glass' : 'tsm-building') + (poly ? '-poly' : '');
 }

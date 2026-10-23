@@ -243,10 +243,28 @@ function cellToScreen(x: number, y: number) {
   const r = env.renderer.domElement.getBoundingClientRect();
   return { x: Math.round(r.left + (v.x + 1) / 2 * r.width), y: Math.round(r.top + (1 - v.y) / 2 * r.height) };
 }
+/** Dev helper: run the sim to a month in small batches, picking `deal` for the docks event and the first option otherwise. */
+async function ff(target: number, deal = 0) {
+  // MessageChannel yields are not throttled in a hidden pane, unlike timers
+  const sl = (_ms: number) => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(0); c.port2.postMessage(0); });
+  send({ type: 'speed', speed: 0 });
+  const until = async (cond: () => boolean) => { const t0 = performance.now(); while (state && !cond() && performance.now() - t0 < 4000) await sl(0); };
+  while (state && state.stats.month < target) {
+    const before = state.stats.month;
+    if (state.event) {
+      const id = state.event.id;
+      send({ type: 'choose', event: id, choice: id === 'docks_bought' ? deal : 0 });
+      await until(() => !state!.event || state!.event.id !== id);
+    } else {
+      send({ type: 'step', months: Math.max(1, Math.min(4, target - before)) });
+      await until(() => state!.stats.month !== before);
+    }
+  }
+}
 /** Test helper: fast-forward, take a docks deal, build a line through the villages (used for screenshots). */
 async function demo(deal = 0, lineAt = 10) {
   const sl = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  const waitMonth = async (m: number) => { send({ type: 'speed', speed: 10 }); while (state && state.stats.month < m) { if (state.event) send({ type: 'choose', event: state.event.id, choice: state.event.id === 'docks_bought' ? deal : 0 }); await sl(100); } send({ type: 'speed', speed: 0 }); await sl(200); };
+  const waitMonth = async (m: number) => { await ff(m, deal); await sl(200); };
   await waitMonth(lineAt);
   if (!state || !init || !planner) return;
   const vs = init.villages.slice().sort((a, b) => a.y - b.y);
@@ -288,4 +306,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, shot, view, phase, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };

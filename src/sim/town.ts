@@ -1,7 +1,7 @@
 import { N, BT, Flag } from './constants';
 import { Rng, fbm } from './rng';
 import { RoadGraph, RC, arterialPath, RULES } from './roads';
-import { LotStore, LOT_W, LOT_D } from './lots';
+import { LotStore } from './lots';
 import { angDiff, lineDiff } from './geom';
 import type { Grid } from './terrain';
 
@@ -104,7 +104,7 @@ export function layoutTown(c: TownCtx) {
     link(P(mid), [c.districts[0].x, c.districts[0].y]);
   }
   roads.rasterize(g.road);
-  for (const e of roads.drainFresh()) lots.frontage(e);
+  lots.frontageAll(roads.drainFresh());
 
   // initial buildings: houses thinning out from each village centre, shops at the core, one green
   for (const d of c.districts) {
@@ -112,7 +112,7 @@ export function layoutTown(c: TownCtx) {
     for (const l of lots.near(d.x, d.y, 10)) {
       if (l.type || (l.flags & Flag.Docks)) continue;
       const dist = Math.hypot(l.x - d.x, l.y - d.y);
-      if (dist > 9.5 || rng.next() > (dist < 6.2 ? 1.3 : 1.08) - dist * 0.085) continue;
+      if (dist > 9.5 || rng.next() > ((dist < 6.2 ? 1.3 : 1.08) - dist * 0.085) * (dist < 4.6 ? (l.back ? 0.45 : 0.9) : (l.back ? 0.15 : 0.55))) continue;
       if (!parkDone && dist < 4 && rng.next() < 0.25) { l.type = BT.Park; l.level = 1; parkDone = true; continue; }
       if (dist < 2.6 && rng.next() < 0.6) { l.type = BT.Com; l.level = 1; }
       else { l.type = BT.Res; l.level = 1; }
@@ -123,18 +123,9 @@ export function layoutTown(c: TownCtx) {
 
   // old town cores: the original plots around each village centre, a paved square at the central junction and a church on it
   for (const d of c.districts) {
-    const near = lots.near(d.x, d.y, 7).filter((l) => !(l.flags & Flag.Docks));
+    const near = lots.near(d.x, d.y, 8).filter((l) => !(l.flags & Flag.Docks));
     for (const l of near) if (Math.hypot(l.x - d.x, l.y - d.y) < 6.2) l.flags |= Flag.Core;
-    // the old core is dense: back plots fill the block interiors behind the street fronts
-    for (const l of near) {
-      if (!(l.flags & Flag.Core) || Math.hypot(l.x - d.x, l.y - d.y) > 4.6) continue;
-      const k = LOT_D + 0.06, bx = l.x - Math.sin(l.ang) * k, by = l.y + Math.cos(l.ang) * k;
-      const b = lots.tryAdd(bx, by, l.ang + Math.PI, LOT_W, LOT_D, RC.Local);
-      if (!b) continue;
-      b.flags |= Flag.Core;
-      if (rng.next() < 0.8) { b.type = BT.Res; b.level = 1; b.age = 24; }
-    }
-    const byDist = near.slice().sort((a, b) => Math.hypot(a.x - d.x, a.y - d.y) - Math.hypot(b.x - d.x, b.y - d.y) || a.id - b.id);
+    const byDist = near.filter((l) => !l.back).sort((a, b) => Math.hypot(a.x - d.x, a.y - d.y) - Math.hypot(b.x - d.x, b.y - d.y) || a.id - b.id);
     const sq = byDist[0];
     if (!sq) continue;
     sq.type = BT.Square; sq.level = 1;

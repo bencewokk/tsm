@@ -83,6 +83,14 @@ export interface LotsMsg {
   type: Uint8Array; level: Uint8Array; target: Uint8Array; constr: Uint8Array; constrTotal: Uint8Array;
   flags: Uint8Array; planType: Uint8Array; planLevel: Uint8Array;
   served: Uint8Array;    // planned plot already within walking range of a station
+  poly: Float32Array;    // 8 numbers per plot: F0, F1, B1, B0 (cell units); F0-F1 is the street front
+  dens: Uint8Array;      // density tier 0..2
+  sides: Uint8Array;     // bit0 / bit1: start / end side faces a cross street
+  back: Uint8Array;      // back-row plot
+  demo: Uint8Array;      // months of demolition left
+  seed: Uint32Array;     // visual seed
+  built: Uint16Array;    // month the building was completed
+  ntype: Uint8Array;     // type after demolition (while demo > 0)
 }
 
 export interface StateMsg {

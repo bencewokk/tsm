@@ -6,7 +6,7 @@ import type { Command, InitMsg, StateMsg, Stats, DocksInfo, EventInfo, RoadsMsg,
 import { Metro } from './metro';
 import { EVENTS, fill, type EventDef, type Variant, type Effect, type DocksDeal } from './events';
 import { RoadGraph, RC, ROAD_HALF } from './roads';
-import { LotStore, type Lot } from './lots';
+import { LotStore, LOT_W, type Lot } from './lots';
 import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './town';
 import { MinHeap } from './heap';
 
@@ -111,6 +111,7 @@ export class Sim {
     this.g = generateTerrain(seed, this.rng);
     this.roads = new RoadGraph(this.g);
     this.lots = new LotStore(this.g.water, this.g.flags, this.roads);
+    this.lots.tierAt = (x, y) => this.tierAt(x, y);
     this.town = { g: this.g, roads: this.roads, lots: this.lots, rng: this.rng, districts: [] };
     layoutTown(this.town);
     this.roads.blockFlags = Flag.Docks;
@@ -229,7 +230,7 @@ export class Sim {
       if (l.planLevel) planned++;
       if (l.planLevel && !(l.flags & Flag.Planned) && l.type) built++;
       if (l.flags & Flag.CarLocked) locked++;
-      const h = l.type === BT.Res ? HOMES[l.level] : 0;
+      const h = this.lotHomes(l);
       homes += h;
       const z = this.zoneOf(l.cell);
       dT += (h || 1) * this.zTransitShare[z]; dW += h || 1;
@@ -311,7 +312,7 @@ export class Sim {
       const locked = (l.flags & Flag.CarLocked) !== 0;
       const build = () => {
         // the developer captures regional demand: docks homes/jobs come out of the city's pools
-        if (l.planType === BT.Res) this.resPool -= HOMES[l.planLevel]; else this.comPool -= COM_JOBS[l.planLevel];
+        if (l.planType === BT.Res) this.resPool -= HOMES[l.planLevel] * this.capOf(l); else this.comPool -= COM_JOBS[l.planLevel] * this.capOf(l);
         this.startBuild(l, l.planType, l.planLevel);
         starts++;
       };
@@ -385,12 +386,27 @@ export class Sim {
     for (const l of this.lots.lots) {
       if (!l.alive) continue;
       l.age = Math.min(65000, l.age + 1);
-      if (l.constr > 0 && --l.constr === 0) { l.level = l.target; l.target = 0; l.age = 0; }
+      if (l.demo > 0 && --l.demo === 0) { if (l.ntype) l.type = l.ntype; l.ntype = 0; l.level = 0; }
+      if (l.constr > 0 && --l.constr === 0) { l.level = l.target; l.target = 0; l.age = 0; l.built = this.month; }
     }
   }
 
-  lotHomes(l: Lot) { return l.type === BT.Res ? HOMES[l.level] : 0; }
-  lotJobs(l: Lot) { return l.type === BT.Com ? COM_JOBS[l.level] : l.type === BT.Ind ? IND_JOBS[l.level] : 0; }
+  /** Capacity of a plot relative to a standard detached one: follows frontage width, denser tiers stack a bit more. */
+  capOf(l: Lot) { return (l.w / LOT_W) * (1 + 0.15 * l.dens); }
+  lotHomes(l: Lot) { return l.type === BT.Res ? Math.round(HOMES[l.level] * this.capOf(l)) : 0; }
+  lotJobs(l: Lot) { return l.type === BT.Com ? Math.round(COM_JOBS[l.level] * this.capOf(l)) : l.type === BT.Ind ? Math.round(IND_JOBS[l.level] * this.capOf(l)) : 0; }
+
+  /** Density tier for new street frontage: 2 old-town core / next to busy stations / very high land value, 1 mid, 0 detached edge. */
+  tierAt(x: number, y: number): number {
+    let dc = Infinity;
+    for (const d of this.town.districts) dc = Math.min(dc, Math.hypot(d.x - x, d.y - y));
+    let ds = Infinity;
+    for (const st of this.metro.stations) ds = Math.min(ds, Math.hypot(st.x - x, st.y - y));
+    const lv = this.lvS ? this.fieldAt(this.lvS, x, y) : 0;
+    if (dc < 7.5 || ds < 3.2 || lv > 0.66) return 2;
+    if (dc < 13 || ds < 6.5 || lv > 0.46) return 1;
+    return 0;
+  }
   homesAt(i: number) { return this.cHomes[i]; }
   jobsAt(i: number) { return this.cJobs[i]; }
   zoneOf(i: number) { return (((i / N) | 0) / ZONE | 0) * NZ + ((i % N) / ZONE | 0); }
@@ -732,11 +748,12 @@ export class Sim {
         const z = this.zoneOf(c.l.cell);
         if (zoneOps[z] >= 6) continue;
         const cur = c.l.type === c.kind ? c.l.level : 0;
-        const add = per[c.to] - per[cur];
+        const add = (per[c.to] - per[cur]) * this.capOf(c.l);
         if (add > this[poolKey] * 2.5 + 10) continue;
         this[poolKey] -= add;
         taken.add(c.l.id); zoneOps[z]++; ops++;
         if (c.to === 3) towers++; else if (c.to === 2) mids++;
+        if (c.to >= 2) this.tryMerge(c.l, c.to);
         this.startBuild(c.l, c.kind, c.to);
       }
     };
@@ -777,12 +794,22 @@ export class Sim {
     }
   }
 
+  /** Redevelopment: an existing building is demolished first (one month of rubble), then the new one rises floor by floor. */
   startBuild(l: Lot, type: number, level: number) {
-    if (l.type !== type) l.level = 0;
-    l.type = type;
+    const had = l.level > 0 && l.type !== BT.None;
+    if (had) { l.demo = 1; l.ntype = type; } else { l.type = type; l.level = 0; l.demo = 0; l.ntype = 0; }
     l.target = level;
-    l.constr = BUILD_MONTHS[level];
     l.constrTotal = BUILD_MONTHS[level];
+    l.constr = BUILD_MONTHS[level] + l.demo;
+  }
+
+  /** A bigger building may replace its small row neighbour: the two plots become one. */
+  private tryMerge(l: Lot, to: number) {
+    if (l.dens === 0 || l.w > 0.7 || (l.flags & (Flag.Core | Flag.Docks | Flag.Planned))) return;
+    if (this.rng.next() > (to === 3 ? 0.4 : 0.15)) return;
+    const nb = this.lots.near(l.x, l.y, 0.9).filter((o) => o !== l && o.alive && o.dens === l.dens && o.back === l.back && o.cls === l.cls && !o.constr && !o.demo
+      && !(o.flags & (Flag.Core | Flag.Docks | Flag.Planned | Flag.CarLocked)) && !isAmenity(o.type) && o.level <= 1 && o.type !== BT.Ind);
+    for (const o of nb) if (this.lots.merge(l, o)) break;
   }
 
   /** As a zone fills with homes, a share of its plots is set aside as parks (small clusters of neighbouring plots next to the housing). */
@@ -826,7 +853,7 @@ export class Sim {
   private extendRoads() {
     // frontier: empty plots on good land; when it runs low, the edge explores outward
     let frontier = 0;
-    for (const l of this.lots.lots) if (l.alive && !l.type && !l.flags && this.lvS[l.cell] > TUNE.spawnLV + 0.08) frontier++;
+    for (const l of this.lots.lots) if (l.alive && !l.type && !l.flags && this.lvS[l.cell] > TUNE.spawnLV + 0.08) frontier += this.capOf(l) * (l.back ? 0.4 : 1);
     const want = 70 + Math.max(0, this.resPool) / 3 + this.homes / 120;
     const exploreOps = frontier > want ? 2 : Math.min(12, 3 + Math.floor((want - frontier) / 15));
     const f = this.growthField();
@@ -839,7 +866,7 @@ export class Sim {
     if (densOps) densify(this.town, f, this.roadDist, densOps);
     if (this.roads.version !== v0) {
       this.roads.rasterize(this.g.road);
-      for (const e of this.roads.drainFresh()) for (const l of this.lots.frontage(e)) this.reserveRiverPark(l);
+      for (const l of this.lots.frontageAll(this.roads.drainFresh())) this.reserveRiverPark(l);
     }
   }
 
@@ -997,8 +1024,10 @@ export class Sim {
     const ls = this.liveLots;
     const n = ls.length;
     const f = () => new Float32Array(n), u = () => new Uint8Array(n);
-    const m: LotsMsg = { n, id: new Int32Array(n), x: f(), y: f(), ang: f(), w: f(), d: f(), type: u(), level: u(), target: u(), constr: u(), constrTotal: u(), flags: u(), planType: u(), planLevel: u(), served: u() };
+    const m: LotsMsg = { n, id: new Int32Array(n), x: f(), y: f(), ang: f(), w: f(), d: f(), type: u(), level: u(), target: u(), constr: u(), constrTotal: u(), flags: u(), planType: u(), planLevel: u(), served: u(),
+      poly: new Float32Array(n * 8), dens: u(), sides: u(), back: u(), demo: u(), seed: new Uint32Array(n), built: new Uint16Array(n), ntype: u() };
     ls.forEach((l, k) => {
+      m.poly.set(l.poly, k * 8); m.dens[k] = l.dens; m.sides[k] = l.sides; m.back[k] = l.back; m.demo[k] = l.demo; m.seed[k] = l.seed; m.built[k] = l.built; m.ntype[k] = l.ntype;
       m.id[k] = l.id; m.x[k] = l.x; m.y[k] = l.y; m.ang[k] = l.ang; m.w[k] = l.w; m.d[k] = l.d;
       m.type[k] = l.type; m.level[k] = l.level; m.target[k] = l.target; m.constr[k] = l.constr; m.constrTotal[k] = l.constrTotal;
       m.flags[k] = l.flags; m.planType[k] = l.planType; m.planLevel[k] = l.planLevel;

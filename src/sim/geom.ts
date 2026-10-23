@@ -40,20 +40,46 @@ export function rectCorners(x: number, y: number, ang: number, hw: number, hd: n
   return [x + ux + vx, y + uy + vy, x - ux + vx, y - uy + vy, x - ux - vx, y - uy - vy, x + ux - vx, y + uy - vy];
 }
 
-/** Separating-axis test between two convex quads (8-number corner arrays). */
+/** Separating-axis test between two convex polygons (flat [x0,y0,x1,y1,...] arrays). */
 export function quadsOverlap(a: number[], b: number[]): boolean {
   for (const poly of [a, b]) {
-    for (let k = 0; k < 4; k++) {
+    const n = poly.length / 2;
+    for (let k = 0; k < n; k++) {
       const x1 = poly[k * 2], y1 = poly[k * 2 + 1];
-      const x2 = poly[((k + 1) % 4) * 2], y2 = poly[((k + 1) % 4) * 2 + 1];
+      const x2 = poly[((k + 1) % n) * 2], y2 = poly[((k + 1) % n) * 2 + 1];
       const nx = y1 - y2, ny = x2 - x1;
       let amin = Infinity, amax = -Infinity, bmin = Infinity, bmax = -Infinity;
-      for (let j = 0; j < 4; j++) {
+      for (let j = 0; j < a.length / 2; j++) {
         const pa = a[j * 2] * nx + a[j * 2 + 1] * ny; amin = Math.min(amin, pa); amax = Math.max(amax, pa);
+      }
+      for (let j = 0; j < b.length / 2; j++) {
         const pb = b[j * 2] * nx + b[j * 2 + 1] * ny; bmin = Math.min(bmin, pb); bmax = Math.max(bmax, pb);
       }
       if (amax <= bmin + 1e-6 || bmax <= amin + 1e-6) return false;
     }
+  }
+  return true;
+}
+
+/** Signed area of a flat polygon (positive = counter-clockwise in a y-up frame). */
+export function polyArea(p: number[]): number {
+  let s = 0;
+  const n = p.length / 2;
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n; s += p[i * 2] * p[j * 2 + 1] - p[j * 2] * p[i * 2 + 1]; }
+  return s / 2;
+}
+
+/** True if the quad / polygon is convex (all cross products share one sign). */
+export function isConvex(p: number[]): boolean {
+  const n = p.length / 2;
+  let sign = 0;
+  for (let i = 0; i < n; i++) {
+    const a = i, b = (i + 1) % n, c = (i + 2) % n;
+    const cr = (p[b * 2] - p[a * 2]) * (p[c * 2 + 1] - p[b * 2 + 1]) - (p[b * 2 + 1] - p[a * 2 + 1]) * (p[c * 2] - p[b * 2]);
+    if (Math.abs(cr) < 1e-9) continue;
+    const sg = cr > 0 ? 1 : -1;
+    if (sign && sg !== sign) return false;
+    sign = sg;
   }
   return true;
 }
