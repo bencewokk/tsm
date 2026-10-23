@@ -51,6 +51,7 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   const bed = new THREE.Color('#9fbccb');
   const concrete = new THREE.Color('#c9c6be');
   const wood = new THREE.Color('#9fb889');
+  const rock = new THREE.Color('#bdb8aa');
   const c = new THREE.Color();
   for (let vy = 0; vy < V; vy++)
     for (let vx = 0; vx < V; vx++) {
@@ -62,6 +63,7 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
       else if (h < 5 * VS || vw[k] > 0) c.copy(sand).lerp(low, Math.max(0, Math.min(1, (h - 2 * VS) / (3 * VS))));
       else if (h < 25 * VS) c.copy(low).lerp(mid, (h - 5 * VS) / (20 * VS));
       else c.copy(mid).lerp(high, Math.min(1, (h - 25 * VS) / (30 * VS)));
+      if (h > 55 * VS) c.lerp(rock, Math.min(0.85, (h - 55 * VS) / (90 * VS)));
       if (vs[k] > 0) c.lerp(wood, vs[k] * 0.9);
       if (vd[k] > 0 && vw[k] < 0.6) c.lerp(concrete, Math.min(1, vd[k] * 1.6));
       col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;

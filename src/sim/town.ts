@@ -3,18 +3,28 @@ import { Rng, fbm } from './rng';
 import { RoadGraph, RC, arterialPath, RULES } from './roads';
 import { LotStore } from './lots';
 import { angDiff, lineDiff } from './geom';
-import type { Grid } from './terrain';
-import { PROFILES } from './profiles';
+import type { Grid, QuarterStyle } from './terrain';
+import { PROFILE_INDEX } from './profiles';
+import type { CityProfile } from './cityprofile';
+import type { DistrictProfile } from './profiles';
 
-/** Each village/district has its own street orientation; noise bends it, and districts meet irregularly. */
-export interface District { x: number; y: number; ang: number }
+/** Each village/district has its own street orientation and profile set; noise bends it, and districts meet irregularly. */
+export interface District {
+  x: number; y: number; ang: number;
+  style?: QuarterStyle;
+  kind?: 'origin' | 'village' | 'planned' | 'garden';
+  /** profile indices for the core, the mid ring and the outskirts of this quarter, and the radii (cells) of the first two */
+  core?: number; mid?: number; outer?: number; coreR?: number; midR?: number;
+}
 
 export interface TownCtx {
   g: Grid;
+  city: CityProfile;
   roads: RoadGraph;
   lots: LotStore;
   rng: Rng;
   districts: District[];
+  profiles: DistrictProfile[];
   /** district profile index at a point (street regularity etc.) */
   profileAt?: (x: number, y: number) => number;
 }
@@ -31,49 +41,179 @@ export function orientationAt(c: TownCtx, x: number, y: number): number {
 
 /** Street regularity of the district at a point (profile.roadRegularity): 0 organic .. 1 planned. */
 export function regularityAt(c: TownCtx, x: number, y: number): number {
-  return c.profileAt ? PROFILES[c.profileAt(x, y)].roadRegularity : 0.5;
+  return c.profileAt ? c.profiles[c.profileAt(x, y)].roadRegularity : 0.5;
 }
 
-/** Initial road network and buildings: village grids at their own angle, arterials between them, the docks road. */
+/** Profile ids and radii of a quarter, from its kind and the city's origin. */
+function quarterProfiles(kind: District['kind'], origin: CityProfile['origin']): { core: string; mid: string; outer: string; coreR: number; midR: number } {
+  if (kind === 'planned') return { core: 'grand', mid: 'grandOuter', outer: 'garden', coreR: 8, midR: 14 };
+  if (kind === 'garden') return { core: 'garden', mid: 'garden', outer: 'garden', coreR: 6, midR: 12 };
+  const oldCore = origin === 'mining' ? 'miners' : origin === 'market-town' ? 'marketTown' : origin === 'rail-junction' ? 'terraces' : origin === 'planned-capital' && kind === 'origin' ? 'grand' : 'oldTown';
+  const mid = origin === 'planned-capital' && kind === 'origin' ? 'grandOuter' : 'terraces';
+  const outer = origin === 'planned-capital' && kind === 'origin' ? 'garden' : 'suburb';
+  return { core: oldCore, mid, outer, coreR: 7.5, midR: 13 };
+}
+
+/** Collector spine + cross streets + back streets (the organic village skeleton). */
+function skeletonOrganic(c: TownCtx, d: District, mainNodesOut: number[]) {
+  const { roads, rng } = c;
+  const centre = roads.addNode(d.x, d.y);
+  mainNodesOut.push(centre);
+  const mainNodes: number[] = [centre];
+  for (const dir of [0, Math.PI]) {
+    let n = centre, a = d.ang + dir;
+    for (let k = 0; k < 3; k++) {
+      a += rng.range(-0.12, 0.12);
+      const len = rng.range(2.1, 2.7);
+      const m = roads.grow(n, roads.nx[n] + Math.cos(a) * len, roads.ny[n] + Math.sin(a) * len, RC.Collector, 0);
+      if (m < 0) break;
+      mainNodes.push(m); n = m;
+    }
+  }
+  const crossEnds: number[] = [];
+  for (const n of mainNodes) {
+    for (const side of [1, -1]) {
+      let a = d.ang + side * Math.PI / 2 + rng.range(-0.1, 0.1), cur = n;
+      for (let k = 0; k < 2; k++) {
+        const len = rng.range(2.4, 3.2);
+        const m = roads.grow(cur, roads.nx[cur] + Math.cos(a) * len, roads.ny[cur] + Math.sin(a) * len, RC.Local, 0);
+        if (m < 0) break;
+        cur = m; a += rng.range(-0.15, 0.15);
+        if (rng.next() < 0.4) break;
+      }
+      if (cur !== n) crossEnds.push(cur);
+    }
+  }
+  // back streets parallel to the main street close some blocks
+  for (const n of crossEnds) {
+    if (rng.next() < 0.45) continue;
+    const a = d.ang + (rng.next() < 0.5 ? 0 : Math.PI);
+    const len = rng.range(2.4, 3.4);
+    roads.grow(n, roads.nx[n] + Math.cos(a) * len, roads.ny[n] + Math.sin(a) * len, RC.Local, 0);
+  }
+}
+
+/** Planned quarter: straight axis (boulevard with rond-points), a regular cross grid, parallel avenues and diagonals from the centre. */
+function skeletonPlanned(c: TownCtx, d: District, mainNodesOut: number[], boulevard: boolean) {
+  const { roads, g } = c;
+  const centre = roads.addNode(d.x, d.y);
+  mainNodesOut.push(centre);
+  const axis: number[] = [centre];
+  const cls = boulevard ? RC.Arterial : RC.Collector;
+  for (const dir of [0, Math.PI]) {
+    let n = centre;
+    for (let k = 0; k < 4; k++) {
+      const m = roads.grow(n, roads.nx[n] + Math.cos(d.ang + dir) * 3.0, roads.ny[n] + Math.sin(d.ang + dir) * 3.0, cls, 0);
+      if (m < 0) break;
+      axis.push(m); n = m;
+    }
+  }
+  const ends = axis.filter((n) => roads.degree(n) <= 1);
+  if (boulevard) for (const n of [centre, ...ends]) g.rondpoints.push([roads.nx[n], roads.ny[n]]);
+  const crossEnds: number[] = [];
+  for (const n of axis) {
+    for (const side of [1, -1]) {
+      let cur = n;
+      for (let k = 0; k < 2; k++) {
+        const m = roads.grow(cur, roads.nx[cur] + Math.cos(d.ang + side * Math.PI / 2) * 3.2, roads.ny[cur] + Math.sin(d.ang + side * Math.PI / 2) * 3.2, n === centre ? RC.Collector : RC.Local, 0);
+        if (m < 0) break;
+        cur = m;
+      }
+      if (cur !== n) crossEnds.push(cur);
+    }
+  }
+  // parallel avenues close the grid at the outer cross streets
+  for (const n of crossEnds) for (const dir of [0, Math.PI]) {
+    let cur = n;
+    for (let k = 0; k < 2; k++) {
+      const m = roads.grow(cur, roads.nx[cur] + Math.cos(d.ang + dir) * 3.0, roads.ny[cur] + Math.sin(d.ang + dir) * 3.0, RC.Local, 0);
+      if (m < 0) break;
+      cur = m;
+    }
+  }
+  if (boulevard) for (const a of [Math.PI / 4, -Math.PI / 4, (3 * Math.PI) / 4, (-3 * Math.PI) / 4]) {
+    roads.grow(centre, roads.nx[centre] + Math.cos(d.ang + a) * 4.4, roads.ny[centre] + Math.sin(d.ang + a) * 4.4, RC.Collector, 0);
+  }
+}
+
+/** Hillside terraces: the spine follows the contour, short stair streets run down the slope. */
+function skeletonTerraces(c: TownCtx, d: District, mainNodesOut: number[]) {
+  const { roads, g, rng } = c;
+  const h = (x: number, y: number) => g.height[Math.max(0, Math.min(N - 1, Math.floor(y))) * N + Math.max(0, Math.min(N - 1, Math.floor(x)))];
+  const contour = (x: number, y: number, prev: number) => {
+    const gx = h(x + 1, y) - h(x - 1, y), gy = h(x, y + 1) - h(x, y - 1);
+    if (Math.hypot(gx, gy) < 0.3) return prev;
+    let a = Math.atan2(gy, gx) + Math.PI / 2;
+    if (Math.cos(a - prev) < 0) a += Math.PI;
+    return a;
+  };
+  d.ang = contour(d.x, d.y, d.ang);
+  const centre = roads.addNode(d.x, d.y);
+  mainNodesOut.push(centre);
+  const spine: number[] = [centre];
+  for (const dir of [0, Math.PI]) {
+    let n = centre, a = d.ang + dir;
+    for (let k = 0; k < 3; k++) {
+      a = contour(roads.nx[n], roads.ny[n], a) + rng.range(-0.06, 0.06);
+      const m = roads.grow(n, roads.nx[n] + Math.cos(a) * 2.2, roads.ny[n] + Math.sin(a) * 2.2, RC.Collector, 0);
+      if (m < 0) break;
+      spine.push(m); n = m;
+    }
+  }
+  const ends: number[] = [];
+  for (const n of spine) for (const side of [1, -1]) {
+    const a = d.ang + side * Math.PI / 2 + rng.range(-0.1, 0.1);
+    const m = roads.grow(n, roads.nx[n] + Math.cos(a) * 2.4, roads.ny[n] + Math.sin(a) * 2.4, RC.Local, 0);
+    if (m >= 0) ends.push(m);
+  }
+  for (const n of ends) {
+    const a = contour(roads.nx[n], roads.ny[n], d.ang);
+    roads.grow(n, roads.nx[n] + Math.cos(a) * 2.4, roads.ny[n] + Math.sin(a) * 2.4, RC.Local, 0);
+  }
+}
+
+/** Market town: spokes from the market square joined by a ring street. */
+function skeletonRadial(c: TownCtx, d: District, mainNodesOut: number[]) {
+  const { roads, rng } = c;
+  const centre = roads.addNode(d.x, d.y);
+  mainNodesOut.push(centre);
+  const n = 6, first: [number, number][] = [];
+  for (let k = 0; k < n; k++) {
+    const a = d.ang + (k / n) * Math.PI * 2 + rng.range(-0.08, 0.08);
+    let cur = centre;
+    for (let s = 0; s < 2; s++) {
+      const m = roads.grow(cur, roads.nx[cur] + Math.cos(a) * 2.7, roads.ny[cur] + Math.sin(a) * 2.7, s === 0 ? RC.Collector : RC.Local, 0);
+      if (m < 0) break;
+      if (s === 0) first.push([roads.nx[m], roads.ny[m]]);
+      cur = m;
+    }
+  }
+  if (first.length >= 4) roads.polyline([...first, first[0]], RC.Local, 0);
+}
+
+/** Initial road network and buildings: quarter skeletons by style, arterials between them, the old industrial site's road. */
 export function layoutTown(c: TownCtx) {
   const { g, roads, lots, rng } = c;
-  c.districts = g.villages.map((v) => ({ x: v.x + 0.5, y: v.y + 0.5, ang: rng.range(0, Math.PI / 2) }));
+  const cp = c.city;
+  c.districts = g.villages.map((v) => {
+    const q = quarterProfiles(v.kind, cp.origin);
+    const ang = rng.range(0, Math.PI / 2);
+    return { x: v.x + 0.5, y: v.y + 0.5, ang, style: v.style, kind: v.kind, core: PROFILE_INDEX[q.core], mid: PROFILE_INDEX[q.mid], outer: PROFILE_INDEX[q.outer], coreR: q.coreR, midR: q.midR };
+  });
   const centres: number[] = [];
   for (const d of c.districts) {
-    const centre = roads.addNode(d.x, d.y);
-    centres.push(centre);
-    const mainNodes: number[] = [centre];
-    for (const dir of [0, Math.PI]) {
-      let n = centre, a = d.ang + dir;
-      for (let k = 0; k < 3; k++) {
-        a += rng.range(-0.12, 0.12);
-        const len = rng.range(2.1, 2.7);
-        const m = roads.grow(n, roads.nx[n] + Math.cos(a) * len, roads.ny[n] + Math.sin(a) * len, RC.Collector, 0);
-        if (m < 0) break;
-        mainNodes.push(m); n = m;
-      }
-    }
-    const crossEnds: number[] = [];
-    for (const n of mainNodes) {
-      for (const side of [1, -1]) {
-        let a = d.ang + side * Math.PI / 2 + rng.range(-0.1, 0.1), cur = n;
-        for (let k = 0; k < 2; k++) {
-          const len = rng.range(2.4, 3.2);
-          const m = roads.grow(cur, roads.nx[cur] + Math.cos(a) * len, roads.ny[cur] + Math.sin(a) * len, RC.Local, 0);
-          if (m < 0) break;
-          cur = m; a += rng.range(-0.15, 0.15);
-          if (rng.next() < 0.4) break;
-        }
-        if (cur !== n) crossEnds.push(cur);
-      }
-    }
-    // back streets parallel to the main street close some blocks
-    for (const n of crossEnds) {
-      if (rng.next() < 0.45) continue;
-      const a = d.ang + (rng.next() < 0.5 ? 0 : Math.PI);
-      const len = rng.range(2.4, 3.4);
-      roads.grow(n, roads.nx[n] + Math.cos(a) * len, roads.ny[n] + Math.sin(a) * len, RC.Local, 0);
-    }
+    if (d.style === 'planned') {
+      // planned quarters face the origin along a straight axis
+      const o = c.districts[0];
+      if (o && o !== d && cp.planningStrength > 0.15) d.ang = Math.round(Math.atan2(o.y - d.y, o.x - d.x) / (Math.PI / 4)) * (Math.PI / 4);
+      skeletonPlanned(c, d, centres, true);
+    } else if (d.style === 'rail') {
+      const line = g.rail[0];
+      if (line && line.length > 1) d.ang = Math.atan2(line[line.length - 1][1] - line[0][1], line[line.length - 1][0] - line[0][0]);
+      skeletonPlanned(c, d, centres, false);
+    } else if (d.style === 'terraces') skeletonTerraces(c, d, centres);
+    else if (d.style === 'radial') skeletonRadial(c, d, centres);
+    else skeletonOrganic(c, d, centres);
   }
   roads.rasterize(g.road);
   // arterials: least-cost paths between villages (each to its nearest earlier one), then off the north edge
@@ -121,7 +261,7 @@ export function layoutTown(c: TownCtx) {
     for (const l of lots.near(d.x, d.y, 10)) {
       if (l.type || (l.flags & Flag.Docks)) continue;
       const dist = Math.hypot(l.x - d.x, l.y - d.y);
-      if (dist > 9.5 || rng.next() > ((dist < 6.2 ? 1.3 : 1.08) - dist * 0.085) * (dist < 4.6 ? (l.back ? 0.45 : 0.9) : (l.back ? 0.15 : 0.55))) continue;
+      if (dist > 9.5 || rng.next() > ((dist < 6.2 ? 1.3 : 1.08) - dist * 0.085) * (dist < 4.6 ? (l.back ? 0.45 : 0.9) : (l.back ? 0.15 : 0.55)) * (d.kind === 'garden' ? 0.3 : 1)) continue;
       if (!parkDone && dist < 4 && rng.next() < 0.25) { l.type = BT.Park; l.level = 1; parkDone = true; continue; }
       if (dist < 2.6 && rng.next() < 0.6) { l.type = BT.Com; l.level = 1; }
       else { l.type = BT.Res; l.level = 1; }
@@ -129,9 +269,16 @@ export function layoutTown(c: TownCtx) {
     }
   }
   for (const l of lots.lots) if (l.alive && (l.flags & Flag.Docks)) { l.type = BT.Ind; l.level = rng.next() < 0.25 ? 2 : 1; l.age = 60; }
+  // mining: the lot nearest the pithead carries the headframe
+  if (g.mine) {
+    let best: ReturnType<LotStore['near']>[number] | null = null, bd = Infinity;
+    for (const l of lots.near(g.mine.x, g.mine.y, 6)) if (l.flags & Flag.Docks) { const dd = Math.hypot(l.x - g.mine.x, l.y - g.mine.y); if (dd < bd) { bd = dd; best = l; } }
+    if (best) { best.flags |= Flag.Mine; best.level = 2; }
+  }
 
   // old town cores: the original plots around each village centre, a paved square at the central junction and a church on it
   for (const d of c.districts) {
+    if (d.kind === 'garden') continue;
     const near = lots.near(d.x, d.y, 8).filter((l) => !(l.flags & Flag.Docks));
     for (const l of near) if (Math.hypot(l.x - d.x, l.y - d.y) < 6.2) l.flags |= Flag.Core;
     const byDist = near.filter((l) => !l.back).sort((a, b) => Math.hypot(a.x - d.x, a.y - d.y) - Math.hypot(b.x - d.x, b.y - d.y) || a.id - b.id);
@@ -140,10 +287,10 @@ export function layoutTown(c: TownCtx) {
     sq.type = BT.Square; sq.level = 1;
     // the church faces the square: the closest other plot
     const ch = byDist.slice(1).find((l) => Math.hypot(l.x - sq.x, l.y - sq.y) < 1.6) ?? byDist[1];
-    if (ch) { ch.type = BT.Landmark; ch.level = 1; }
+    if (ch) { ch.type = BT.Landmark; ch.level = 1; if (d.kind === 'planned' || (d.kind === 'origin' && cp.origin === 'planned-capital')) ch.flags |= Flag.Civic; }
     // a second paved plot opposite makes the square read as a plaza across the street
     const opp = byDist.slice(1).find((l) => l !== ch && Math.hypot(l.x - sq.x, l.y - sq.y) < 1.3 && l.type !== BT.Landmark);
-    if (opp && rng.next() < 0.7) { opp.type = BT.Square; opp.level = 1; }
+    if (opp && rng.next() < (d.kind === 'planned' ? 1 : 0.7)) { opp.type = BT.Square; opp.level = 1; }
   }
 }
 

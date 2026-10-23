@@ -17,6 +17,8 @@ export interface Ctx {
   prof: DistrictProfile;         // district profile of the plot
   pal: Palette;                  // its palette
   wave: number;                  // construction wave (built month / 24)
+  site: 'harbour' | 'railyard' | 'mine';   // what the old industrial district is in this city
+  mine: [number, number] | null; // pithead position (world metres)
   style?: string;                // force a tower style (gallery / tests)
 }
 
@@ -105,7 +107,7 @@ function designHouse(c: Ctx) {
     const place = (s: number, wm: number, dm: number, h: number, wc: number) => {
       const ws = wm / Q.W / 2, tt0 = (7 + r(4) * 2) / Q.D;
       const poly = Q.strip(s - ws, s + ws, tt0, tt0 + dm / Q.D);
-      block(c, poly, h, wc, { roof: r(3) < 0.35 ? 'gableT' : 'gableS', rh: 3.6 + r(5), roofColor: roof });
+      block(c, poly, h, wc, { roof: r(26) < (c.pal.flat ?? 0) ? 'flat' : r(3) < 0.35 ? 'gableT' : 'gableS', rh: 3.6 + r(5), roofColor: roof });
       return poly;
     };
     if (two) {
@@ -132,14 +134,35 @@ function designHouse(c: Ctx) {
     const poly = Q.strip(cs[i], cs[i + 1], 0, bd / Q.D);
     const h = 7.5 + r(10 + i) * 3.5;
     const wall = pick(c.pal.wall, r(30 + i));
-    block(c, poly, h, wall, { roof: r(50 + i) < 0.7 ? 'gableT' : 'gableS', rh: 3 + r(60 + i) * 2, roofColor: pick(c.pal.roof, r(71 + i)) });
+    block(c, poly, h, wall, { roof: r(45 + i) < (c.pal.flat ?? 0) ? 'flat' : r(50 + i) < 0.7 ? 'gableT' : 'gableS', rh: 3 + r(60 + i) * 2, roofColor: pick(c.pal.roof, r(71 + i)) });
   }
   // back gardens
   if (r(80) < 0.8) tree(c, Q.at(0.3, 0.8), 5 + r(81) * 2, 82);
   if (r(83) < 0.7) tree(c, Q.at(0.72, 0.85), 5 + r(84) * 2, 85);
 }
 
+function designGrand(c: Ctx) {
+  // boulevard fronts: wide cream facades with a rusticated plinth, cornice and mansard roof
+  const { Q, r } = c;
+  pad(c, c.pal.ground, 0.1, 0.3);
+  const n = Math.max(1, Math.round(Q.W / 15));
+  const cs = cuts(c, n, 0.2);
+  const floors = 4 + c.level * 1.5 + Math.floor(r(2) * 2);
+  for (let i = 0; i < n; i++) {
+    let poly = Q.strip(cs[i], cs[i + 1], 0, (15 + r(3 + i) * 4) / Q.D);
+    const h = floors * 3.5 + (r(10 + i) - 0.5) * 2;
+    const wall = pick(c.pal.wall, r(20 + i));
+    if (i === 0 && cornerStart(c)) poly = chamfer(poly, 0, 4); else if (i === n - 1 && cornerEnd(c)) poly = chamfer(poly, 1, 4);
+    block(c, poly, h, wall, { roof: 'mansard', rh: 4.4, roofColor: pick(c.pal.roof, r(30 + i)) });
+    c.mb.prism('plain', scalePoly(Q.strip(cs[i], cs[i + 1], 0, 9 / Q.D), 1.01), c.g - 1, c.g + 4.4, 0xcfc8b6, 0xcfc8b6);
+    c.mb.prism('plain', scalePoly(poly, 1.02), c.g + h - 1, c.g + h, 0xf1ecde, 0xf1ecde);
+    if (c.isCom) awning(c, cs[i], cs[i + 1], 3.6, 1.6, pick(c.pal.accent, r(40 + i)));
+  }
+  if (Q.D > 28 && r(5) < 0.7) block(c, Q.strip(0.1, 0.9, 1 - 10 / Q.D, 0.97), floors * 3.2, pick(c.pal.wall, r(6)), { roof: 'flat' });
+}
+
 function designCore(c: Ctx) {
+  if (c.prof.id === 'grand') return designGrand(c);
   const { Q, r } = c;
   pad(c, c.pal.ground, 0.1, 0.3);
   const n = Math.max(1, Math.round(Q.W / 8.6));
@@ -153,7 +176,7 @@ function designCore(c: Ctx) {
     const wall = pick(c.pal.wall, r(60 + i));
     const roofC = pick(c.pal.roof, r(80 + i));
     const rr = r(90 + i);
-    const roof = rr < 0.5 ? 'gableT' : rr < 0.78 ? 'gableS' : lvl >= 3 && rr < 0.9 ? 'mansard' : 'hip';
+    const roof = r(97 + i) < (c.pal.flat ?? 0) ? 'flat' : rr < 0.5 ? 'gableT' : rr < 0.78 ? 'gableS' : lvl >= 3 && rr < 0.9 ? 'mansard' : 'hip';
     const corner = (i === 0 && cornerStart(c)) || (i === n - 1 && cornerEnd(c));
     if (corner) {
       // wrap the corner: chamfered front corner, a wing along the side street
@@ -309,6 +332,8 @@ function designInd(c: Ctx) {
 }
 
 function designPort(c: Ctx) {
+  if (c.site === 'railyard') return designRailyard(c);
+  if (c.site === 'mine') return designMine(c);
   const { Q, r } = c;
   pad(c, GROUND.port, 0.3, 0.3);
   if (r(1) < 0.42) {
@@ -384,7 +409,89 @@ function designSquare(c: Ctx) {
   for (let k = 1; k < 4; k++) mb.prism('plain', Q.strip(0.03, 0.97, k / 4 - 0.006, k / 4 + 0.006), g + 0.3, g + 0.42, 0xcbbfa9, 0xcbbfa9);
 }
 
+
+/** Old rail yards: long freight sheds, sidings with wagons, a water tower. */
+function designRailyard(c: Ctx) {
+  const { Q, r, mb, g } = c;
+  pad(c, GROUND.port, 0.3, 0.3);
+  if (r(1) < 0.45) {
+    // freight shed with a loading canopy
+    const h = 8 + r(2) * 3, col = pick(PAL.brick, r(3));
+    const body = Q.strip(0.03, 0.97, 0.12, 0.55);
+    block(c, body, h, col, { roof: 'gableS', rh: 4.2, roofColor: pick(PAL.slate, r(5)) });
+    mb.prism('plain', Q.strip(0.03, 0.97, 0.02, 0.12), g + 5.2, g + 5.7, 0x6d6f70, 0x6d6f70);
+    for (let k = 0; k < 4; k++) mb.prism('plain', Q.strip(0.08 + k * 0.24, 0.1 + k * 0.24, 0.03, 0.06), g, g + 5.4, 0x5d5f60, 0x5d5f60);
+    if (r(7) < 0.4) { const p = Q.at(0.9, 0.82); mb.prism('plain', circle(p[0], p[1], 3.2, 10), g + 6, g + 11, 0x8a6a4a, 0x7a5a3a); mb.prism('plain', [[p[0] - 0.4, p[1] - 0.4], [p[0] + 0.4, p[1] - 0.4], [p[0] + 0.4, p[1] + 0.4], [p[0] - 0.4, p[1] + 0.4]], g - 1, g + 6, 0x666a6e, 0x666a6e); }
+  } else {
+    // sidings: three tracks with wagons
+    for (let k = 0; k < 3; k++) {
+      const t = 0.2 + k * 0.28;
+      mb.prism('plain', Q.strip(0.02, 0.98, t - 0.012, t + 0.012), g + 0.3, g + 0.6, 0x3f4245, 0x3f4245);
+      let s0 = 0.04 + r(10 + k) * 0.1;
+      while (s0 < 0.92) {
+        const len = (0.1 + r(20 + k + s0 * 10) * 0.06);
+        if (r(30 + k * 7 + Math.floor(s0 * 20)) > 0.25) {
+          const cc = pick([0x7a4a38, 0x5f6a70, 0x8a5a3a, 0x4a5a4f, 0x9a8f7a, 0x3d6e9e], r(40 + k * 5 + Math.floor(s0 * 20)));
+          mb.prism('plain', Q.strip(s0, Math.min(0.97, s0 + len), t - 0.045, t + 0.045), g + 0.7, g + 0.7 + 3.3, cc, cc);
+        }
+        s0 += len + 0.015;
+      }
+    }
+  }
+}
+
+/** Old mine yard: headframe over the shaft, engine house, ore bunkers and spoil heaps. */
+function designMine(c: Ctx) {
+  const { Q, r, mb, g } = c;
+  pad(c, 0xb4ada0, 0.3, 0.3);
+  const heap = (s: number, t: number, rad: number, h: number) => { const p = Q.at(s, t); mb.frustum('plain', circle(p[0], p[1], rad, 11), circle(p[0], p[1], rad * 0.12, 11), g - 1, g + h, 0x6f685d, true, 0x6a6358); };
+  if (c.flags & 64) {
+    // pithead: slanted A-frame legs, a crossbeam, engine house alongside
+    const engine = Q.strip(0.08, 0.5, 0.1, 0.5);
+    block(c, engine, 10, pick(PAL.brick, r(1)), { roof: 'gableS', rh: 4, roofColor: pick(PAL.slate, r(2)) });
+    for (const sgn of [-1, 1]) {
+      const base = Q.strip(0.66 + sgn * 0.06, 0.72 + sgn * 0.06, 0.4, 0.46), top = Q.strip(0.69, 0.71, 0.42, 0.44);
+      mb.frustum('plain', base, top, g - 1, g + 27, 0x4f5459, true, 0x4f5459);
+    }
+    const bar = Q.strip(0.6, 0.78, 0.415, 0.445);
+    mb.prism('plain', bar, g + 26, g + 27.8, 0x3f4448, 0x3f4448);
+    const w = Q.at(0.69, 0.43);
+    mb.prism('plain', circle(w[0], w[1], 3.4, 12), g + 28.4, g + 29.2, 0x6b7378, 0x6b7378);
+    mb.prism('lamp', circle(w[0], w[1], 0.5, 5), g + 29.2, g + 31, 0xffe3a6, 0xffe3a6);
+    heap(0.82, 0.8, 11, 11);
+    return;
+  }
+  const kind = r(3);
+  if (kind < 0.38) heap(0.5, 0.5, 13 + r(4) * 4, 12 + r(5) * 6);
+  else if (kind < 0.7) {
+    const body = Q.strip(0.06, 0.94, 0.15, 0.58);
+    block(c, body, 7 + r(6) * 3, pick(PAL.brick, r(7)), { roof: 'gableS', rh: 3.2, roofColor: pick(PAL.slate, r(8)) });
+    heap(0.8, 0.85, 8, 7);
+  } else {
+    // ore bunkers on stilts and a loading trestle
+    for (let k = 0; k < 3; k++) mb.prism('plain', Q.strip(0.1 + k * 0.28, 0.32 + k * 0.28, 0.2, 0.55), g + 3, g + 9, 0x7c7468, 0x70685c);
+    for (let k = 0; k < 4; k++) mb.prism('plain', Q.strip(0.08 + k * 0.28, 0.1 + k * 0.28, 0.18, 0.2), g - 1, g + 3, 0x5a5348, 0x5a5348);
+    heap(0.5, 0.88, 7, 5);
+  }
+}
+
+/** Civic hall of a planned quarter: columned portico under a pediment, wings, a copper dome. */
+function designHall(c: Ctx) {
+  const { Q, r, mb, g } = c;
+  pad(c, 0xe0dac8, 0.2, 0.35);
+  const wall = pick(c.pal.wall, r(1)), roofC = 0x8fa39b;
+  block(c, Q.strip(0.05, 0.95, 0.2, 0.62), 13, wall, { roof: 'flat', roofColor: 0xcbc6b6 });
+  block(c, Q.strip(0.3, 0.7, 0.1, 0.22), 11, wall, { roof: 'gableS', rh: 3.6, roofColor: roofC });
+  for (let k = 0; k < 6; k++) mb.prism('plain', Q.strip(0.32 + k * 0.0705, 0.345 + k * 0.0705, 0.08, 0.095), g, g + 10.5, 0xf4efe2, 0xf4efe2);
+  block(c, Q.strip(0.34, 0.66, 0.3, 0.52), 16, wall, { roof: 'none' });
+  const m = Q.at(0.5, 0.41);
+  mb.frustum('plain', circle(m[0], m[1], 6.2, 14), circle(m[0], m[1], 2.2, 14), g + 16, g + 23, roofC, true, roofC);
+  mb.prism('lamp', circle(m[0], m[1], 0.7, 6), g + 23, g + 27, 0xffe3a6, 0xffe3a6);
+  tree(c, Q.at(0.12, 0.85), 6, 30); tree(c, Q.at(0.88, 0.85), 6, 31);
+}
+
 function designChurch(c: Ctx) {
+  if (c.flags & 32) return designHall(c);
   const { Q, r, mb, g } = c;
   pad(c, GROUND.church, 0.2, 0.35);
   const roofC = r(1) < 0.6 ? pick(PAL.coreRoof, r(2)) : 0x6c6a68;

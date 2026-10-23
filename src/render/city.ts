@@ -8,7 +8,9 @@ import { Layer, unitGeos } from './layers';
 import { kindOf, SITE, PAL, type Kind } from './forms';
 import { Harbour } from './harbour';
 import { MB, Quad, type Pt, type Mat } from './poly';
-import { PROFILES, PALETTES } from '../sim/profiles';
+import { PALETTES, type DistrictProfile } from '../sim/profiles';
+import type { CityProfile } from '../sim/cityprofile';
+import type { InitMsg } from '../sim/protocol';
 import { designLot, massing, pad, tree as ctxTree, FOOT, type Ctx, type Tree } from './buildings';
 
 // road widths (m) by class, and the narrow cobbled lanes of the old cores
@@ -47,6 +49,7 @@ export class CityView {
   craneMat: THREE.MeshStandardMaterial;
   scafMat: THREE.LineBasicMaterial;
   roads: THREE.Mesh;
+  railMesh: THREE.Mesh;
   private L: Record<string, Layer>;
   private craneMast: Layer;
   private craneJib: Layer;
@@ -67,7 +70,14 @@ export class CityView {
   private streetTrees: { x: number; z: number; s: number; seed: number }[] = [];
   stats = { chunksBuilt: 0, lots: 0, grows: 0 };
 
-  constructor(private water: Uint8Array, private flags: Uint8Array, private villages: Village[], private sample: (x: number, z: number) => number) {
+  profiles: DistrictProfile[];
+  city: CityProfile;
+  private rail: [number, number][][];
+  private rond: [number, number][];
+  private mine: { x: number; y: number } | null;
+
+  constructor(private water: Uint8Array, private flags: Uint8Array, private villages: Village[], private sample: (x: number, z: number) => number, init: InitMsg) {
+    this.profiles = init.profiles; this.city = init.city; this.rail = init.rail; this.rond = init.rondpoints; this.mine = init.mine;
     const g = unitGeos();
     this.wallMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, vertexColors: true });
     patchBuildingMaterial(this.wallMat, false, true);
@@ -96,14 +106,66 @@ export class CityView {
     this.roads.receiveShadow = true;
     this.roads.frustumCulled = false;
 
-    this.harbour = new Harbour(water, flags, sample, plainInst);
-    this.group.add(this.roads, this.chunkGroup, this.growGroup, ...Object.values(this.L).map((l) => l.mesh), this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
+    this.railMesh = this.buildRail();
+    this.harbour = new Harbour(water, flags, sample, plainInst, init.city.terrain === 'coast', init.city.site === 'harbour');
+    this.group.add(this.roads, this.railMesh, this.chunkGroup, this.growGroup, ...Object.values(this.L).map((l) => l.mesh), this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
   }
 
   private ground(x: number, z: number) {
     const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
     if (cx >= 0 && cz >= 0 && cx < N && cz < N && this.water[cz * N + cx]) return 0.4;
     return this.sample(x, z);
+  }
+
+  /** Railway lines: ballast bed, two rails and sleepers, following the terrain (bridged over water). */
+  private buildRail(): THREE.Mesh {
+    const pos: number[] = [], col: number[] = [], idx: number[] = [];
+    let base = 0;
+    const quad = (a: Pt, b: Pt, c: Pt, d: Pt, ya: number, yb: number, color: number) => {
+      const cc = new THREE.Color(color);
+      for (const [p, y] of [[a, ya], [b, yb], [c, yb], [d, ya]] as [Pt, number][]) { pos.push(p[0], y, p[1]); col.push(cc.r, cc.g, cc.b); }
+      idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
+      base += 4;
+    };
+    const yAt = (x: number, z: number) => {
+      const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+      const wet = cx >= 0 && cz >= 0 && cx < N && cz < N && this.water[cz * N + cx];
+      return wet ? 6.3 : this.sample(x, z) + 0.5;
+    };
+    for (const line of this.rail) {
+      const pts = line.map(([x, y]) => [x * CELL, y * CELL] as Pt);
+      for (let k = 0; k + 1 < pts.length; k++) {
+        const [ax, az] = pts[k], [bx, bz] = pts[k + 1];
+        const L = Math.hypot(bx - ax, bz - az);
+        if (L < 1) continue;
+        const ux = (bx - ax) / L, uz = (bz - az) / L, nx = -uz, nz = ux;
+        const steps = Math.max(1, Math.ceil(L / 20));
+        for (let j = 0; j < steps; j++) {
+          const t0 = j / steps, t1 = (j + 1) / steps;
+          const p0: Pt = [ax + (bx - ax) * t0, az + (bz - az) * t0], p1: Pt = [ax + (bx - ax) * t1, az + (bz - az) * t1];
+          const y0 = yAt(p0[0], p0[1]), y1 = yAt(p1[0], p1[1]);
+          const off = (p: Pt, o: number): Pt => [p[0] + nx * o, p[1] + nz * o];
+          quad(off(p0, -4), off(p0, 4), off(p1, 4), off(p1, -4), y0, y1, 0xa9a396);          // ballast
+          for (const o of [-1.7, 1.7]) quad(off(p0, o - 0.45), off(p0, o + 0.45), off(p1, o + 0.45), off(p1, o - 0.45), y0 + 0.25, y1 + 0.25, 0x4d5055); // rails
+          // sleepers every 3 m
+          const n = Math.max(1, Math.round((L / steps) / 3));
+          for (let q = 0; q < n; q++) {
+            const t = t0 + ((q + 0.5) / n) * (t1 - t0);
+            const c: Pt = [ax + (bx - ax) * t, az + (bz - az) * t], y = y0 + (y1 - y0) * ((q + 0.5) / n);
+            const a: Pt = [c[0] - ux * 0.4, c[1] - uz * 0.4], b: Pt = [c[0] + ux * 0.4, c[1] + uz * 0.4];
+            quad(off(a, -3.1), off(a, 3.1), off(b, 3.1), off(b, -3.1), y + 0.15, y + 0.15, 0x6e6a60);
+          }
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+    m.receiveShadow = true; m.frustumCulled = false;
+    return m;
   }
 
   update(s: StateMsg) {
@@ -144,6 +206,13 @@ export class CityView {
       const w = isCore ? CORE_W : ROAD_W[r.cls[k]], c = isCore ? COBBLE : ASPHALT[r.cls[k]];
       widths.push(w); colors.push(c);
       for (const n of [a, b]) if (w > maxW[n]) { maxW[n] = w; nodeCol[n] = c; }
+    }
+    // roundabouts of planned boulevards: a wide asphalt ring with a green island
+    const rondNodes: number[] = [];
+    for (const [rx, ry] of this.rond) {
+      let bn = -1, bd = 0.2;
+      for (let n = 0; n < nNodes; n++) { const d = Math.hypot(r.nodes[n * 2] - rx, r.nodes[n * 2 + 1] - ry); if (d < bd) { bd = d; bn = n; } }
+      if (bn >= 0) { rondNodes.push(bn); maxW[bn] = Math.max(maxW[bn], 34); if (!nodeCol[bn]) nodeCol[bn] = ASPHALT[0]; }
     }
     const strip = (k: number, w: number, c: THREE.Color, lift: number) => {
       const a = r.ea[k], b = r.eb[k];
@@ -200,6 +269,7 @@ export class CityView {
     for (let n = 0; n < nNodes; n++) if (maxW[n]) disc(n, maxW[n] / 2 + 2.5, KERB, 0.02);
     for (let k = 0; k < r.ea.length; k++) strip(k, widths[k], colors[k], 0.25);
     for (let n = 0; n < nNodes; n++) if (maxW[n]) disc(n, maxW[n] / 2, nodeCol[n], 0.27);
+    for (const n of rondNodes) { disc(n, 8.5, KERB, 0.3); disc(n, 6.8, new THREE.Color(0x9fbf86), 0.34); }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
@@ -232,8 +302,8 @@ export class CityView {
     const dens = L.dens[k];
     return {
       mb, Q, id: L.id[k], seed, g, kind, level, dens, sides: L.sides[k], back: L.back[k], isCom: L.type[k] === BT.Com, flags: L.flags[k],
-      prof: PROFILES[L.prof[k]], pal: PALETTES[PROFILES[L.prof[k]].palette], wave: Math.floor(L.built[k] / 24),
-      era: Math.min(1, PROFILES[L.prof[k]].era * 0.3 + (L.built[k] / 96) * 0.8), lv: dens === 2 ? 0.8 : dens === 1 ? 0.5 : 0.3, trees,
+      prof: this.profiles[L.prof[k]], pal: PALETTES[this.profiles[L.prof[k]].palette], wave: Math.floor(L.built[k] / 24), site: this.city.site, mine: this.mine ? [this.mine.x * CELL, this.mine.y * CELL] : null,
+      era: Math.min(1, this.profiles[L.prof[k]].era * 0.3 + (L.built[k] / 96) * 0.8), lv: dens === 2 ? 0.8 : dens === 1 ? 0.5 : 0.3, trees,
       r: (j: number) => vhash(seed >>> 3, j),
     };
   }
@@ -336,8 +406,8 @@ export class CityView {
       const Q = new Quad([x - 21, cz], [x + 21, cz], [x + 21, cz + 40], [x - 21, cz + 40]);
       mb.baseY = g; mb.seed = i;
       const seed = 1000 + i * 77;
-      const prof = PROFILES[3];
-      const c: Ctx = { mb, Q, id: i, seed, g, kind: 'cbd', level: 3, dens: 2, sides: 0, back: 0, isCom: true, flags: 0, era: 0.5, lv: 0.9, trees, r: (j: number) => vhash(seed, j), style: st, prof, pal: PALETTES[prof.palette], wave: 2 };
+      const prof = this.profiles[3];
+      const c: Ctx = { mb, Q, id: i, seed, g, kind: 'cbd', level: 3, dens: 2, sides: 0, back: 0, isCom: true, flags: 0, era: 0.5, lv: 0.9, trees, r: (j: number) => vhash(seed, j), style: st, prof, pal: PALETTES[prof.palette], wave: 2, site: this.city.site, mine: null };
       designLot(c);
       void heights;
     });

@@ -17,7 +17,7 @@ const seed = Number(params.get('seed') ?? 4821) | 0 || 4821;
 const app = document.getElementById('app')!;
 const env = new Env(app);
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
-const send = (c: Command | { type: 'start'; seed: number }) => worker.postMessage(c);
+const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string }) => worker.postMessage(c);
 
 let init: InitMsg | null = null;
 let terrain: TerrainView | null = null;
@@ -37,7 +37,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     init = m;
     terrain = buildTerrain(m.height, m.water, m.flags);
     env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment);
-    city = new CityView(m.water, m.flags, m.villages, (x, z) => terrain!.sample(x, z));
+    city = new CityView(m.water, m.flags, m.villages, (x, z) => terrain!.sample(x, z), m);
     env.scene.add(city.group);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
     env.scene.add(metro.group);
@@ -45,6 +45,8 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     const vx = m.villages.reduce((a, v) => a + v.x, 0) / m.villages.length;
     const vy = m.villages.reduce((a, v) => a + v.y, 0) / m.villages.length;
     env.focus((vx + 0.5) * CELL, (vy + 0.5) * CELL, 3600);
+    send({ type: 'speed', speed: 0 });
+    hud.showIntro(m.city, seed, () => send({ type: 'speed', speed: 1 }));
   } else if (m.type === 'state') {
     const newMonth = !state || state.stats.month !== m.stats.month;
     const sig = (s: StateMsg) => JSON.stringify([s.lines.map((l) => [l.id, l.stations, l.trains]), s.stations.map((st) => (st.riders < 1200 ? 0 : st.riders < 5000 ? 1 : 2))]);
@@ -63,7 +65,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     console.error('[sim]', m.message);
   }
 };
-send({ type: 'start', seed });
+send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined });
 
 // ------------------------------------------------------------------ tools
 let savedView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;

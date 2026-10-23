@@ -13,6 +13,16 @@ export type Trigger = {
 /** Conditions select a text variant (all listed keys must match). */
 export type Cond = { deal?: string; late?: boolean };
 
+/** An event only appears in cities whose profile matches (all listed keys). */
+export interface Requires { site?: ('harbour' | 'railyard' | 'mine')[]; origin?: string[]; history?: string[] }
+
+/** Words for the old industrial district that the redevelopment project is about, per site kind. Data, so new site kinds are new rows. */
+export const SITE_TEXT: Record<string, Record<string, string>> = {
+  harbour: { oldSite: 'old docks', district: 'waterfront', past: 'have stood empty since the container port moved down the coast', dev1: 'Harbourside Partners', dev2: 'Tidewater Housing Trust', dev3: 'Parkway Estates', project: 'Docks project', park: 'waterfront park', parkLabel: 'Waterfront park opened at the docks', done: 'Docks district complete' },
+  railyard: { oldSite: 'old rail yards', district: 'rail-yard', past: 'have stood idle since freight moved to the new ring line', dev1: 'Railside Developments', dev2: 'Junction Housing Trust', dev3: 'Parkway Estates', project: 'Rail-yard project', park: 'linear park along the old tracks', parkLabel: 'Park opened on the old rail yards', done: 'Rail-yard district complete' },
+  mine: { oldSite: 'old pithead', district: 'pithead', past: 'have stood empty since the last seam was worked out', dev1: 'Deepshaft Regeneration', dev2: 'Miners Housing Trust', dev3: 'Parkway Estates', project: 'Pithead project', park: 'park on the spoil heaps', parkLabel: 'Park opened on the old mine', done: 'Pithead district complete' },
+};
+
 export type Effect =
   | { kind: 'money'; amount: number }
   | { kind: 'docksDeal'; deal: DocksDeal }
@@ -33,41 +43,42 @@ export interface DocksDeal {
 
 export interface ChoiceDef { label: string; detail: string; effects: Effect[] }
 export interface Variant { when: Cond; title?: string; text: string; choices: ChoiceDef[] }
-export interface EventDef { id: string; trigger: Trigger; title: string; text: string; choices: ChoiceDef[]; variants?: Variant[] }
+export interface EventDef { id: string; trigger: Trigger; requires?: Requires; title: string; text: string; choices: ChoiceDef[]; variants?: Variant[] }
 
 export const EVENTS: EventDef[] = [
   {
     id: 'docks_bought',
     trigger: { monthAtLeast: 14, popAtLeast: 5000 },
-    title: 'The city bought the old docks',
+    requires: { site: ['harbour', 'railyard', 'mine'] },
+    title: 'The city bought the {oldSite}',
     text:
-      'The warehouses on the {village} waterfront have stood empty since the container port moved down the coast. ' +
-      'The council has bought all {cells} waterfront plots and wants a new district of homes and offices there.<br><br>' +
+      'The sheds on the {village} {district} {past}. ' +
+      'The council has bought all {cells} {district} plots and wants a new district of homes and offices there.<br><br>' +
       '<b>Brief:</b> the district only grows where the metro reaches it. Every planned block needs a station on a line within an <b>8-minute walk</b> (about 600 m) along the streets. ' +
       'Blocks still unserved when the deadline passes get built car-first, and those residents buy cars for good.<br><br>Pick a development partner:',
     choices: [
       {
-        label: 'Harbourside Partners: fast-track towers',
+        label: '{dev1}: fast-track towers',
         detail: '+$35M subsidy now. Dense towers. Service must arrive within 12 months.',
         effects: [
           { kind: 'money', amount: 35e6 },
-          { kind: 'docksDeal', deal: { id: 'fast', name: 'Harbourside Partners', deadline: 12, density: 'high' } },
+          { kind: 'docksDeal', deal: { id: 'fast', name: '{dev1}', deadline: 12, density: 'high' } },
         ],
       },
       {
-        label: 'Tidewater Housing Trust: slow and steady',
+        label: '{dev2}: slow and steady',
         detail: 'Costs the city $15M. Mid-rise blocks. You get 30 months to bring the metro.',
         effects: [
           { kind: 'money', amount: -15e6 },
-          { kind: 'docksDeal', deal: { id: 'trust', name: 'Tidewater Housing Trust', deadline: 30, density: 'mid' } },
+          { kind: 'docksDeal', deal: { id: 'trust', name: '{dev2}', deadline: 30, density: 'mid' } },
         ],
       },
       {
-        label: 'Parkway Estates: build with parking',
+        label: '{dev3}: build with parking',
         detail: '+$10M. Low-rise with garages, no deadline. The whole district is car-locked from day one.',
         effects: [
           { kind: 'money', amount: 10e6 },
-          { kind: 'docksDeal', deal: { id: 'parking', name: 'Parkway Estates', deadline: 0, density: 'low', carLockAll: true } },
+          { kind: 'docksDeal', deal: { id: 'parking', name: '{dev3}', deadline: 0, density: 'low', carLockAll: true } },
         ],
       },
     ],
@@ -75,16 +86,16 @@ export const EVENTS: EventDef[] = [
   {
     id: 'docks_followup',
     trigger: { after: { event: 'docks_bought', months: 26 } },
-    title: 'The docks, two years on',
+    title: 'The {oldSite}, two years on',
     text: '',
     choices: [],
     variants: [
       {
         when: { deal: 'fast', late: true },
-        title: 'Harbourside Partners want their money back',
+        title: '{dev1} want their money back',
         text:
-          'Harbourside Partners took your fast-track deal on the promise of a metro within 12 months. ' +
-          '{locked} of {planned} docks blocks missed the deadline and were built car-first; their residents drive everywhere. ' +
+          '{dev1} took your fast-track deal on the promise of a metro within 12 months. ' +
+          '{locked} of {planned} {district} blocks missed the deadline and were built car-first; their residents drive everywhere. ' +
           'The contract lets the developer claw back part of the $35M subsidy.',
         choices: [
           { label: 'Pay the $20M clawback', detail: 'Settle and move on.', effects: [{ kind: 'money', amount: -20e6 }] },
@@ -93,22 +104,22 @@ export const EVENTS: EventDef[] = [
       },
       {
         when: { deal: 'fast', late: false },
-        title: 'Harbourside Partners report back',
+        title: '{dev1} report back',
         text:
-          'The fast-track worked: your metro reached the docks on time. The towers are {built}/{planned} complete and ' +
-          '{share}% of docks trips go by metro (city average {cityShare}%). Harbourside offers a phase two.',
+          'The fast-track worked: your metro reached the {district} on time. The towers are {built}/{planned} complete and ' +
+          '{share}% of {district} trips go by metro (city average {cityShare}%). {dev1} offer a phase two.',
         choices: [
           { label: 'Take phase two (+$25M, two more towers)', detail: 'More plots that need service too.', effects: [{ kind: 'money', amount: 25e6 }, { kind: 'docksExtraPlots', count: 2 }] },
-          { label: 'Decline politely', detail: 'Keep the waterfront as it is.', effects: [] },
+          { label: 'Decline politely', detail: 'Keep the {district} as it is.', effects: [] },
         ],
       },
       {
         when: { deal: 'trust' },
-        title: 'The Housing Trust writes in',
+        title: '{dev2} write in',
         text:
-          'The Tidewater Housing Trust took the slow road with you. {built} of {planned} blocks are finished, ' +
-          '{locked} went car-first, and {share}% of docks trips are by metro (city average {cityShare}%). ' +
-          'The Trust asks the city to turn one plot into a waterfront park.',
+          '{dev2} took the slow road with you. {built} of {planned} blocks are finished, ' +
+          '{locked} went car-first, and {share}% of {district} trips are by metro (city average {cityShare}%). ' +
+          'They ask the city to turn one plot into a {park}.',
         choices: [
           { label: 'Fund the park ($6M)', detail: 'Raises land value around the docks.', effects: [{ kind: 'money', amount: -6e6 }, { kind: 'docksPark' }] },
           { label: 'Not now', detail: 'Keep the money.', effects: [] },
@@ -116,15 +127,29 @@ export const EVENTS: EventDef[] = [
       },
       {
         when: { deal: 'parking' },
-        title: 'Parkway Estates traffic',
+        title: '{dev3} traffic',
         text:
-          'Parkway Estates built the docks around garages, as agreed. Its {homes} households own cars and the harbour roads are jammed ' +
+          '{dev3} built the {district} around garages, as agreed. Its {homes} households own cars and the roads are jammed ' +
           '(local congestion {cong}%). Residents now petition for a metro station, but they have two cars each: even with a station, only {share}% of their trips use transit.',
         choices: [
-          { label: 'Build bus lanes ($5M)', detail: 'Eases the waterfront roads a little.', effects: [{ kind: 'money', amount: -5e6 }, { kind: 'docksRoadRelief' }] },
+          { label: 'Build bus lanes ($5M)', detail: 'Eases the {district} roads a little.', effects: [{ kind: 'money', amount: -5e6 }, { kind: 'docksRoadRelief' }] },
           { label: 'Ignore it', detail: 'They chose the cars.', effects: [] },
         ],
       },
+    ],
+  },
+  {
+    id: 'capital_quarter',
+    trigger: { monthAtLeast: 30, popAtLeast: 12000 },
+    requires: { origin: ['planned-capital'], history: ['planned'] },
+    title: 'The ministries want a government quarter',
+    text:
+      'A capital needs somewhere to govern from. The ministries have drawn up a government quarter of long, formal blocks on the boulevards of {village}. ' +
+      'Civil servants commute in lockstep, so a station nearby would move thousands of people a day. How do you answer?',
+    choices: [
+      { label: 'Welcome them with a grant (+$30M)', detail: 'The state pays for the buildings; you promise service.', effects: [{ kind: 'money', amount: 30e6 }, { kind: 'log', text: 'Government quarter agreed on the boulevards' }] },
+      { label: 'Ask them to pay their way (+$12M)', detail: 'Less money, a smaller quarter.', effects: [{ kind: 'money', amount: 12e6 }, { kind: 'log', text: 'A small government quarter is agreed' }] },
+      { label: 'Decline', detail: 'Keep the boulevards for homes and shops.', effects: [] },
     ],
   },
 ];

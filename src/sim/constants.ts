@@ -15,6 +15,9 @@ export const Flag = {
   Planned: 4,     // ghost building planned by the docks project
   Steep: 8,       // too steep to build
   Core: 16,       // lot flag: part of an original village core (old town)
+  Rail: 32,       // raster flag: railway corridor (no plots). Lot flags: 32 = civic landmark (hall)
+  Civic: 32,      // lot flag (Landmark plots): a civic hall instead of a church
+  Mine: 64,       // lot flag: pithead / mine yard building
 } as const;
 
 /** Households per residential level (index = level). */

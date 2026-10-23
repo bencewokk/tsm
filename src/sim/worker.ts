@@ -29,10 +29,10 @@ function step() {
 }
 
 self.onmessage = (ev: MessageEvent) => {
-  const m = ev.data as Command | { type: 'start'; seed: number } | { type: 'quote'; id: number; stations: number[] };
+  const m = ev.data as Command | { type: 'start'; seed: number; terrain?: string; origin?: string } | { type: 'quote'; id: number; stations: number[] };
   try {
     if (m.type === 'start') {
-      sim = new Sim(m.seed);
+      sim = new Sim(m.seed, { terrain: m.terrain as never, origin: m.origin as never });
       post(sim.initMsg());
       post(sim.snapshot());
       schedule();

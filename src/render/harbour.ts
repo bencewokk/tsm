@@ -14,12 +14,13 @@ export class Harbour {
   boxes: Layer;
   cyls: Layer;
 
-  constructor(water: Uint8Array, flags: Uint8Array, sample: (x: number, z: number) => number, mat: THREE.Material) {
+  constructor(water: Uint8Array, flags: Uint8Array, sample: (x: number, z: number) => number, mat: THREE.Material, sea = true, enabled = true) {
     const g = unitGeos();
     this.boxes = new Layer(g.box, mat, 2000);
     this.cyls = new Layer(g.cyl, mat, 100);
     this.group.add(this.boxes.mesh, this.cyls.mesh);
-    const isSea = (x: number, y: number) => x >= 0 && y >= 0 && x < N && y < N && water[y * N + x] === Water.Sea;
+    if (!enabled) { this.finish(); return; }
+    const isSea = (x: number, y: number) => x >= 0 && y >= 0 && x < N && y < N && (sea ? water[y * N + x] === Water.Sea : water[y * N + x] !== 0);
     const docks = (x: number, y: number) => x >= 0 && y >= 0 && x < N && y < N && !water[y * N + x] && (flags[y * N + x] & Flag.Docks) !== 0;
     // quay edge: sea cells touching the docks become concrete wharf with a straight wall into the water
     const quay: { x: number; y: number; dx: number; dy: number }[] = [];

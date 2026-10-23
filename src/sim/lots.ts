@@ -1,7 +1,7 @@
 import { N, Flag, BT } from './constants';
 import { quadsOverlap, pointSeg, polyArea, isConvex } from './geom';
 import { RoadGraph, ROAD_HALF } from './roads';
-import { PROFILES, densClass, hash01, lerpRange } from './profiles';
+import { type DistrictProfile, densClass, hash01, lerpRange } from './profiles';
 
 /**
  * A building plot along street frontage: a convex quad [F0, F1, B1, B0] (cell units).
@@ -49,7 +49,7 @@ export class LotStore {
   /** district profile at a point (set by the sim: zoning around old centres, stations, land value, docks) */
   profileAt: (x: number, y: number) => number = () => 0;
 
-  constructor(private water: Uint8Array, private flags: Uint8Array, private roads: RoadGraph) {}
+  constructor(private water: Uint8Array, private flags: Uint8Array, private roads: RoadGraph, private profiles: DistrictProfile[]) {}
 
   private buckets(l: Lot, f: (k: number) => void) {
     const r = 0.6;
@@ -120,7 +120,7 @@ export class LotStore {
     }
     const l: Lot = {
       id: this.lots.length, x: 0, y: 0, ang: 0, w: 0, d: 0, cell: 0, cls, type: BT.None, level: 0, target: 0, constr: 0, constrTotal: 0, age: 0, low: 0,
-      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(PROFILES[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0,
+      flags: 0, planType: 0, planLevel: 0, alive: true, poly: q, dens: densClass(this.profiles[prof]), prof, sides, back, demo: 0, seed: 0, built: 0, ntype: 0,
     };
     this.setGeom(l, q);
     l.flags = this.flags[l.cell] & Flag.Docks;
@@ -138,7 +138,7 @@ export class LotStore {
     const g = this.roads;
     const mx = (g.nx[g.ea[e]] + g.nx[g.eb[e]]) / 2, my = (g.ny[g.ea[e]] + g.ny[g.eb[e]]) / 2;
     const prof = this.profileAt(mx, my);
-    const P = PROFILES[prof];
+    const P = this.profiles[prof];
     p = {
       prof, tier: densClass(P), rows: P.backRows,
       w: lerpRange(P.lotWidthRange, hash01(e, 1)), d: lerpRange(P.lotDepthRange, hash01(e, 2)),
@@ -239,11 +239,11 @@ export class LotStore {
   /** Back-row plots behind the front rows (dense tiers): interior courtyards and rear ranges fill the blocks. */
   backland(parents: Lot[]): Lot[] {
     const out: Lot[] = [];
-    let cur = parents.filter((l) => PROFILES[l.prof].backRows > 0 && !l.back);
+    let cur = parents.filter((l) => this.profiles[l.prof].backRows > 0 && !l.back);
     for (let row = 1; row <= 3 && cur.length; row++) {
       const next: Lot[] = [];
       for (const p of cur) {
-        if (PROFILES[p.prof].backRows < row) continue;
+        if (this.profiles[p.prof].backRows < row) continue;
         const q = p.poly;
         // extend from the rear line away from the street by the same depth; front of the new plot = the parent's rear line
         const b0x = q[6], b0y = q[7], b1x = q[4], b1y = q[5];

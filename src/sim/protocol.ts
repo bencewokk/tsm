@@ -9,6 +9,11 @@ export interface InitMsg {
   flags: Uint8Array;
   villages: Village[];
   bay: { x: number; y: number; r: number };
+  rail: [number, number][][];
+  mine: { x: number; y: number } | null;
+  rondpoints: [number, number][];
+  city: import('./cityprofile').CityProfile;
+  profiles: import('./profiles').DistrictProfile[];
 }
 
 export interface StationInfo { id: number; x: number; y: number; name: string; riders: number; underwater: boolean }
@@ -53,6 +58,7 @@ export interface DocksInfo {
   state: 'none' | 'active' | 'done';
   deal: string;
   dealName: string;
+  title: string;          // project name for the panel (Docks / Rail-yard / Pithead project)
   brief: string;
   deadline: number;       // month index
   served: number;         // planned cells already in service range

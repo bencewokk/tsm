@@ -4,10 +4,11 @@ import { Rng } from './rng';
 import { generateTerrain, idx, inb, DIR4, type Grid } from './terrain';
 import type { Command, InitMsg, StateMsg, Stats, DocksInfo, EventInfo, RoadsMsg, LotsMsg } from './protocol';
 import { Metro } from './metro';
-import { EVENTS, fill, type EventDef, type Variant, type Effect, type DocksDeal } from './events';
+import { EVENTS, SITE_TEXT, fill, type EventDef, type Variant, type Effect, type DocksDeal } from './events';
 import { RoadGraph, RC, ROAD_HALF } from './roads';
 import { LotStore, LOT_W, type Lot } from './lots';
-import { PROFILE_INDEX, PROFILES, ZONING } from './profiles';
+import { PROFILE_INDEX, ZONING, deriveProfiles, type DistrictProfile } from './profiles';
+import { makeCityProfile, type CityProfile } from './cityprofile';
 import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './town';
 import { MinHeap } from './heap';
 
@@ -107,13 +108,18 @@ export class Sim {
   log: string[] = [];
   actions: { month: number; cmd: Command }[] = [];
 
-  constructor(public seed: number) {
+  cp: CityProfile;
+  profiles: DistrictProfile[];
+
+  constructor(public seed: number, force?: { terrain?: CityProfile['terrain']; origin?: CityProfile['origin'] }) {
     this.rng = new Rng(seed);
-    this.g = generateTerrain(seed, this.rng);
+    this.cp = makeCityProfile(seed, force);
+    this.profiles = deriveProfiles(this.cp);
+    this.g = generateTerrain(seed, this.rng, this.cp);
     this.roads = new RoadGraph(this.g);
-    this.lots = new LotStore(this.g.water, this.g.flags, this.roads);
+    this.lots = new LotStore(this.g.water, this.g.flags, this.roads, this.profiles);
     this.lots.profileAt = (x, y) => this.profileAt(x, y);
-    this.town = { g: this.g, roads: this.roads, lots: this.lots, rng: this.rng, districts: [] };
+    this.town = { g: this.g, city: this.cp, roads: this.roads, lots: this.lots, rng: this.rng, districts: [], profiles: this.profiles };
     this.town.profileAt = (x, y) => this.profileAt(x, y);
     layoutTown(this.town);
     this.roads.blockFlags = Flag.Docks;
@@ -194,7 +200,7 @@ export class Sim {
     if (!ch) return;
     for (const e of ch.effects) this.applyEffect(e);
     this.resolved[cmd.event] = { month: this.month, choice: cmd.choice };
-    this.say(`${this.pending.variant?.title ?? this.pending.def.title}: ${ch.label}`);
+    this.say(`${fill(this.pending.variant?.title ?? this.pending.def.title, this.pending.vars)}: ${fill(ch.label, this.pending.vars)}`);
     this.pending = null;
   }
 
@@ -203,6 +209,11 @@ export class Sim {
     if (this.pending) return;
     for (const def of EVENTS) {
       if (this.fired[def.id] !== undefined) continue;
+      if (def.requires) {
+        const q = def.requires;
+        if (q.site && (!q.site.includes(this.cp.site) || this.g.docksCells.length < 4)) continue;
+        if (q.origin && !q.origin.includes(this.cp.origin) && !(q.history && this.cp.history.some((h) => q.history!.includes(h.kind)))) continue;
+      }
       const t = def.trigger;
       if (t.monthAtLeast !== undefined && this.month < t.monthAtLeast) continue;
       if (t.popAtLeast !== undefined && this.homes * PERSONS_PER_HOME < t.popAtLeast) continue;
@@ -240,7 +251,7 @@ export class Sim {
     }
     const pct = (v: number) => Math.round(v * 100);
     return {
-      village: this.g.villages[0]?.name ?? 'harbour', cells: plots, homes, planned, built, locked,
+      ...SITE_TEXT[this.cp.site], village: this.g.villages[0]?.name ?? 'harbour', cells: plots, homes, planned, built, locked,
       share: pct(dW ? dT / dW : 0), cityShare: pct(this.totalTrips ? this.transitTrips / this.totalTrips : 0), cong: pct(cz ? cong / cz : 0),
     };
   }
@@ -250,7 +261,7 @@ export class Sim {
       case 'money': this.money += e.amount; break;
       case 'log': this.say(e.text); break;
       case 'docksDeal': {
-        const d = e.deal;
+        const d = { ...e.deal, name: fill(e.deal.name, this.eventVars()) };
         this.docks = { state: 'active', deal: d, start: this.month, deadline: d.deadline ? this.month + d.deadline : 0, roadRelief: false, lateLogged: false };
         for (const l of this.docksLots()) {
           l.type = BT.None; l.level = 0; l.constr = 0; l.target = 0;
@@ -280,7 +291,7 @@ export class Sim {
       case 'docksPark': {
         const ls = this.docksLots().sort((a, b) => a.level - b.level || a.id - b.id).slice(0, 2);
         for (const l of ls) { l.type = BT.Park; l.level = 1; l.constr = 0; l.flags &= ~Flag.Planned; l.planLevel = 0; }
-        this.say('Waterfront park opened at the docks');
+        this.say(SITE_TEXT[this.cp.site].parkLabel);
         break;
       }
       case 'docksRoadRelief': this.docks.roadRelief = true; this.say('Bus lanes painted along the harbour roads'); break;
@@ -326,7 +337,7 @@ export class Sim {
       this.docks.lateLogged = true;
       this.say(`Docks deadline missed: ${newlyLocked} blocks go car-first, residents buy cars`);
     }
-    if (remaining === 0) { this.docks.state = 'done'; this.say('Docks district complete'); }
+    if (remaining === 0) { this.docks.state = 'done'; this.say(SITE_TEXT[this.cp.site].done); }
   }
 
   docksInfo(): DocksInfo {
@@ -343,14 +354,14 @@ export class Sim {
     const brief = !deal ? '' : deal.carLockAll
       ? 'Car-oriented district: builds without a station, but every household owns cars.'
       : 'Every block needs a station on a line within an 8-minute walk (about 600 m) along the streets. Unserved blocks after the deadline go car-first.';
-    return { state: d.state, deal: deal?.id ?? '', dealName: deal?.name ?? '', brief, deadline: d.deadline, served, planned, carLocked: locked, built, centre: this.docksCentre() };
+    return { state: d.state, title: SITE_TEXT[this.cp.site].project, deal: deal?.id ?? '', dealName: deal?.name ?? '', brief, deadline: d.deadline, served, planned, carLocked: locked, built, centre: this.docksCentre() };
   }
 
   eventInfo(): EventInfo | null {
     const p = this.pending;
     if (!p) return null;
     const choices = p.variant ? p.variant.choices : p.def.choices;
-    return { id: p.def.id, title: p.variant?.title ?? p.def.title, text: fill(p.variant?.text ?? p.def.text, p.vars), choices: choices.map((c) => ({ label: c.label, detail: c.detail })) };
+    return { id: p.def.id, title: fill(p.variant?.title ?? p.def.title, p.vars), text: fill(p.variant?.text ?? p.def.text, p.vars), choices: choices.map((c) => ({ label: fill(c.label, p.vars), detail: fill(c.detail, p.vars) })) };
   }
 
   paused(): boolean { return this.pending !== null; }
@@ -398,20 +409,21 @@ export class Sim {
   lotHomes(l: Lot) { return l.type === BT.Res ? Math.round(HOMES[l.level] * this.capOf(l)) : 0; }
   lotJobs(l: Lot) { return l.type === BT.Com ? Math.round(COM_JOBS[l.level] * this.capOf(l)) : l.type === BT.Ind ? Math.round(IND_JOBS[l.level] * this.capOf(l)) : 0; }
 
-  /** District profile for new street frontage: docks, old-town core, downtown (stations / high value), mid-density terraces, suburb. */
+  /** District profile for new street frontage: the old industrial site, the nearest quarter's core / mid / outer profile, downtown near stations or at high value. */
   profileAt(x: number, y: number): number {
     const gx = Math.floor(x), gy = Math.floor(y);
-    if (gx >= 0 && gy >= 0 && gx < N && gy < N && (this.g.flags[gy * N + gx] & Flag.Docks)) return PROFILE_INDEX.docks;
-    let dc = Infinity;
-    for (const d of this.town.districts) dc = Math.min(dc, Math.hypot(d.x - x, d.y - y));
+    if (gx >= 0 && gy >= 0 && gx < N && gy < N && (this.g.flags[gy * N + gx] & Flag.Docks)) return PROFILE_INDEX[this.cp.site === 'harbour' ? 'docks' : 'railside'];
+    let dq = this.town.districts[0], dc = Infinity;
+    for (const d of this.town.districts) { const dd = Math.hypot(d.x - x, d.y - y); if (dd < dc) { dc = dd; dq = d; } }
     let ds = Infinity;
     for (const st of this.metro.stations) ds = Math.min(ds, Math.hypot(st.x - x, st.y - y));
     const lv = this.lvS ? this.fieldAt(this.lvS, x, y) : 0;
     const Z = ZONING;
-    if (dc < Z.coreRadius) return PROFILE_INDEX.oldTown;
+    const q = dq ?? { core: PROFILE_INDEX.oldTown, mid: PROFILE_INDEX.terraces, outer: PROFILE_INDEX.suburb, coreR: Z.coreRadius, midR: Z.midRadius };
+    if (dc < (q.coreR ?? Z.coreRadius)) return q.core ?? PROFILE_INDEX.oldTown;
     if (ds < Z.stationCore || lv > Z.valueCore) return PROFILE_INDEX.downtown;
-    if (dc < Z.midRadius || ds < Z.stationMid || lv > Z.valueMid) return PROFILE_INDEX.terraces;
-    return PROFILE_INDEX.suburb;
+    if (dc < (q.midR ?? Z.midRadius) || ds < Z.stationMid || lv > Z.valueMid) return q.mid ?? PROFILE_INDEX.terraces;
+    return q.outer ?? PROFILE_INDEX.suburb;
   }
 
   homesAt(i: number) { return this.cHomes[i]; }
@@ -724,7 +736,7 @@ export class Sim {
       if (l.flags & Flag.Planned) continue;
       const v = this.fieldAt(this.lvS, l.x, l.y), t = l.type, lv = l.level;
       const jit = this.rng.next() * 0.12;
-      const pf = PROFILES[l.prof], fr = (0.5 + pf.landUseMix.res) * pf.growthRate, fc = (0.5 + pf.landUseMix.com) * pf.growthRate, fi = (0.5 + pf.landUseMix.ind) * pf.growthRate;
+      const pf = this.profiles[l.prof], fr = (0.5 + pf.landUseMix.res) * pf.growthRate, fc = (0.5 + pf.landUseMix.com) * pf.growthRate, fi = (0.5 + pf.landUseMix.ind) * pf.growthRate;
       if (t === BT.None) {
         if (v < Math.min(spawnR, spawnC)) continue;
         const pull = this.stationPull(l.cell);
@@ -996,7 +1008,7 @@ export class Sim {
 
   // ---------------------------------------------------------------- output
   initMsg(): InitMsg {
-    return { type: 'init', seed: this.seed, height: this.g.height, water: this.g.water, flags: this.g.flags.slice(), villages: this.g.villages, bay: this.g.bay };
+    return { type: 'init', seed: this.seed, height: this.g.height, water: this.g.water, flags: this.g.flags.slice(), villages: this.g.villages, bay: this.g.bay, rail: this.g.rail, mine: this.g.mine, rondpoints: this.g.rondpoints, city: this.cp, profiles: this.profiles };
   }
 
   stats(): Stats {

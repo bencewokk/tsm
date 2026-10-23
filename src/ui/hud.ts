@@ -1,4 +1,5 @@
 import type { Command, StateMsg } from '../sim/protocol';
+import type { CityProfile } from '../sim/cityprofile';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const dateStr = (m: number) => `${MONTHS[m % 12]} ${2030 + Math.floor(m / 12)}`;
@@ -75,7 +76,8 @@ export class Hud {
       <div class="hint panel" data-k="hint"></div>
       <div class="ticker" data-k="ticker"></div>
       <div class="docks panel" data-k="docks"></div>
-      <div class="modal-wrap" data-k="modal"></div>`;
+      <div class="modal-wrap" data-k="modal"></div>
+      <div class="modal-wrap" data-k="intro"></div>`;
     parent.appendChild(this.root);
     this.root.querySelectorAll<HTMLElement>('[data-k]').forEach((e) => (this.el[e.dataset.k!] = e));
     this.root.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) =>
@@ -92,6 +94,22 @@ export class Hud {
       if (b.dataset.act === 'sub') this.send({ type: 'setTrains', line: id, trains: l.trains - 1 });
       if (b.dataset.act === 'del' && confirm(`Close line ${id}? Tunnels are written off.`)) this.send({ type: 'deleteLine', line: id });
     });
+  }
+
+  /** Start card: the city's story from its profile; the clock starts when the player begins. */
+  showIntro(cp: CityProfile, seed: number, onBegin: () => void) {
+    const wrap = this.el.intro;
+    const chip = (k: string, v: string) => `<span class="chip"><i>${k}</i> ${v}</span>`;
+    const lvl = (v: number) => (v > 0.7 ? 'high' : v < 0.3 ? 'low' : 'medium');
+    wrap.style.display = 'flex';
+    wrap.innerHTML = `<div class="modal panel">
+      <div class="h">Tidewater Transit · seed ${seed}</div>
+      <h2>${cp.story.split('. ')[0]}.</h2>
+      <p>${cp.story.split('. ').slice(1).join('. ')}</p>
+      <div class="chips">${chip('terrain', cp.terrain)}${chip('origin', cp.origin.replace('-', ' '))}${chip('old industry', cp.site === 'harbour' ? 'docks' : cp.site === 'railyard' ? 'rail yards' : 'mine')}${chip('style', cp.tradition)}${chip('planning', lvl(cp.planningStrength))}${chip('wealth', lvl(cp.wealth))}</div>
+      <div class="choices"><button class="choice" data-begin><b>Begin</b><span>Build the metro, grow the city.</span></button></div>
+    </div>`;
+    wrap.querySelector<HTMLButtonElement>('[data-begin]')!.addEventListener('click', () => { wrap.innerHTML = ''; wrap.style.display = 'none'; onBegin(); });
   }
 
   private last: StateMsg | null = null;
@@ -131,7 +149,7 @@ export class Hud {
     const pct = (v: number) => `${Math.round((v / Math.max(1, d.planned)) * 100)}%`;
     const dl = !d.deadline ? '<span class="muted">no deadline</span>'
       : left > 0 ? `<b class="${left <= 4 ? 'neg' : ''}">${left} months</b> left (deadline ${dateStr(d.deadline)})` : '<b class="neg">deadline passed</b>';
-    el.innerHTML = `<div class="h">Docks project · ${d.dealName}</div>
+    el.innerHTML = `<div class="h">${d.title} · ${d.dealName}</div>
       <div class="small">${d.brief}</div>
       <div class="dbar"><i class="b" style="width:${pct(d.built)}"></i><i class="s" style="width:${pct(Math.max(0, d.served - d.built))}"></i><i class="l" style="width:${pct(d.carLocked)}"></i></div>
       <div class="small"><span class="lk b"></span>built ${d.built} · <span class="lk s"></span>served ${d.served} · <span class="lk l"></span>car-locked ${d.carLocked} / ${d.planned}</div>
