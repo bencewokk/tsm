@@ -13,6 +13,12 @@ const deal = nums[2] ?? 0;
 
 function ascii(sim: Sim) {
   const g = sim.g;
+  const cellCh = new Array(N * N).fill('');
+  for (const l of sim.lots.lots) {
+    if (!l.alive) continue;
+    let ch = l.type === BT.Res ? String(l.level) : l.type === BT.Com ? ('cCO'[l.level - 1] ?? 'c') : l.type === BT.Ind ? 'I' : l.type === BT.Park ? 'p' : (l.flags & 4 ? 'g' : '');
+    if (ch && (!cellCh[l.cell] || ch > cellCh[l.cell])) cellCh[l.cell] = ch;
+  }
   const rows: string[] = [];
   for (let y = 0; y < N; y += 2) {
     let r = '';
@@ -21,18 +27,15 @@ function ascii(sim: Sim) {
       let ch = '.';
       if (g.water[i] === 1) ch = '~';
       else if (g.water[i] === 2) ch = '=';
-      else if (g.btype[i] === BT.Res) ch = String(g.level[i]);
-      else if (g.btype[i] === BT.Com) ch = 'cCO'[g.level[i] - 1] ?? 'c';
-      else if (g.btype[i] === BT.Ind) ch = 'I';
-      else if (g.btype[i] === BT.Park) ch = 'p';
+      else if (cellCh[i]) ch = cellCh[i];
       else if (g.road[i]) ch = '#';
       else if (g.flags[i] & 8) ch = '^';
-      for (const s of (sim as unknown as { stations?: { x: number; y: number }[] }).stations ?? []) if (s.x === x && (s.y === y || s.y === y + 1)) ch = '@';
+      for (const s of sim.metro.stations) if (Math.floor(s.x) === x && (Math.floor(s.y) === y || Math.floor(s.y) === y + 1)) ch = '@';
       r += ch;
     }
     rows.push(r);
   }
-  console.log(rows.join('\n'));
+  console.log(rows.join(String.fromCharCode(10)));
 }
 
 const lineMonth = 24;
@@ -62,16 +65,14 @@ function testLine(sim: Sim) {
 }
 
 function nearStats(sim: Sim) {
-  const lv = [0, 0, 0, 0], cnt = [0, 0, 0, 0];
+  const cnt = [0, 0, 0, 0];
   let nearLV = 0, nN = 0, farLV = 0, nF = 0;
-  for (let i = 0; i < N * N; i++) {
-    if (!sim.g.btype[i]) continue;
-    const x = i % N, y = (i / N) | 0;
-    const near = sim.metro.stations.some((s) => Math.hypot(s.x - x, s.y - y) <= 8);
-    if (near) { nearLV += sim.lv[i]; nN++; if (sim.g.btype[i] === BT.Res) { cnt[sim.g.level[i]]++; } } else { farLV += sim.lv[i]; nF++; }
-    void lv;
+  for (const l of sim.lots.lots) {
+    if (!l.alive || !l.type) continue;
+    const near = sim.walkToStation(l.cell) <= 8;
+    if (near) { nearLV += sim.lv[l.cell]; nN++; if (l.type === BT.Res) cnt[l.level]++; } else { farLV += sim.lv[l.cell]; nF++; }
   }
-  console.log(`near stations: ${nN} bld, avg LV ${(nearLV / Math.max(1, nN)).toFixed(2)}, res levels ${cnt.join('/')}; elsewhere avg LV ${(farLV / Math.max(1, nF)).toFixed(2)}`);
+  console.log(`within 8 min walk of stations: ${nN} bld, avg LV ${(nearLV / Math.max(1, nN)).toFixed(2)}, res levels ${cnt.join('/')}; elsewhere avg LV ${(farLV / Math.max(1, nF)).toFixed(2)}`);
 }
 
 function run(withLine: boolean) {
@@ -93,13 +94,11 @@ function run(withLine: boolean) {
       console.log(`m${String(s.month).padStart(3)} pop ${String(Math.round(s.population)).padStart(7)} homes ${s.homes} jobs ${s.jobs} bld ${s.buildings} $${(s.money / 1e6).toFixed(1)}M inc ${(s.income / 1e6).toFixed(2)} exp ${(s.expenses / 1e6).toFixed(2)} cong ${s.congestion.toFixed(2)} spd ${s.driveSpeed.toFixed(0)} share ${(s.transitShare * 100).toFixed(1)}% R ${s.resDemand.toFixed(2)} C ${s.comDemand.toFixed(2)}`);
     }
   }
-  const lvs: number[] = [];
-  for (let i = 0; i < N * N; i++) if (sim.g.btype[i]) lvs.push(sim.lv[i]);
-  lvs.sort((a, b) => a - b);
-  const pc = (p: number) => lvs[Math.floor(p * (lvs.length - 1))]?.toFixed(2);
   const lc = [0, 0, 0, 0];
-  for (let i = 0; i < N * N; i++) if (sim.g.btype[i] === BT.Res) lc[sim.g.level[i]]++;
-  console.log(`LV built p10 ${pc(0.1)} p50 ${pc(0.5)} p90 ${pc(0.9)} max ${pc(1)}; res levels ${lc.join('/')}`);
+  for (const l of sim.lots.lots) if (l.alive && l.type === BT.Res) lc[l.level]++;
+  const R = sim.roads, cls = [0, 0, 0];
+  for (const e of R.aliveEdges()) cls[R.ecls[e]]++;
+  console.log(`res levels ${lc.join('/')}; lots ${sim.lots.lots.filter((l) => l.alive).length}; road nodes ${R.nx.length} edges ${R.aliveEdges().length} (art/col/loc ${cls.join('/')})`);
   if (withLine) { nearStats(sim); for (const l of sim.metro.lines) console.log(`line ${l.id}: riders/day ${Math.round(l.riders)} peak ${Math.round(l.peakLoad)}/h cap ${Math.round(l.capacity)}/h rating ${l.rating.toFixed(0)}`); }
   console.log(`ran ${months} months in ${Date.now() - t0} ms`);
   return sim;

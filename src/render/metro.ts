@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { StateMsg, StationInfo } from '../sim/protocol';
-import { cellCenter } from './common';
+import { CELL } from '../sim/constants';
 
 export const TUNNEL_Y = -42;
 
@@ -68,8 +68,21 @@ export class MetroView {
   }
 
   private stationXZ(st: { x: number; y: number }) {
-    const [x, z] = cellCenter(st.x, st.y);
-    return new THREE.Vector3(x, 0, z);
+    return new THREE.Vector3(st.x * CELL, 0, st.y * CELL);
+  }
+
+  /** Smooth curve through the stations (centripetal Catmull-Rom), sampled every ~25 m. */
+  private smooth(pts: THREE.Vector3[]): THREE.Vector3[] {
+    if (pts.length < 3) {
+      if (pts.length < 2) return pts;
+      const out: THREE.Vector3[] = [];
+      const L = pts[0].distanceTo(pts[1]), n = Math.max(1, Math.ceil(L / 25));
+      for (let k = 0; k <= n; k++) out.push(pts[0].clone().lerp(pts[1], k / n));
+      return out;
+    }
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const n = Math.max(8, Math.ceil(curve.getLength() / 25));
+    return curve.getSpacedPoints(n);
   }
 
   update(s: StateMsg) {
@@ -83,7 +96,7 @@ export class MetroView {
     const byId = new Map(s.stations.map((st) => [st.id, st]));
     const stationColor = new Map<number, string>();
     s.lines.forEach((l, li) => {
-      const pts = l.stations.map((id) => this.stationXZ(byId.get(id)!));
+      const pts = this.smooth(l.stations.map((id) => this.stationXZ(byId.get(id)!)));
       // offset parallel lines a little so shared corridors read as bundles
       const off = (li % 3 - 1) * 7;
       const shifted = pts.map((p, k) => {
@@ -97,9 +110,8 @@ export class MetroView {
       // tunnels
       const tmat = new THREE.MeshStandardMaterial({ color: l.color, emissive: l.color, emissiveIntensity: 0.35, roughness: 0.6 });
       const tpts = pts.map((p) => new THREE.Vector3(p.x, TUNNEL_Y - li * 6, p.z));
-      const curve = new THREE.CurvePath<THREE.Vector3>();
-      for (let k = 1; k < tpts.length; k++) curve.add(new THREE.LineCurve3(tpts[k - 1], tpts[k]));
-      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, tpts.length * 8), 6, 8, false), tmat);
+      const curve = new THREE.CatmullRomCurve3(tpts, false, 'centripetal');
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(16, tpts.length), 6, 8, false), tmat);
       this.under.add(tube);
       const lens: number[] = [];
       let total = 0;
@@ -170,8 +182,9 @@ export class MetroView {
   draft(points: { x: number; y: number }[], hover: { x: number; y: number } | null, color: string) {
     this.draftGroup.traverse((o) => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
     this.draftGroup.clear();
-    const pts = points.map((p) => this.stationXZ(p));
-    if (hover && pts.length) pts.push(this.stationXZ(hover));
+    const raw = points.map((p) => this.stationXZ(p));
+    if (hover && raw.length) raw.push(this.stationXZ(hover));
+    const pts = this.smooth(raw.filter((p, k) => k === 0 || p.distanceTo(raw[k - 1]) > 1));
     if (pts.length >= 2) {
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
       this.draftGroup.add(this.ribbon(pts, 22, mat, 4));

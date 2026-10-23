@@ -27,7 +27,7 @@ export class Planner {
       this.draft.push(st.id);
       return;
     }
-    if (this.water[y * 128 + x]) return;
+    if (this.water[Math.floor(y) * 128 + Math.floor(x)]) return;
     // placeholder keeps click order while the worker digs the station
     this.pending.push({ x, y });
     this.draft.push(-this.pending.length);

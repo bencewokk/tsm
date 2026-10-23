@@ -37,7 +37,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     init = m;
     terrain = buildTerrain(m.height, m.water);
     env.scene.add(terrain.mesh, terrain.water, terrain.heat);
-    city = new CityView(m.height, m.water);
+    city = new CityView(m.water, (x, z) => terrain!.sample(x, z));
     env.scene.add(city.group);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
     env.scene.add(metro.group);
@@ -98,7 +98,7 @@ hud.handlers.onToggle = (name, on) => {
 hud.onFocusDocks = () => {
   if (!state) return;
   const c = state.docks.centre;
-  const target = new THREE.Vector3((c.x + 0.5) * CELL, 0, (c.y + 0.5) * CELL);
+  const target = new THREE.Vector3(c.x * CELL, 0, c.y * CELL);
   const dir = env.camera.position.clone().sub(env.controls.target).normalize();
   flyTo(target.clone().addScaledVector(dir, 1500), target);
 };
@@ -125,7 +125,8 @@ function pickCell(ev: PointerEvent): { x: number; y: number } | null {
   ray.setFromCamera(ndc, env.camera);
   const hit = ray.intersectObjects([terrain.mesh, terrain.water], false)[0];
   if (!hit) return null;
-  const x = Math.floor(hit.point.x / CELL), y = Math.floor(hit.point.z / CELL);
+  // stations go anywhere: continuous coordinates in cell units
+  const x = hit.point.x / CELL, y = hit.point.z / CELL;
   if (x < 0 || y < 0 || x >= N || y >= N) return null;
   return { x, y };
 }
@@ -146,7 +147,7 @@ canvas.addEventListener('pointermove', (e) => {
   const c = pickCell(e);
   const snap = c ? planner.stationAt(state, c.x, c.y) : null;
   planner.hover = snap ? { x: snap.x, y: snap.y } : c;
-  metro.setCursor(planner.hover, !!c && (!!snap || !init.water[c.y * N + c.x]));
+  metro.setCursor(planner.hover, !!c && (!!snap || !init.water[Math.floor(c.y) * N + Math.floor(c.x)]));
   if (planner.draft.length) refreshPlan();
 });
 
@@ -235,7 +236,7 @@ requestAnimationFrame(frame);
 
 // debug handle for testing
 function cellToScreen(x: number, y: number) {
-  const v = new THREE.Vector3((x + 0.5) * CELL, terrain ? terrain.sample((x + 0.5) * CELL, (y + 0.5) * CELL) : 0, (y + 0.5) * CELL).project(env.camera);
+  const v = new THREE.Vector3(x * CELL, terrain ? terrain.sample(x * CELL, y * CELL) : 0, y * CELL).project(env.camera);
   const r = env.renderer.domElement.getBoundingClientRect();
   return { x: Math.round(r.left + (v.x + 1) / 2 * r.width), y: Math.round(r.top + (1 - v.y) / 2 * r.height) };
 }

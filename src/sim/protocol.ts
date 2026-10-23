@@ -62,19 +62,36 @@ export interface DocksInfo {
 
 export interface DesireLine { ax: number; ay: number; bx: number; by: number; trips: number }
 
+/** Planar road graph: node coordinates (cell units) and live edges with stable ids, class and build year. */
+export interface RoadsMsg {
+  version: number;
+  nodes: Float32Array;   // x,y pairs
+  ids: Int32Array;       // stable edge ids (never reused)
+  ea: Int32Array;
+  eb: Int32Array;
+  cls: Uint8Array;       // 0 arterial, 1 collector, 2 local
+  year: Uint16Array;
+}
+
+/** Building plots: oriented rectangles along street frontage. */
+export interface LotsMsg {
+  n: number;
+  id: Int32Array;
+  x: Float32Array; y: Float32Array; ang: Float32Array; w: Float32Array; d: Float32Array;
+  type: Uint8Array; level: Uint8Array; target: Uint8Array; constr: Uint8Array; constrTotal: Uint8Array;
+  flags: Uint8Array; planType: Uint8Array; planLevel: Uint8Array;
+  served: Uint8Array;    // planned plot already within walking range of a station
+}
+
 export interface StateMsg {
   type: 'state';
   stats: Stats;
+  roads: RoadsMsg;
+  lots: LotsMsg;
+  /** hidden 50 m raster, only for overlays / tree placement */
   road: Uint8Array;
-  btype: Uint8Array;
-  level: Uint8Array;
-  target: Uint8Array;
-  constr: Uint8Array;
-  constrTotal: Uint8Array;
   lv: Float32Array;
   flags: Uint8Array;
-  planType: Uint8Array;
-  planLevel: Uint8Array;
   stations: StationInfo[];
   lines: LineInfo[];
   event: EventInfo | null;

@@ -1,15 +1,18 @@
 import { N, CELL, ZONE, NZ, ZONES, BT, Flag, HOMES, COM_JOBS, IND_JOBS, BUILD_MONTHS, PERSONS_PER_HOME, WORKERS_PER_HOME } from './constants';
+import { STATION_COST, TRAIN_COST, START_MONEY, TRIPS_PER_HOME, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
-import { generateTerrain, idx, inb, adjRoad, DIR4, type Grid } from './terrain';
-import type { Command, InitMsg, StateMsg, Stats } from './protocol';
+import { generateTerrain, idx, inb, DIR4, type Grid } from './terrain';
+import type { Command, InitMsg, StateMsg, Stats, DocksInfo, EventInfo, RoadsMsg, LotsMsg } from './protocol';
 import { Metro } from './metro';
 import { EVENTS, fill, type EventDef, type Variant, type Effect, type DocksDeal } from './events';
-import type { DocksInfo, EventInfo } from './protocol';
-import { STATION_COST, TRAIN_COST, START_MONEY, TRIPS_PER_HOME, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
+import { RoadGraph, RC, ROAD_HALF } from './roads';
+import { LotStore, type Lot } from './lots';
+import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './town';
+import { MinHeap } from './heap';
 
-/** Tunable knobs for the growth model. Exposed so the headless runner / UI can poke them. */
+/** Tunable knobs for the growth model. */
 export const TUNE = {
-  tau: 10,               // minutes: accessibility decay
+  tau: 10,               // minutes: accessibility decay (smooth, no cutoff)
   freeSpeed: 45,         // km/h
   circuity: 1.3,
   accessMin: 4,          // minutes to park/unpark
@@ -23,91 +26,105 @@ export const TUNE = {
   wPark: 0.05,
   wInd: 0.06,
   wCentre: 0.55,
-  walkSpeed: 85,         // m per minute
+  walkSpeed: 80,         // m per minute along streets
+  walkCap: 15,           // minutes: walk fields are computed this far (faded out from walkFade)
+  walkFade: 10,
   walkDecay: 7,          // minutes: how fast station value fades with walking time
   stationPrem: 0.3,      // walkable-station premium on land value
-  premRadius: 700,       // metres
+  premWalk: 9,           // minutes: premium reaches zero at this walk time
+  serveWalk: 8,          // minutes: docks blocks count as served within this walk (~600 m)
   spawnLV: 0.24,
-  upLV: [0, 0.6, 0.82],    // LV to upgrade from level k -> k+1 (index = current level)
+  upLV: [0, 0.6, 0.82],
   comUpLV: [0, 0.55, 0.88],
   downLV: [0, 0.1, 0.3, 0.5],
-  distDecay: 2.6,        // km: gravity model distance decay
-  parkMin: 9,            // minutes of parking search in the densest job zones
-  modeBeta: 0.13,        // logistic mode choice sensitivity per minute
-  transitASC: 1.5,        // minutes: transit inconvenience constant
-  carLockASC: 14,        // extra minutes of perceived transit time where residents own cars
-  growth: 0.032,        // base monthly growth rate of the region's demand pool
-  minGrowth: 180,        // homes per month floor
+  lvLag: 0.3,            // per month: how fast the value buildings react to catches up with land value
+  maxTowerStarts: 4,     // per month: towers rise over months, not all at once
+  maxMidStarts: 30,
+  distDecay: 2.6,
+  parkMin: 9,
+  modeBeta: 0.13,
+  transitASC: 1.5,
+  carLockASC: 14,
+  growth: 0.032,
+  minGrowth: 180,
 };
+
+const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 
 export class Sim {
   rng: Rng;
   g: Grid;
+  roads: RoadGraph;
+  lots: LotStore;
+  town: TownCtx;
   month = 0;
   speed = 1;
-  // per-cell
-  target = new Uint8Array(N * N);
-  constr = new Uint8Array(N * N);
-  constrTotal = new Uint8Array(N * N);
+  // hidden raster fields (50 m cells) for the maths
   lv = new Float32Array(N * N);
-  age = new Uint16Array(N * N);
-  low = new Uint8Array(N * N);
+  lvS = new Float32Array(N * N);          // lagged land value that buildings respond to
   roadDist = new Uint8Array(N * N);
-  transitCell = new Float32Array(N * N);   // transit accessibility at cell
-  stationPrem = new Float32Array(N * N);   // walkable station premium
-  planType = new Uint8Array(N * N);
-  planLevel = new Uint8Array(N * N);
-  // per-zone
+  transitCell = new Float32Array(N * N);
+  stationPrem = new Float32Array(N * N);
+  cHomes = new Float32Array(N * N);
+  cJobs = new Float32Array(N * N);
+  cInd = new Float32Array(N * N);
+  cPark = new Float32Array(N * N);
+  // zones (8x8 cells)
   zHomes = new Float64Array(ZONES);
   zJobs = new Float64Array(ZONES);
   zRoads = new Float64Array(ZONES);
-  zCong = new Float64Array(ZONES);       // volume / capacity
+  zCong = new Float64Array(ZONES);
   zSpeed = new Float64Array(ZONES);
   zCarAcc = new Float64Array(ZONES);
   zTransitShare = new Float64Array(ZONES);
+  zCarLocked = new Float64Array(ZONES);
   driveTime = new Float64Array(ZONES * ZONES);
-  // pools
-  resPool = 0;
-  comPool = 0;
-  indPool = 0;
-  resDemand = 0;
-  comDemand = 0;
-  indDemand = 0;
-  homes = 0;
-  jobs = 0;
-  congestion = 0;
-  pressure = 0;
-  driveSpeed = 45;
+  // pools + headline numbers
+  resPool = 0; comPool = 0; indPool = 0;
+  resDemand = 0; comDemand = 0; indDemand = 0;
+  homes = 0; jobs = 0;
+  congestion = 0; pressure = 0; driveSpeed = 45;
   centre = { x: N / 2, y: N / 2 };
   money = START_MONEY;
+  income = 0; expenses = 0; buildSpend = 0;
+  // metro
   metro = new Metro();
   stAccess = new Float64Array(0);
   zoneNear: { s: number; w: number }[][] = [];
   egress = new Float64Array(0);
   egressVia = new Int32Array(0);
-  transitTrips = 0;
-  totalTrips = 0;
-  rating = 0;
-  /** share of each zone's homes that are car-locked (docks) */
-  zCarLocked = new Float64Array(ZONES);
+  /** per used station (matrix index): walk minutes over the street network to every cell */
+  walk: Float32Array[] = [];
+  private walkKey = '';
+  transitTrips = 0; totalTrips = 0; rating = 0;
   desire: { a: number; b: number; trips: number }[] = [];
   // events + docks
   fired: Record<string, number> = {};
   resolved: Record<string, { month: number; choice: number }> = {};
   pending: { def: EventDef; variant: Variant | null; vars: Record<string, string | number> } | null = null;
   docks = { state: 'none' as 'none' | 'active' | 'done', deal: null as DocksDeal | null, start: 0, deadline: 0, roadRelief: false, lateLogged: false };
-  income = 0;
-  expenses = 0;
-  buildSpend = 0;
   log: string[] = [];
   actions: { month: number; cmd: Command }[] = [];
 
   constructor(public seed: number) {
     this.rng = new Rng(seed);
     this.g = generateTerrain(seed, this.rng);
+    this.roads = new RoadGraph(this.g);
+    this.lots = new LotStore(this.g.water, this.g.flags, this.roads);
+    this.town = { g: this.g, roads: this.roads, lots: this.lots, rng: this.rng, districts: [] };
+    layoutTown(this.town);
+    this.roads.blockFlags = Flag.Docks;
+    this.roads.corridor = {
+      blocked: (ax, ay, bx, by) => this.lots.inCorridor(ax, ay, bx, by, ROAD_HALF[RC.Local] + 0.05)
+        .some((l) => (l.flags & (Flag.Docks | Flag.Planned)) || l.constr > 0 || l.type === BT.Ind || l.type === BT.Park || l.level >= 2),
+      clear: (ax, ay, bx, by) => { for (const l of this.lots.inCorridor(ax, ay, bx, by, ROAD_HALF[RC.Local] + 0.05)) this.lots.remove(l); },
+    };
     this.aggregate();
     this.computeLandValue();
+    this.lvS.set(this.lv);
   }
+
+  get liveLots(): Lot[] { return this.lots.lots.filter((l) => l.alive); }
 
   // ---------------------------------------------------------------- commands
   apply(cmd: Command) {
@@ -130,10 +147,7 @@ export class Sim {
         this.say(`${st.name} station dug`);
         break;
       }
-      case 'removeStation': {
-        if (m.removeStation(cmd.id)) { this.money += STATION_COST * 0.5; }
-        break;
-      }
+      case 'removeStation': if (m.removeStation(cmd.id)) this.money += STATION_COST * 0.5; break;
       case 'buildLine': {
         const q = m.quote(cmd.stations, w);
         const est = q.cost + 2 * TRAIN_COST;
@@ -158,16 +172,12 @@ export class Sim {
         this.refreshTransit();
         break;
       }
-      case 'deleteLine': {
-        m.lines = m.lines.filter((l) => l.id !== cmd.line);
-        this.refreshTransit();
-        break;
-      }
+      case 'deleteLine': m.lines = m.lines.filter((l) => l.id !== cmd.line); this.refreshTransit(); break;
       default: this.applyEvent(cmd);
     }
   }
 
-  /** Recompute transit-driven land value right away so the overlay reacts to a new line. */
+  /** Land value reacts at once when service changes; buildings follow over the next months (lvS lags). */
   refreshTransit() {
     this.computeTransit();
     this.computeRiders();
@@ -210,65 +220,54 @@ export class Sim {
     }
   }
 
+  docksLots(): Lot[] { return this.liveLots.filter((l) => l.flags & Flag.Docks); }
+
   private eventVars(): Record<string, string | number> {
-    const g = this.g;
-    let planned = 0, built = 0, locked = 0, homes = 0, docksTransit = 0, docksTrips = 0, cong = 0, cz = 0, plots = 0;
-    for (const i of g.docksCells) {
-      if (!g.road[i]) plots++;
-      if (g.flags[i] & Flag.Planned || this.planLevel[i]) planned++;
-      if (this.planLevel[i] && g.btype[i] && g.level[i] >= this.planLevel[i] && !(g.flags[i] & Flag.Planned)) built++;
-      if (g.flags[i] & Flag.CarLocked) locked++;
-      const h = this.homesAt(i);
+    let planned = 0, built = 0, locked = 0, homes = 0, dT = 0, dW = 0, cong = 0, cz = 0, plots = 0;
+    for (const l of this.docksLots()) {
+      plots++;
+      if (l.planLevel) planned++;
+      if (l.planLevel && !(l.flags & Flag.Planned) && l.type) built++;
+      if (l.flags & Flag.CarLocked) locked++;
+      const h = l.type === BT.Res ? HOMES[l.level] : 0;
       homes += h;
-      const z = this.zoneOf(i);
-      docksTransit += (h || 1) * this.zTransitShare[z]; docksTrips += h || 1;
+      const z = this.zoneOf(l.cell);
+      dT += (h || 1) * this.zTransitShare[z]; dW += h || 1;
       cong += this.zCong[z]; cz++;
     }
     const pct = (v: number) => Math.round(v * 100);
     return {
-      village: g.villages[0]?.name ?? 'harbour', cells: plots, homes: homes || Math.round(plots * 0.7 * 120), jobs: Math.round(plots * 0.3 * 300),
-      planned, built, locked, share: pct(docksTrips ? docksTransit / docksTrips : 0),
-      cityShare: pct(this.totalTrips ? this.transitTrips / this.totalTrips : 0), cong: pct(cz ? cong / cz : 0),
+      village: this.g.villages[0]?.name ?? 'harbour', cells: plots, homes, planned, built, locked,
+      share: pct(dW ? dT / dW : 0), cityShare: pct(this.totalTrips ? this.transitTrips / this.totalTrips : 0), cong: pct(cz ? cong / cz : 0),
     };
   }
 
   private applyEffect(e: Effect) {
-    const g = this.g;
     switch (e.kind) {
       case 'money': this.money += e.amount; break;
       case 'log': this.say(e.text); break;
       case 'docksDeal': {
         const d = e.deal;
         this.docks = { state: 'active', deal: d, start: this.month, deadline: d.deadline ? this.month + d.deadline : 0, roadRelief: false, lateLogged: false };
-        for (const i of g.docksCells) {
-          if (g.road[i]) continue;
-          g.btype[i] = BT.None; g.level[i] = 0; this.constr[i] = 0; this.target[i] = 0;
+        for (const l of this.docksLots()) {
+          l.type = BT.None; l.level = 0; l.constr = 0; l.target = 0;
           const r = this.rng.next();
-          let t: number = BT.Res, l = 1;
-          if (d.density === 'high') { if (r < 0.34) l = 3; else if (r < 0.66) l = 2; else if (r < 0.82) { t = BT.Com; l = 3; } else { t = BT.Com; l = 2; } }
-          else if (d.density === 'mid') { if (r < 0.7) l = 2; else { t = BT.Com; l = 2; } }
-          else { l = r < 0.45 ? 2 : 1; if (r > 0.9) t = BT.Com; }
-          this.planType[i] = t; this.planLevel[i] = l;
-          g.flags[i] |= Flag.Planned;
-          if (d.carLockAll) g.flags[i] |= Flag.CarLocked;
+          let t: number = BT.Res, lv = 1;
+          if (d.density === 'high') { if (r < 0.34) lv = 3; else if (r < 0.66) lv = 2; else if (r < 0.82) { t = BT.Com; lv = 3; } else { t = BT.Com; lv = 2; } }
+          else if (d.density === 'mid') { if (r < 0.7) lv = 2; else { t = BT.Com; lv = 2; } }
+          else { lv = r < 0.45 ? 2 : 1; if (r > 0.9) t = BT.Com; }
+          l.planType = t; l.planLevel = lv;
+          l.flags |= Flag.Planned;
+          if (d.carLockAll) l.flags |= Flag.CarLocked;
         }
         this.say(`Docks deal signed with ${d.name}${d.deadline ? `: metro needed within ${d.deadline} months` : ''}`);
         break;
       }
       case 'docksExtraPlots': {
         const c = this.docksCentre();
-        const cands: number[] = [];
-        for (let i = 0; i < N * N; i++) {
-          if (g.water[i] || g.road[i] || g.btype[i] || (g.flags[i] & (Flag.Planned | Flag.Docks | Flag.Steep))) continue;
-          if (g.distWater[i] > 4 || Math.hypot((i % N) - c.x, ((i / N) | 0) - c.y) > 16 || this.roadDist[i] > 2) continue;
-          cands.push(i);
-        }
-        cands.sort((a, b) => Math.hypot((a % N) - c.x, ((a / N) | 0) - c.y) - Math.hypot((b % N) - c.x, ((b / N) | 0) - c.y) || a - b);
-        for (const i of cands.slice(0, e.count)) {
-          g.flags[i] |= Flag.Docks | Flag.Planned;
-          this.planType[i] = BT.Res; this.planLevel[i] = 3;
-          g.docksCells.push(i);
-        }
+        const cands = this.lots.near(c.x, c.y, 14).filter((l) => !l.type && !(l.flags & (Flag.Planned | Flag.Docks)))
+          .sort((a, b) => Math.hypot(a.x - c.x, a.y - c.y) - Math.hypot(b.x - c.x, b.y - c.y) || a.id - b.id);
+        for (const l of cands.slice(0, e.count)) { l.flags |= Flag.Docks | Flag.Planned; l.planType = BT.Res; l.planLevel = 3; }
         this.docks.state = 'active';
         this.docks.deadline = this.month + 12;
         this.docks.lateLogged = false;
@@ -276,18 +275,8 @@ export class Sim {
         break;
       }
       case 'docksPark': {
-        let best = -1;
-        for (const i of g.docksCells) if (!g.road[i] && (best < 0 || g.level[i] < g.level[best])) best = i;
-        if (best >= 0) {
-          g.btype[best] = BT.Park; g.level[best] = 1; this.constr[best] = 0;
-          g.flags[best] &= ~Flag.Planned; this.planLevel[best] = 0;
-          // a second plot, if available, for a proper waterfront green
-          const x = best % N, y = (best / N) | 0;
-          for (const [dx, dy] of DIR4) {
-            const j = idx(x + dx, y + dy);
-            if (inb(x + dx, y + dy) && (g.flags[j] & Flag.Docks) && !g.road[j]) { g.btype[j] = BT.Park; g.level[j] = 1; this.constr[j] = 0; g.flags[j] &= ~Flag.Planned; this.planLevel[j] = 0; break; }
-          }
-        }
+        const ls = this.docksLots().sort((a, b) => a.level - b.level || a.id - b.id).slice(0, 2);
+        for (const l of ls) { l.type = BT.Park; l.level = 1; l.constr = 0; l.flags &= ~Flag.Planned; l.planLevel = 0; }
         this.say('Waterfront park opened at the docks');
         break;
       }
@@ -299,52 +288,36 @@ export class Sim {
     const c = this.g.docksCells;
     if (!c.length) return { x: 0, y: 0 };
     let x = 0, y = 0;
-    for (const i of c) { x += i % N; y += (i / N) | 0; }
+    for (const i of c) { x += (i % N) + 0.5; y += ((i / N) | 0) + 0.5; }
     return { x: x / c.length, y: y / c.length };
   }
 
-  /** Is this cell within 600 m of a station that is on a line? */
-  private servedCells(): Uint8Array {
-    const out = new Uint8Array(N * N);
-    const R = 12;
-    for (const st of this.metro.stations) {
-      if (!this.metro.onLine(st.id)) continue;
-      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
-        if (dx * dx + dy * dy > R * R || !inb(st.x + dx, st.y + dy)) continue;
-        out[idx(st.x + dx, st.y + dy)] = 1;
-      }
-    }
-    return out;
+  /** Best walk time (minutes, over streets) from any station on a line to this cell. */
+  walkToStation(cell: number): number {
+    let b = Infinity;
+    for (const f of this.walk) if (f[cell] < b) b = f[cell];
+    return b;
   }
 
-  /** Docks district: grows only where service reaches; late blocks go car-first for good. */
   private docksTick() {
     if (this.docks.state !== 'active') return;
-    const g = this.g;
-    const served = this.servedCells();
     const late = this.docks.deadline > 0 && this.month > this.docks.deadline;
     let remaining = 0, starts = 0, newlyLocked = 0;
-    for (const i of g.docksCells) {
-      if (!(g.flags[i] & Flag.Planned)) continue;
-      if (this.constr[i]) { remaining++; continue; }
-      if (g.btype[i] === this.planType[i] && g.level[i] >= this.planLevel[i]) { g.flags[i] &= ~Flag.Planned; continue; }
+    for (const l of this.docksLots()) {
+      if (!(l.flags & Flag.Planned)) continue;
+      if (l.constr) { remaining++; continue; }
+      if (l.type === l.planType && l.level >= l.planLevel) { l.flags &= ~Flag.Planned; continue; }
       remaining++;
-      const locked = (g.flags[i] & Flag.CarLocked) !== 0;
+      const locked = (l.flags & Flag.CarLocked) !== 0;
       const build = () => {
         // the developer captures regional demand: docks homes/jobs come out of the city's pools
-        if (this.planType[i] === BT.Res) this.resPool -= HOMES[this.planLevel[i]]; else this.comPool -= COM_JOBS[this.planLevel[i]];
-        this.startBuild(i, this.planType[i], this.planLevel[i]);
+        if (l.planType === BT.Res) this.resPool -= HOMES[l.planLevel]; else this.comPool -= COM_JOBS[l.planLevel];
+        this.startBuild(l, l.planType, l.planLevel);
         starts++;
       };
-      if (!locked && served[i]) {
-        if (starts < 6) build();
-      } else if (locked) {
-        if (starts < 6) { this.planLevel[i] = Math.min(this.planLevel[i], 2); build(); }
-      } else if (late) {
-        g.flags[i] |= Flag.CarLocked;
-        this.planLevel[i] = Math.min(this.planLevel[i], 2);
-        newlyLocked++;
-      }
+      if (!locked && this.walkToStation(l.cell) <= TUNE.serveWalk) { if (starts < 6) build(); }
+      else if (locked) { if (starts < 6) { l.planLevel = Math.min(l.planLevel, 2); build(); } }
+      else if (late) { l.flags |= Flag.CarLocked; l.planLevel = Math.min(l.planLevel, 2); newlyLocked++; }
     }
     if (newlyLocked && !this.docks.lateLogged) {
       this.docks.lateLogged = true;
@@ -354,20 +327,19 @@ export class Sim {
   }
 
   docksInfo(): DocksInfo {
-    const g = this.g, d = this.docks;
+    const d = this.docks;
     let served = 0, planned = 0, locked = 0, built = 0;
-    const sv = d.state === 'active' ? this.servedCells() : null;
-    for (const i of g.docksCells) {
-      if (!this.planLevel[i]) continue;
+    for (const l of this.docksLots()) {
+      if (!l.planLevel) continue;
       planned++;
-      if (g.flags[i] & Flag.CarLocked) locked++;
-      if (!(g.flags[i] & Flag.Planned)) built++;
-      if (sv && sv[i]) served++;
+      if (l.flags & Flag.CarLocked) locked++;
+      if (!(l.flags & Flag.Planned)) built++;
+      if (d.state === 'active' && this.walkToStation(l.cell) <= TUNE.serveWalk) served++;
     }
     const deal = d.deal;
     const brief = !deal ? '' : deal.carLockAll
       ? 'Car-oriented district: builds without a station, but every household owns cars.'
-      : 'Every block needs a station on a line within 600 m. Unserved blocks after the deadline go car-first.';
+      : 'Every block needs a station on a line within an 8-minute walk (about 600 m) along the streets. Unserved blocks after the deadline go car-first.';
     return { state: d.state, deal: deal?.id ?? '', dealName: deal?.name ?? '', brief, deadline: d.deadline, served, planned, carLocked: locked, built, centre: this.docksCentre() };
   }
 
@@ -378,9 +350,7 @@ export class Sim {
     return { id: p.def.id, title: p.variant?.title ?? p.def.title, text: fill(p.variant?.text ?? p.def.text, p.vars), choices: choices.map((c) => ({ label: c.label, detail: c.detail })) };
   }
 
-  paused(): boolean {
-    return this.pending !== null;
-  }
+  paused(): boolean { return this.pending !== null; }
 
   quoteLine(stations: number[]) {
     const q = this.metro.quote(stations, this.g.water);
@@ -402,60 +372,56 @@ export class Sim {
     this.computeTransit();
     this.computeRiders();
     this.computeLandValue();
+    for (let i = 0; i < N * N; i++) this.lvS[i] += (this.lv[i] - this.lvS[i]) * TUNE.lvLag;
     this.grow();
     this.docksTick();
     this.extendRoads();
+    this.upgradeRoads();
     this.finance();
     this.checkEvents();
   }
 
   private progressConstruction() {
-    const g = this.g;
-    for (let i = 0; i < N * N; i++) {
-      this.age[i] = Math.min(65000, this.age[i] + 1);
-      if (this.constr[i] > 0) {
-        this.constr[i]--;
-        if (this.constr[i] === 0) {
-          g.level[i] = this.target[i];
-          this.target[i] = 0;
-          this.age[i] = 0;
-        }
-      }
+    for (const l of this.lots.lots) {
+      if (!l.alive) continue;
+      l.age = Math.min(65000, l.age + 1);
+      if (l.constr > 0 && --l.constr === 0) { l.level = l.target; l.target = 0; l.age = 0; }
     }
   }
 
-  homesAt(i: number) { return this.g.btype[i] === BT.Res ? HOMES[this.g.level[i]] : 0; }
-  jobsAt(i: number) {
-    const t = this.g.btype[i], l = this.g.level[i];
-    return t === BT.Com ? COM_JOBS[l] : t === BT.Ind ? IND_JOBS[l] : 0;
-  }
+  lotHomes(l: Lot) { return l.type === BT.Res ? HOMES[l.level] : 0; }
+  lotJobs(l: Lot) { return l.type === BT.Com ? COM_JOBS[l.level] : l.type === BT.Ind ? IND_JOBS[l.level] : 0; }
+  homesAt(i: number) { return this.cHomes[i]; }
+  jobsAt(i: number) { return this.cJobs[i]; }
   zoneOf(i: number) { return (((i / N) | 0) / ZONE | 0) * NZ + ((i % N) / ZONE | 0); }
 
   aggregate() {
     const g = this.g;
-    this.zHomes.fill(0); this.zJobs.fill(0); this.zRoads.fill(0);
+    this.cHomes.fill(0); this.cJobs.fill(0); this.cInd.fill(0); this.cPark.fill(0);
+    this.zHomes.fill(0); this.zJobs.fill(0); this.zRoads.fill(0); this.zCarLocked.fill(0);
     let h = 0, j = 0, jx = 0, jy = 0;
-    for (let i = 0; i < N * N; i++) {
-      const z = this.zoneOf(i);
-      const hh = this.homesAt(i), jj = this.jobsAt(i);
+    for (const l of this.lots.lots) {
+      if (!l.alive || !l.type) continue;
+      const hh = this.lotHomes(l), jj = this.lotJobs(l), z = this.zoneOf(l.cell);
+      this.cHomes[l.cell] += hh; this.cJobs[l.cell] += jj;
+      if (l.type === BT.Ind) this.cInd[l.cell] += l.level;
+      if (l.type === BT.Park) this.cPark[l.cell] += 1;
       this.zHomes[z] += hh; this.zJobs[z] += jj; h += hh; j += jj;
-      jx += (jj + hh * 0.3) * (i % N); jy += (jj + hh * 0.3) * ((i / N) | 0);
-      if (g.road[i]) this.zRoads[z]++;
+      if (l.flags & Flag.CarLocked) this.zCarLocked[z] += hh;
+      jx += (jj + hh * 0.3) * l.x; jy += (jj + hh * 0.3) * l.y;
     }
-    this.homes = h; this.jobs = j;
-    this.zCarLocked.fill(0);
-    for (let i = 0; i < N * N; i++) if (g.flags[i] & Flag.CarLocked) this.zCarLocked[this.zoneOf(i)] += this.homesAt(i);
+    for (let i = 0; i < N * N; i++) if (g.road[i]) this.zRoads[this.zoneOf(i)]++;
     for (let z = 0; z < ZONES; z++) this.zCarLocked[z] = this.zHomes[z] > 0 ? this.zCarLocked[z] / this.zHomes[z] : 0;
+    this.homes = h; this.jobs = j;
     const w = j + h * 0.3;
     if (w > 0) this.centre = { x: jx / w, y: jy / w };
-    // road distance (BFS up to 4)
     const rd = this.roadDist;
     rd.fill(9);
     const q: number[] = [];
     for (let i = 0; i < N * N; i++) if (g.road[i]) { rd[i] = 0; q.push(i); }
     for (let k = 0; k < q.length; k++) {
       const i = q[k];
-      if (rd[i] >= 4) continue;
+      if (rd[i] >= 5) continue;
       const x = i % N, y = (i / N) | 0;
       for (const [dx, dy] of DIR4) {
         const nx = x + dx, ny = y + dy;
@@ -467,13 +433,13 @@ export class Sim {
   }
 
   private computeCongestion() {
-    // car trip-ends per zone (2 trips per worker per day + visitor trips to jobs), smoothed over 3x3 zones
     const ends = new Float64Array(ZONES);
     for (let z = 0; z < ZONES; z++) {
       const car = 1 - this.zTransitShare[z] * 0.9;
       ends[z] = (this.zHomes[z] * WORKERS_PER_HOME * 2 + this.zJobs[z] * 1.2) * car;
     }
-    let vol = 0, cap = 0, wsum = 0, ssum = 0;
+    const docksZ = this.docksZones();
+    let vol = 0, wsum = 0, ssum = 0, wc = 0;
     for (let zy = 0; zy < NZ; zy++)
       for (let zx = 0; zx < NZ; zx++) {
         let e = 0, r = 0;
@@ -485,19 +451,14 @@ export class Sim {
             e += ends[ay * NZ + ax] * wgt; r += this.zRoads[ay * NZ + ax] * wgt;
           }
         const z = zy * NZ + zx;
-        const relief = this.docks.roadRelief && this.docksZones().has(zy * NZ + zx) ? 1.6 : 1;
+        const relief = this.docks.roadRelief && docksZ.has(z) ? 1.6 : 1;
         const vc = r > 0 ? e / (r * TUNE.roadCap * relief) : 0;
         this.zCong[z] = vc;
         this.zSpeed[z] = TUNE.freeSpeed / (1 + TUNE.bprA * Math.pow(vc, TUNE.bprB));
-        vol += ends[z]; cap += this.zRoads[z] * TUNE.roadCap;
-        wsum += ends[z]; ssum += ends[z] * this.zSpeed[z];
+        vol += ends[z]; wsum += ends[z]; ssum += ends[z] * this.zSpeed[z]; wc += ends[z] * vc;
       }
-    // headline congestion: trip-weighted v/c
-    let wc = 0;
-    for (let z = 0; z < ZONES; z++) wc += ends[z] * this.zCong[z];
     this.congestion = vol > 0 ? wc / vol : 0;
     this.driveSpeed = wsum > 0 ? ssum / wsum : TUNE.freeSpeed;
-    void cap;
   }
 
   private _docksZones: Set<number> | null = null;
@@ -518,16 +479,74 @@ export class Sim {
         dt[a * ZONES + b] = (dist / 1000) / sp * 60 + TUNE.accessMin;
       }
     }
-    let J = this.jobs || 1;
+    const J = this.jobs || 1;
     for (let a = 0; a < ZONES; a++) {
       let s = 0;
       for (let b = 0; b < ZONES; b++) if (this.zJobs[b] > 0) s += this.zJobs[b] * Math.exp(-dt[a * ZONES + b] / TUNE.tau);
       this.zCarAcc[a] = s / J;
     }
-    J = 0;
   }
 
-  /** Transit accessibility: station graph, egress times, per-cell access + walkable premium. */
+  /**
+   * Station catchments follow the street network: Dijkstra from each station over road nodes at walking speed,
+   * then each cell takes its nearest node's time plus the walk to it. A station across a river with no bridge barely helps.
+   */
+  private computeWalkFields(used: { id: number; x: number; y: number }[]) {
+    const key = `${this.roads.version}|${used.map((s) => `${s.id}:${s.x.toFixed(2)},${s.y.toFixed(2)}`).join(';')}`;
+    if (key === this.walkKey) return;
+    this.walkKey = key;
+    const R = this.roads, M = R.nx.length, sp = TUNE.walkSpeed / CELL; // cells per minute
+    const cap = TUNE.walkCap;
+    this.walk = [];
+    for (const st of used) {
+      const t = new Float32Array(M).fill(Infinity);
+      const heap = new MinHeap();
+      // street access from the station entrance (straight-line walk to nearby nodes)
+      for (let n = 0; n < M; n++) {
+        if (!R.adj[n].length) continue;
+        const d = Math.hypot(R.nx[n] - st.x, R.ny[n] - st.y);
+        if (d < 2.5) { const v = (d * 1.2) / sp; if (v < t[n]) { t[n] = v; heap.push(n, v); } }
+      }
+      while (heap.size) {
+        const n = heap.pop();
+        const tn = t[n];
+        if (tn > cap) continue;
+        for (const e of R.adj[n]) {
+          const o = R.other(e, n);
+          const v = tn + R.edgeLen(e) / sp;
+          if (v < t[o]) { t[o] = v; heap.push(o, v); }
+        }
+      }
+      const f = new Float32Array(N * N).fill(Infinity);
+      const stamp = (px: number, py: number, base: number, r: number) => {
+        for (let y = Math.floor(py - r); y <= Math.floor(py + r); y++)
+          for (let x = Math.floor(px - r); x <= Math.floor(px + r); x++) {
+            if (x < 0 || y < 0 || x >= N || y >= N) continue;
+            const i = y * N + x;
+            if (this.g.water[i]) continue;
+            const v = base + (Math.hypot(x + 0.5 - px, y + 0.5 - py) * 1.2) / sp;
+            if (v < f[i]) f[i] = v;
+          }
+      };
+      stamp(st.x, st.y, 0, 2);
+      for (let n = 0; n < M; n++) if (t[n] <= cap) stamp(R.nx[n], R.ny[n], t[n], 2.2);
+      // edges: interpolate along long segments so mid-block cells are reached too
+      for (let e = 0; e < R.ea.length; e++) {
+        if (!R.alive[e]) continue;
+        const a = R.ea[e], b = R.eb[e];
+        if (!(t[a] <= cap || t[b] <= cap)) continue;
+        const L = R.edgeLen(e), steps = Math.floor(L / 1.2);
+        for (let k = 1; k < steps; k++) {
+          const u = k / steps;
+          const base = Math.min(t[a] + (L * u) / sp, t[b] + (L * (1 - u)) / sp);
+          if (base <= cap) stamp(R.nx[a] + (R.nx[b] - R.nx[a]) * u, R.ny[a] + (R.ny[b] - R.ny[a]) * u, base, 1.6);
+        }
+      }
+      this.walk.push(f);
+    }
+  }
+
+  /** Transit accessibility: travel time = walk + wait + ride + transfers + crowding, smooth exp decay (no cutoffs). */
   computeTransit() {
     const m = this.metro;
     m.rebuildGraph();
@@ -539,21 +558,23 @@ export class Sim {
     for (let z = 0; z < ZONES; z++) this.zoneNear.push([]);
     this.egress = new Float64Array(S * ZONES).fill(Infinity);
     this.egressVia = new Int32Array(S * ZONES).fill(-1);
-    if (S === 0) return;
     const used = m.stations.filter((st) => m.sIndex.has(st.id)).sort((a, b) => m.sIndex.get(a.id)! - m.sIndex.get(b.id)!);
-    // walk distances from each zone's activity centroid (homes + jobs), not its geometric centre
+    this.computeWalkFields(used);
+    if (S === 0) return;
+    // walk from each zone's activity centroid (homes + jobs)
     const ax = new Float64Array(ZONES), ay = new Float64Array(ZONES), aw = new Float64Array(ZONES);
     for (let i = 0; i < N * N; i++) {
-      const w = this.homesAt(i) + this.jobsAt(i);
+      const w = this.cHomes[i] + this.cJobs[i];
       if (!w) continue;
       const z = this.zoneOf(i);
       ax[z] += w * (i % N + 0.5); ay[z] += w * (((i / N) | 0) + 0.5); aw[z] += w;
     }
     for (let z = 0; z < ZONES; z++) {
       const cx = aw[z] ? ax[z] / aw[z] : (z % NZ + 0.5) * ZONE, cy = aw[z] ? ay[z] / aw[z] : (((z / NZ) | 0) + 0.5) * ZONE;
+      const cell = Math.floor(cy) * N + Math.floor(cx);
       for (let k = 0; k < S; k++) {
-        const d = Math.hypot(used[k].x - cx, used[k].y - cy) * CELL * 1.15;
-        if (d < 1100) this.zoneNear[z].push({ s: k, w: d / TUNE.walkSpeed + 1 });
+        const wt = this.walk[k][cell];
+        if (wt < TUNE.walkCap) this.zoneNear[z].push({ s: k, w: wt + 1 });
       }
     }
     const T = m.T, eg = this.egress;
@@ -567,83 +588,100 @@ export class Sim {
     const J = Math.max(1, this.jobs);
     for (let s = 0; s < S; s++) {
       let a = 0;
-      for (let b = 0; b < ZONES; b++) if (this.zJobs[b] > 0 && eg[s * ZONES + b] < 90) a += this.zJobs[b] * Math.exp(-eg[s * ZONES + b] / TUNE.tau);
+      for (let b = 0; b < ZONES; b++) if (this.zJobs[b] > 0 && eg[s * ZONES + b] < Infinity) a += this.zJobs[b] * Math.exp(-eg[s * ZONES + b] / TUNE.tau);
       this.stAccess[s] = a / J;
     }
-    const R = 16;
     for (let s = 0; s < S; s++) {
-      const st = used[s], A = this.stAccess[s];
+      const A = this.stAccess[s], f = this.walk[s];
       const premK = TUNE.stationPrem * Math.min(1, A / 0.1);
-      for (let dy = -R; dy <= R; dy++)
-        for (let dx = -R; dx <= R; dx++) {
-          const x = st.x + dx, y = st.y + dy;
-          if (!inb(x, y)) continue;
-          const i = idx(x, y);
-          const d = Math.hypot(dx, dy) * CELL * 1.2;
-          const val = A * Math.exp(-(d / 80) / TUNE.walkDecay);
-          if (val > this.transitCell[i]) this.transitCell[i] = val;
-          const p = premK * Math.max(0, 1 - d / TUNE.premRadius);
-          if (p > this.stationPrem[i]) this.stationPrem[i] = p;
-        }
+      for (let i = 0; i < N * N; i++) {
+        const wt = f[i];
+        if (!(wt < TUNE.walkCap)) continue;
+        const fade = 1 - clamp((wt - TUNE.walkFade) / (TUNE.walkCap - TUNE.walkFade), 0, 1);
+        const val = A * Math.exp(-wt / TUNE.walkDecay) * fade;
+        if (val > this.transitCell[i]) this.transitCell[i] = val;
+        const p = premK * Math.max(0, 1 - wt / TUNE.premWalk);
+        if (p > this.stationPrem[i]) this.stationPrem[i] = p;
+      }
     }
   }
 
-  /** Bilinear sample of a zone field at a cell. */
-  zoneSample(f: Float64Array, i: number): number {
-    const fx = ((i % N) + 0.5) / ZONE - 0.5, fy = (((i / N) | 0) + 0.5) / ZONE - 0.5;
-    const x0 = Math.max(0, Math.min(NZ - 1, Math.floor(fx))), y0 = Math.max(0, Math.min(NZ - 1, Math.floor(fy)));
+  zoneSampleXY(f: Float64Array, x: number, y: number): number {
+    const fx = x / ZONE - 0.5, fy = y / ZONE - 0.5;
+    const x0 = clamp(Math.floor(fx), 0, NZ - 1), y0 = clamp(Math.floor(fy), 0, NZ - 1);
     const x1 = Math.min(NZ - 1, x0 + 1), y1 = Math.min(NZ - 1, y0 + 1);
-    const tx = Math.max(0, Math.min(1, fx - x0)), ty = Math.max(0, Math.min(1, fy - y0));
+    const tx = clamp(fx - x0, 0, 1), ty = clamp(fy - y0, 0, 1);
     return (f[y0 * NZ + x0] * (1 - tx) + f[y0 * NZ + x1] * tx) * (1 - ty) + (f[y1 * NZ + x0] * (1 - tx) + f[y1 * NZ + x1] * tx) * ty;
+  }
+
+  /** Bilinear sample of a cell field at a point (cell units). */
+  fieldAt(f: Float32Array, x: number, y: number): number {
+    const fx = x - 0.5, fy = y - 0.5;
+    const x0 = clamp(Math.floor(fx), 0, N - 1), y0 = clamp(Math.floor(fy), 0, N - 1);
+    const x1 = Math.min(N - 1, x0 + 1), y1 = Math.min(N - 1, y0 + 1);
+    const tx = clamp(fx - x0, 0, 1), ty = clamp(fy - y0, 0, 1);
+    return (f[y0 * N + x0] * (1 - tx) + f[y0 * N + x1] * tx) * (1 - ty) + (f[y1 * N + x0] * (1 - tx) + f[y1 * N + x1] * tx) * ty;
   }
 
   computeLandValue() {
     const g = this.g;
-    // nuisance + amenity fields via small windows
     const ind = new Float32Array(N * N), park = new Float32Array(N * N);
     for (let i = 0; i < N * N; i++) {
-      const t = g.btype[i];
-      if (t !== BT.Ind && t !== BT.Park) continue;
-      const x = i % N, y = (i / N) | 0, R = t === BT.Ind ? 4 : 3;
-      for (let dy = -R; dy <= R; dy++)
-        for (let dx = -R; dx <= R; dx++) {
+      const vi = this.cInd[i], vp = this.cPark[i];
+      if (!vi && !vp) continue;
+      const x = i % N, y = (i / N) | 0;
+      for (const [v, R, out] of [[vi, 4, ind], [vp, 3, park]] as [number, number, Float32Array][]) {
+        if (!v) continue;
+        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
           if (!inb(x + dx, y + dy)) continue;
           const f = 1 - Math.hypot(dx, dy) / (R + 1);
-          if (f <= 0) continue;
-          const j = idx(x + dx, y + dy);
-          if (t === BT.Ind) ind[j] += f * g.level[i]; else park[j] += f;
+          if (f > 0) out[idx(x + dx, y + dy)] += f * v;
         }
+      }
     }
     const cx = this.centre.x, cy = this.centre.y;
     for (let i = 0; i < N * N; i++) {
       if (g.water[i]) { this.lv[i] = 0; continue; }
-      const rdf = [1, 1, 0.85, 0.65, 0.45][Math.min(4, this.roadDist[i])] ?? 0.3;
-      const car = this.zoneSample(this.zCarAcc, i) * rdf;
+      const x = (i % N) + 0.5, y = ((i / N) | 0) + 0.5;
+      const rdf = [1, 1, 0.85, 0.65, 0.45, 0.35][Math.min(5, this.roadDist[i])] ?? 0.3;
+      const car = this.zoneSampleXY(this.zCarAcc, x, y) * rdf;
       const dw = g.distWater[i];
       const water = dw <= 4 ? TUNE.wWater * (1 - (dw - 1) / 4) : 0;
       const pk = Math.min(0.15, park[i] * TUNE.wPark);
       const nz = Math.min(0.4, ind[i] * TUNE.wInd);
-      const dc = Math.hypot((i % N) - cx, ((i / N) | 0) - cy) / (N * 0.5);
+      const dc = Math.hypot(x - cx, y - cy) / (N * 0.5);
       let v = TUNE.base + TUNE.wCar * car + TUNE.wTransit * this.transitCell[i] + this.stationPrem[i] + water + pk - nz - TUNE.wCentre * dc;
       if (g.flags[i] & Flag.Steep) v -= 0.2;
-      this.lv[i] = Math.max(0, Math.min(1.5, v));
+      this.lv[i] = clamp(v, 0, 1.5);
     }
+  }
+
+  /** Ridership-weighted pull of nearby busy stations (0..1), over the street network. */
+  stationPull(cell: number): number {
+    let p = 0;
+    const m = this.metro;
+    for (const st of m.stations) {
+      const k = m.sIndex.get(st.id);
+      if (k === undefined || !this.walk[k]) continue;
+      const wt = this.walk[k][cell];
+      if (wt < 12) p += Math.min(1, st.riders / 4000) * Math.exp(-wt / 5);
+    }
+    return Math.min(1, p);
   }
 
   // ---------------------------------------------------------------- growth
   private grow() {
-    const g = this.g;
     const workers = this.homes * WORKERS_PER_HOME;
     const scale = Math.max(400, workers);
     this.resDemand = clamp((this.jobs - workers * 0.95) / scale * 3 + 0.35, -1, 1);
     this.comDemand = clamp((workers * 0.95 - this.jobs) / scale * 3 + 0.35, -1, 1);
-    let indJobs = 0;
-    for (let i = 0; i < N * N; i++) if (g.btype[i] === BT.Ind) indJobs += this.jobsAt(i);
+    const lots = this.liveLots;
+    let indJobs = 0, lvSum = 0, lvN = 0;
+    for (const l of lots) {
+      if (l.type === BT.Ind) indJobs += this.lotJobs(l);
+      if (l.type === BT.Res) { lvSum += this.lvS[l.cell]; lvN++; }
+    }
     this.indDemand = clamp(0.5 - (indJobs / Math.max(1, this.jobs)) * 3, -1, 1);
-
-    // regional demand, slowed by congestion (the city pushes back)
-    let lvSum = 0, lvN = 0;
-    for (let i = 0; i < N * N; i++) if (g.btype[i] === BT.Res) { lvSum += this.lv[i]; lvN++; }
     const attract = lvN ? lvSum / lvN : 0.4;
     const congPenalty = 1 / (1 + 1.2 * Math.max(0, this.congestion - 0.6));
     const B = Math.max(TUNE.minGrowth, this.homes * TUNE.growth * (0.6 + 0.6 * attract) * congPenalty);
@@ -651,223 +689,182 @@ export class Sim {
     const jobB = B * WORKERS_PER_HOME * Math.max(0.05, 0.5 + 0.5 * this.comDemand);
     this.comPool = this.comPool * 0.85 + jobB * (this.indDemand > 0 ? 0.75 : 0.92);
     this.indPool = this.indPool * 0.85 + jobB * (this.indDemand > 0 ? 0.25 : 0.08);
-
-    // pressure: unmet demand lets growth reach into lower-value land and denser forms
     const pR = clamp(this.resPool / (B * 4), 0, 1), pC = clamp(this.comPool / (jobB * 4 + 1), 0, 1);
     this.pressure = (pR + pC) / 2;
     const spawnR = TUNE.spawnLV - 0.14 * pR, spawnC = TUNE.spawnLV - 0.14 * pC;
-    type Cand = { i: number; s: number; kind: number; to: number };
+
+    type Cand = { l: Lot; s: number; kind: number; to: number };
     const res: Cand[] = [], com: Cand[] = [], ind: Cand[] = [];
-    for (let i = 0; i < N * N; i++) {
-      if (g.water[i] || g.road[i] || this.constr[i] || (g.flags[i] & (Flag.Steep | Flag.Planned))) continue;
-      const t = g.btype[i], l = g.level[i], v = this.lv[i];
+    for (const l of lots) {
+      if (l.constr || (l.flags & (Flag.Planned | Flag.Docks)) && !l.type) continue;
+      if (l.flags & Flag.Planned) continue;
+      const v = this.fieldAt(this.lvS, l.x, l.y), t = l.type, lv = l.level;
       const jit = this.rng.next() * 0.12;
       if (t === BT.None) {
-        if (this.roadDist[i] !== 1 || v < Math.min(spawnR, spawnC)) continue;
-        if (g.flags[i] & Flag.Docks) continue;
-        if (v >= spawnR) res.push({ i, s: v + jit, kind: BT.Res, to: 1 });
-        if (v >= spawnC) com.push({ i, s: v * 0.8 + this.zoneSample(this.zCarAcc, i) * 0.5 + this.transitCell[i] * 0.9 + jit - 0.12, kind: BT.Com, to: 1 });
-        ind.push({ i, s: 0.6 - v * 0.4 + (g.distWater[i] <= 3 ? 0.15 : 0) + this.zoneSample(this.zCarAcc, i) * 0.3 + jit, kind: BT.Ind, to: 1 });
-      } else if (t === BT.Res && l < 3) {
-        const cap = g.flags[i] & Flag.CarLocked ? 2 : 3;
-        if (l + 1 > cap) continue;
-        if (v > TUNE.upLV[l] - 0.1 * pR && this.age[i] >= (l === 1 ? 10 : 8)) res.push({ i, s: v + 0.05 + jit, kind: BT.Res, to: l + 1 });
-      } else if (t === BT.Com && l < 3) {
-        if (v > TUNE.comUpLV[l] - 0.1 * pC && this.age[i] >= (l === 1 ? 5 : 10)) com.push({ i, s: v + 0.1 + jit, kind: BT.Com, to: l + 1 });
+        if (v < Math.min(spawnR, spawnC)) continue;
+        const pull = this.stationPull(l.cell);
+        const front = l.cls === RC.Arterial ? 0.1 : l.cls === RC.Collector ? 0.05 : 0;
+        if (v >= spawnR) res.push({ l, s: v + jit, kind: BT.Res, to: 1 });
+        if (v >= spawnC) com.push({ l, s: v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12, kind: BT.Com, to: 1 });
+        ind.push({ l, s: 0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit, kind: BT.Ind, to: 1 });
+      } else if (t === BT.Res && lv < 3) {
+        const cap = l.flags & Flag.CarLocked ? 2 : 3;
+        if (lv + 1 > cap) continue;
+        if (v > TUNE.upLV[lv] - 0.1 * pR && l.age >= (lv === 1 ? 10 : 8)) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: lv + 1 });
+      } else if (t === BT.Com && lv < 3) {
+        if (v > TUNE.comUpLV[lv] - 0.1 * pC && l.age >= (lv === 1 ? 5 : 10)) com.push({ l, s: v + 0.1 + jit, kind: BT.Com, to: lv + 1 });
       }
     }
-    res.sort((a, b) => b.s - a.s || a.i - b.i);
-    com.sort((a, b) => b.s - a.s || a.i - b.i);
-    ind.sort((a, b) => b.s - a.s || a.i - b.i);
+    const order = (a: Cand, b: Cand) => b.s - a.s || a.l.id - b.l.id;
+    res.sort(order); com.sort(order); ind.sort(order);
     const zoneOps = new Uint8Array(ZONES);
-    const taken = new Uint8Array(N * N);
+    const taken = new Set<number>();
+    let towers = 0, mids = 0;
     const place = (list: Cand[], poolKey: 'resPool' | 'comPool' | 'indPool', per: number[], maxOps: number) => {
       let ops = 0;
       for (const c of list) {
         if (this[poolKey] <= 0 || ops >= maxOps) break;
-        if (taken[c.i]) continue;
-        const z = this.zoneOf(c.i);
+        if (taken.has(c.l.id)) continue;
+        // growth lags: only a few towers and mid-rises start each month
+        if (c.to === 3 && towers >= TUNE.maxTowerStarts) continue;
+        if (c.to === 2 && mids >= TUNE.maxMidStarts) continue;
+        const z = this.zoneOf(c.l.cell);
         if (zoneOps[z] >= 6) continue;
-        const cur = g.btype[c.i] === c.kind ? g.level[c.i] : 0;
+        const cur = c.l.type === c.kind ? c.l.level : 0;
         const add = per[c.to] - per[cur];
-        if (add > this[poolKey] * 2.5 + 10) continue; // too big for current demand
+        if (add > this[poolKey] * 2.5 + 10) continue;
         this[poolKey] -= add;
-        taken[c.i] = 1; zoneOps[z]++; ops++;
-        this.startBuild(c.i, c.kind, c.to);
+        taken.add(c.l.id); zoneOps[z]++; ops++;
+        if (c.to === 3) towers++; else if (c.to === 2) mids++;
+        this.startBuild(c.l, c.kind, c.to);
       }
     };
-    place(res, 'resPool', HOMES, 300);
-    place(com, 'comPool', COM_JOBS, 120);
+    if (this.comDemand > this.resDemand) { place(com, 'comPool', COM_JOBS, 120); place(res, 'resPool', HOMES, 300); }
+    else { place(res, 'resPool', HOMES, 300); place(com, 'comPool', COM_JOBS, 120); }
     place(ind, 'indPool', IND_JOBS, 30);
 
     // decline: buildings whose value falls empty out
-    for (let i = 0; i < N * N; i++) {
-      const t = g.btype[i];
-      if (!t || t === BT.Park || this.constr[i]) continue;
-      if (this.lv[i] < TUNE.downLV[g.level[i]]) this.low[i] = Math.min(255, this.low[i] + 1); else this.low[i] = 0;
-      if (this.low[i] >= 6 && this.rng.next() < 0.25) {
-        this.low[i] = 0;
-        g.level[i]--;
-        if (g.level[i] === 0) g.btype[i] = BT.None;
+    for (const l of lots) {
+      if (!l.type || l.type === BT.Park || l.constr || (l.flags & Flag.Planned)) continue;
+      const v = this.fieldAt(this.lvS, l.x, l.y);
+      if (v < TUNE.downLV[l.level]) l.low = Math.min(255, l.low + 1); else l.low = 0;
+      if (l.low >= 6 && this.rng.next() < 0.25) {
+        l.low = 0;
+        l.level--;
+        if (l.level === 0) l.type = BT.None;
       }
     }
-    // oversupply: if far more homes than jobs, a few of the worst homes empty out
     if (this.resDemand < -0.6) {
-      for (let i = 0; i < N * N; i++)
-        if (g.btype[i] === BT.Res && !this.constr[i] && this.lv[i] < 0.3 && this.rng.next() < 0.02) { g.btype[i] = BT.None; g.level[i] = 0; }
+      for (const l of lots) if (l.type === BT.Res && !l.constr && this.lvS[l.cell] < 0.3 && this.rng.next() < 0.02) { l.type = BT.None; l.level = 0; }
     }
-    this.placeParks();
+    this.placeParks(lots);
   }
 
-  startBuild(i: number, type: number, level: number) {
-    const g = this.g;
-    if (g.btype[i] !== type) g.level[i] = 0;
-    g.btype[i] = type;
-    this.target[i] = level;
-    this.constr[i] = BUILD_MONTHS[level];
-    this.constrTotal[i] = BUILD_MONTHS[level];
+  startBuild(l: Lot, type: number, level: number) {
+    if (l.type !== type) l.level = 0;
+    l.type = type;
+    l.target = level;
+    l.constr = BUILD_MONTHS[level];
+    l.constrTotal = BUILD_MONTHS[level];
   }
 
-  private placeParks() {
-    const g = this.g;
+  private placeParks(lots: Lot[]) {
+    const hasPark = new Uint8Array(ZONES);
+    const cands: Lot[][] = [];
+    for (let z = 0; z < ZONES; z++) cands.push([]);
+    for (const l of lots) {
+      const z = this.zoneOf(l.cell);
+      if (l.type === BT.Park) hasPark[z] = 1;
+      else if (!l.type && !l.flags) cands[z].push(l);
+    }
     for (let z = 0; z < ZONES; z++) {
-      if (this.zHomes[z] < 900) continue;
-      const zx = (z % NZ) * ZONE, zy = ((z / NZ) | 0) * ZONE;
-      let has = false;
-      const cands: number[] = [];
-      for (let y = zy; y < zy + ZONE; y++)
-        for (let x = zx; x < zx + ZONE; x++) {
-          const i = idx(x, y);
-          if (g.btype[i] === BT.Park) has = true;
-          else if (!g.btype[i] && !g.road[i] && !g.water[i] && !(g.flags[i] & (Flag.Steep | Flag.Planned)) && this.roadDist[i] <= 2) cands.push(i);
-        }
-      if (!has && cands.length) {
-        const i = cands[Math.floor(this.rng.next() * cands.length)];
-        g.btype[i] = BT.Park; g.level[i] = 1;
-      }
+      if (this.zHomes[z] < 900 || hasPark[z] || !cands[z].length) continue;
+      const l = cands[z][Math.floor(this.rng.next() * cands[z].length)];
+      l.type = BT.Park; l.level = 1;
     }
   }
 
   // ---------------------------------------------------------------- roads
+  private growthField(): GrowthField {
+    return {
+      lvAt: (x, y) => this.fieldAt(this.lvS, x, y),
+      stationPull: (x, y) => this.stationPull(Math.floor(y) * N + Math.floor(x)),
+      pressure: this.pressure,
+      spawnLV: TUNE.spawnLV,
+      year: 2030 + Math.floor(this.month / 12),
+    };
+  }
+
   private extendRoads() {
-    const g = this.g;
+    // frontier: empty plots on good land; when it runs low, the edge explores outward
     let frontier = 0;
-    for (let i = 0; i < N * N; i++)
-      if (!g.btype[i] && !g.road[i] && !g.water[i] && this.roadDist[i] === 1 && this.lv[i] > TUNE.spawnLV + 0.1 && !(g.flags[i] & (Flag.Steep | Flag.Docks))) frontier++;
-    const want = 60 + Math.max(0, this.resPool) / 3 + this.homes / 150;
-    const ops = frontier > want ? 1 : Math.min(8, 2 + Math.floor((want - frontier) / 20));
-    const roadCells: number[] = [];
-    for (let i = 0; i < N * N; i++) if (g.road[i]) roadCells.push(i);
-    if (!roadCells.length) return;
-    for (let op = 0; op < ops; op++) {
-      // sample candidate start cells, prefer high value with empty land around
-      let best = -1, bestS = -1e9;
-      for (let k = 0; k < 160; k++) {
-        const i = roadCells[Math.floor(this.rng.next() * roadCells.length)];
-        const x = i % N, y = (i / N) | 0;
-        let empty = 0;
-        for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
-          if (!inb(x + dx, y + dy)) continue;
-          const j = idx(x + dx, y + dy);
-          if (!g.btype[j] && !g.road[j] && !g.water[j] && !(g.flags[j] & Flag.Steep)) empty++;
-        }
-        if (this.lv[i] < TUNE.spawnLV + 0.08 - 0.14 * this.pressure || !this.branchDirs(i).length) continue;
-        const s = this.lv[i] * 1.5 + (empty / 49) * 0.35 + this.rng.next() * 0.2;
-        if (s > bestS) { bestS = s; best = i; }
-      }
-      if (best >= 0) this.growRoadFrom(best);
+    for (const l of this.lots.lots) if (l.alive && !l.type && !l.flags && this.lvS[l.cell] > TUNE.spawnLV + 0.08) frontier++;
+    const want = 70 + Math.max(0, this.resPool) / 3 + this.homes / 120;
+    const exploreOps = frontier > want ? 2 : Math.min(12, 3 + Math.floor((want - frontier) / 15));
+    const f = this.growthField();
+    const v0 = this.roads.version;
+    explore(this.town, f, exploreOps);
+    // densification: high value but poor access, biased toward busy stations
+    let pull = 0;
+    for (const st of this.metro.stations) pull += st.riders;
+    const densOps = (this.pressure > 0.3 ? 1 : 0) + (pull > 3000 ? 1 : 0) + (pull > 12000 ? 1 : 0);
+    if (densOps) densify(this.town, f, this.roadDist, densOps);
+    if (this.roads.version !== v0) {
+      this.roads.rasterize(this.g.road);
+      for (const e of this.roads.drainFresh()) this.lots.frontage(e);
     }
   }
 
-  /** Directions a new street could branch from this road cell. */
-  private branchDirs(start: number): number[] {
-    const g = this.g;
-    const sx = start % N, sy = (start / N) | 0;
-    const out: number[] = [];
-    for (let d = 0; d < 4; d++) {
-      const [dx, dy] = DIR4[d];
-      const nx = sx + dx, ny = sy + dy;
-      if (!inb(nx, ny)) continue;
-      const n1 = idx(nx, ny);
-      if (g.road[n1] || g.water[n1] || (g.flags[n1] & (Flag.Steep | Flag.Docks | Flag.Planned))) continue;
-      // a branch may buy out a single small building at its mouth
-      if (g.btype[n1] && (g.level[n1] > 1 || this.constr[n1] || g.btype[n1] === BT.Ind)) continue;
-      // keep branches apart: no road directly sideways of the first cell
-      let crowded = false;
-      for (const sd of [-1, 1]) {
-        const lx = nx + dy * sd, ly = ny + dx * sd;
-        if (inb(lx, ly) && g.road[idx(lx, ly)]) crowded = true;
-        const l2x = nx + dy * sd * 2, l2y = ny + dx * sd * 2;
-        if (inb(l2x, l2y) && g.road[idx(l2x, l2y)] && !g.road[idx(sx + dy * sd * 2, sy + dx * sd * 2)]) crowded = true;
+  /** Streets near busy stations gain importance and are upgraded (local -> collector -> arterial) over time. */
+  private upgradeRoads() {
+    if (!this.walk.length) return;
+    const R = this.roads;
+    const m = this.metro;
+    let changed = false;
+    for (let e = 0; e < R.ea.length; e++) {
+      if (!R.alive[e] || R.ecls[e] === RC.Arterial) continue;
+      const mx = (R.nx[R.ea[e]] + R.nx[R.eb[e]]) / 2, my = (R.ny[R.ea[e]] + R.ny[R.eb[e]]) / 2;
+      const cell = Math.floor(my) * N + Math.floor(mx);
+      let gain = 0;
+      for (const st of m.stations) {
+        const k = m.sIndex.get(st.id);
+        if (k === undefined) continue;
+        const wt = this.walk[k][cell];
+        if (wt < 6) gain += (st.riders / 1000) * (1 - wt / 6);
       }
-      // need open land ahead
-      const ax = sx + dx * 2, ay = sy + dy * 2;
-      if (!inb(ax, ay) || g.water[idx(ax, ay)] || g.btype[idx(ax, ay)]) crowded = true;
-      if (!crowded) out.push(d);
+      if (!gain) continue;
+      R.eimp[e] += gain;
+      if (R.ecls[e] === RC.Local && R.eimp[e] > 80) { R.ecls[e] = RC.Collector; changed = true; }
+      else if (R.ecls[e] === RC.Collector && R.eimp[e] > 600) { R.ecls[e] = RC.Arterial; changed = true; }
     }
-    return out;
-  }
-
-  private growRoadFrom(start: number) {
-    const g = this.g;
-    const sx = start % N, sy = (start / N) | 0;
-    let bestD = -1, bestS = -1e9;
-    for (const d of this.branchDirs(start)) {
-      const [dx, dy] = DIR4[d];
-      const fx = sx + dx * 4, fy = sy + dy * 4;
-      const ahead = inb(fx, fy) ? this.lv[idx(fx, fy)] : 0;
-      const s = ahead + this.rng.next() * 0.25;
-      if (s > bestS) { bestS = s; bestD = d; }
-    }
-    if (bestD < 0) return;
-    const [dx, dy] = DIR4[bestD];
-    const len = 3 + Math.floor(this.rng.next() * 7);
-    let laid = 0;
-    for (let k = 1; k <= len; k++) {
-      const x = sx + dx * k, y = sy + dy * k;
-      if (!inb(x, y)) break;
-      const i = idx(x, y);
-      if (g.water[i] || (g.flags[i] & (Flag.Steep | Flag.Docks | Flag.Planned))) break;
-      if (g.road[i]) break; // joined another road
-      if (g.btype[i] && k > 1) break;
-      if (g.btype[i]) { g.btype[i] = BT.None; g.level[i] = 0; }
-      // stop if we'd run alongside an existing road
-      const l1 = inb(x + dy, y + dx) && g.road[idx(x + dy, y + dx)];
-      const l2 = inb(x - dy, y - dx) && g.road[idx(x - dy, y - dx)];
-      if (k > 1 && (l1 || l2)) { g.road[i] = 1; laid++; break; }
-      g.road[i] = 1;
-      laid++;
-    }
-    void laid;
+    if (changed) R.version++;
   }
 
   // ---------------------------------------------------------------- riders
-  /** Gravity-model trips between zones, logistic car/transit choice, assignment onto lines. */
   computeRiders() {
     const m = this.metro, S = m.sIndex.size;
-    const L = m.lines.length;
     const segLoad = m.lines.map((l) => l.segTime.map(() => [0, 0]));
-    const boards = new Float64Array(L);
+    const boards = new Float64Array(m.lines.length);
     const stEntries = new Float64Array(S);
     const stOD = new Float64Array(S * S);
     const zTrips = new Float64Array(ZONES), zTransit = new Float64Array(ZONES);
     const attr = new Float64Array(ZONES);
     for (let b = 0; b < ZONES; b++) attr[b] = this.zJobs[b] + 0.3 * this.zHomes[b];
     const zd = (a: number, b: number) => a === b ? 0.3 : Math.hypot((a % NZ) - (b % NZ), ((a / NZ) | 0) - ((b / NZ) | 0)) * ZONE * CELL / 1000;
-    const g = new Float64Array(ZONES);
+    const gv = new Float64Array(ZONES);
     const desire: { a: number; b: number; trips: number }[] = [];
     let total = 0, transit = 0;
     for (let a = 0; a < ZONES; a++) {
       const P = this.zHomes[a] * TRIPS_PER_HOME;
       if (P <= 0) continue;
       let sum = 0;
-      for (let b = 0; b < ZONES; b++) { g[b] = attr[b] > 0 ? attr[b] * Math.exp(-zd(a, b) / TUNE.distDecay) : 0; sum += g[b]; }
+      for (let b = 0; b < ZONES; b++) { gv[b] = attr[b] > 0 ? attr[b] * Math.exp(-zd(a, b) / TUNE.distDecay) : 0; sum += gv[b]; }
       if (sum <= 0) continue;
       const near = this.zoneNear[a] ?? [];
       const asc = TUNE.transitASC + this.zCarLocked[a] * TUNE.carLockASC;
       for (let b = 0; b < ZONES; b++) {
-        if (g[b] <= 0) continue;
-        const T = P * g[b] / sum;
+        if (gv[b] <= 0) continue;
+        const T = P * gv[b] / sum;
         total += T; zTrips[a] += T;
         if (a === b || !near.length) { if (a !== b && T > 30 && zd(a, b) > 1.2) desire.push({ a, b, trips: T }); continue; }
         let best = Infinity, bs = -1;
@@ -876,8 +873,8 @@ export class Sim {
           if (v < best) { best = v; bs = s; }
         }
         const drive = this.driveTime[a * ZONES + b] + TUNE.parkMin * Math.min(1, this.zJobs[b] / 2500);
-        let share = 0;
-        if (bs >= 0 && best < 120) share = 1 / (1 + Math.exp(TUNE.modeBeta * (best + asc - drive)));
+        // logistic mode choice on the time difference; smooth, no hard cutoff
+        const share = bs >= 0 && best < Infinity ? 1 / (1 + Math.exp(TUNE.modeBeta * (best + asc - drive))) : 0;
         const F = T * share;
         if (T * (1 - share) > 30 && zd(a, b) > 1.2) desire.push({ a, b, trips: T * (1 - share) });
         if (F <= 0.01) continue;
@@ -889,8 +886,7 @@ export class Sim {
     for (let s = 0; s < S; s++)
       for (let t = 0; t < S; t++) {
         const F = stOD[s * S + t];
-        if (F <= 0) continue;
-        m.tracePath(s, t, (li, k, dir) => { segLoad[li][k][dir > 0 ? 0 : 1] += F; }, (li) => { boards[li] += F; });
+        if (F > 0) m.tracePath(s, t, (li, k, dir) => { segLoad[li][k][dir > 0 ? 0 : 1] += F; }, (li) => { boards[li] += F; });
       }
     let rSum = 0, rW = 0;
     m.lines.forEach((l, li) => {
@@ -901,14 +897,11 @@ export class Sim {
       l.rating = clamp(100 - Math.max(0, l.crowd - 0.7) * 130 - Math.max(0, l.headway - 4) * 4, 0, 100);
       rSum += l.rating * Math.max(1, l.riders); rW += Math.max(1, l.riders);
     });
-    const used = m.stations.filter((st) => m.sIndex.has(st.id));
-    for (const st of m.stations) st.riders = 0;
-    for (const st of used) st.riders = stEntries[m.sIndex.get(st.id)!];
+    for (const st of m.stations) { const k = m.sIndex.get(st.id); st.riders = k === undefined ? 0 : stEntries[k]; }
     this.rating = rW > 0 ? rSum / rW : 0;
     this.transitTrips = transit;
     this.totalTrips = total;
     for (let z = 0; z < ZONES; z++) this.zTransitShare[z] = zTrips[z] > 0 ? zTransit[z] / zTrips[z] : 0;
-    // desire lines: strongest car-bound flows between distinct zones, both directions summed
     const agg = new Map<number, number>();
     for (const d of desire) {
       const k = Math.min(d.a, d.b) * ZONES + Math.max(d.a, d.b);
@@ -923,8 +916,7 @@ export class Sim {
     this.income = this.transitTrips * FARE * 30;
     let trains = 0, km = 0;
     for (const l of m.lines) { trains += l.trains; km += l.lengthKm; }
-    const stations = m.stations.length;
-    this.expenses = trains * TRAIN_MONTH + stations * STATION_UPKEEP + km * TRACK_UPKEEP_KM;
+    this.expenses = trains * TRAIN_MONTH + m.stations.length * STATION_UPKEEP + km * TRACK_UPKEEP_KM;
     this.money += this.income - this.expenses;
   }
 
@@ -935,7 +927,7 @@ export class Sim {
 
   stats(): Stats {
     let b = 0;
-    for (let i = 0; i < N * N; i++) if (this.g.btype[i] && this.g.btype[i] !== BT.Park) b++;
+    for (const l of this.lots.lots) if (l.alive && l.type && l.type !== BT.Park && (l.level > 0 || l.constr)) b++;
     return {
       month: this.month, population: Math.round(this.homes * PERSONS_PER_HOME), homes: this.homes, jobs: this.jobs,
       money: this.money, income: this.income, expenses: this.expenses, build: this.buildSpend,
@@ -945,13 +937,36 @@ export class Sim {
     };
   }
 
+  roadsMsg(): RoadsMsg {
+    const R = this.roads;
+    const es = R.aliveEdges();
+    const nodes = new Float32Array(R.nx.length * 2);
+    for (let n = 0; n < R.nx.length; n++) { nodes[n * 2] = R.nx[n]; nodes[n * 2 + 1] = R.ny[n]; }
+    return {
+      version: R.version, nodes, ids: Int32Array.from(es), ea: Int32Array.from(es.map((e) => R.ea[e])), eb: Int32Array.from(es.map((e) => R.eb[e])),
+      cls: Uint8Array.from(es.map((e) => R.ecls[e])), year: Uint16Array.from(es.map((e) => R.eyear[e])),
+    };
+  }
+
+  lotsMsg(): LotsMsg {
+    const ls = this.liveLots;
+    const n = ls.length;
+    const f = () => new Float32Array(n), u = () => new Uint8Array(n);
+    const m: LotsMsg = { n, id: new Int32Array(n), x: f(), y: f(), ang: f(), w: f(), d: f(), type: u(), level: u(), target: u(), constr: u(), constrTotal: u(), flags: u(), planType: u(), planLevel: u(), served: u() };
+    ls.forEach((l, k) => {
+      m.id[k] = l.id; m.x[k] = l.x; m.y[k] = l.y; m.ang[k] = l.ang; m.w[k] = l.w; m.d[k] = l.d;
+      m.type[k] = l.type; m.level[k] = l.level; m.target[k] = l.target; m.constr[k] = l.constr; m.constrTotal[k] = l.constrTotal;
+      m.flags[k] = l.flags; m.planType[k] = l.planType; m.planLevel[k] = l.planLevel;
+      m.served[k] = (l.flags & Flag.Planned) && this.walkToStation(l.cell) <= TUNE.serveWalk ? 1 : 0;
+    });
+    return m;
+  }
+
   snapshot(): StateMsg {
-    const g = this.g;
     return {
       type: 'state', stats: this.stats(),
-      road: g.road.slice(), btype: g.btype.slice(), level: g.level.slice(), target: this.target.slice(),
-      constr: this.constr.slice(), constrTotal: this.constrTotal.slice(), lv: this.lv.slice(), flags: g.flags.slice(),
-      planType: this.planType.slice(), planLevel: this.planLevel.slice(),
+      roads: this.roadsMsg(), lots: this.lotsMsg(),
+      road: this.g.road.slice(), lv: this.lv.slice(), flags: this.g.flags.slice(),
       stations: this.metro.stations.map((st) => ({ ...st })),
       lines: this.metro.lines.map((l) => ({ id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders,
         capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice() })),
@@ -962,6 +977,3 @@ export class Sim {
     };
   }
 }
-
-function clamp(v: number, a: number, b: number) { return v < a ? a : v > b ? b : v; }
-export { adjRoad };
