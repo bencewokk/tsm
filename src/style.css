@@ -97,3 +97,9 @@ button.mini { padding: 0 6px; font-size: 11px; line-height: 16px; }
 .stat { flex-shrink: 0; }
 .ticker { background: rgba(250, 248, 243, 0.78); border-radius: 6px; padding: 4px 8px; text-shadow: none; }
 .ticker:empty { display: none; }
+
+.lmh { margin-top: 8px; }
+.lmlist { display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow: auto; }
+.lm { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 2px 6px; font-size: 11px; text-align: left; }
+.lm i { font-style: normal; font-size: 10px; padding: 0 5px; border-radius: 8px; white-space: nowrap; }
+.lm i.b { background: #f3e3b6; } .lm i.ev { background: #f4b8a8; font-weight: 600; } .lm i.cp { background: #e5d3c8; } .lm i.sv { background: #cfe3f2; } .lm i.ns { background: #ececec; }

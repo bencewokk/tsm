@@ -51,6 +51,8 @@ export class Hud {
         <div class="row"><span>Road congestion</span><b data-k="cong">-</b></div>
         <div class="row"><span>Avg drive speed</span><b data-k="spd">-</b></div>
         <div class="row"><span>Transit trips / day</span><b data-k="trips">-</b></div>
+        <div class="h lmh">Landmarks</div>
+        <div class="lmlist" data-k="lmlist"></div>
       </div>
       <div class="lines panel" data-k="linesPanel">
         <div class="h">Metro lines</div>
@@ -116,6 +118,21 @@ export class Hud {
   private eventSig = '';
   private docksSig = '';
   onFocusDocks?: () => void;
+  onFocusLandmark?: (x: number, y: number) => void;
+  private lmSig = '';
+
+  private renderLandmarks(s: StateMsg) {
+    const sig = JSON.stringify(s.landmarks.map((l) => [l.id, l.state, Math.round(l.pct * 10), l.served, l.carPark, l.eventDay]));
+    if (sig === this.lmSig) return;
+    this.lmSig = sig;
+    const el = this.el.lmlist;
+    if (!s.landmarks.length) { el.innerHTML = '<div class="muted small">None yet.</div>'; return; }
+    el.innerHTML = s.landmarks.slice().sort((a, b) => (a.state === b.state ? a.name.localeCompare(b.name) : a.state === 'building' ? -1 : 1)).map((l) => {
+      const badge = l.state === 'building' ? `<i class="b">building ${Math.round(l.pct * 100)}%</i>` : l.eventDay ? '<i class="ev">event day</i>' : l.carPark ? '<i class="cp">car park</i>' : l.served ? '<i class="sv">served</i>' : '<i class="ns">no station</i>';
+      return `<button class="lm" data-lx="${l.x}" data-ly="${l.y}"><span>${l.name}</span>${badge}</button>`;
+    }).join('');
+    el.querySelectorAll<HTMLButtonElement>('button.lm').forEach((b) => b.addEventListener('click', () => this.onFocusLandmark?.(Number(b.dataset.lx), Number(b.dataset.ly))));
+  }
 
   private renderEvent(s: StateMsg) {
     const ev = s.event;
@@ -213,6 +230,7 @@ export class Hud {
     this.renderLines(s);
     this.renderEvent(s);
     this.renderDocks(s);
+    this.renderLandmarks(s);
     const st = s.stats, e = this.el;
     e.date.textContent = dateStr(st.month);
     e.pop.textContent = num(st.population);

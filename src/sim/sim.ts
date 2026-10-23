@@ -8,6 +8,8 @@ import { EVENTS, SITE_TEXT, fill, type EventDef, type Variant, type Effect, type
 import { RoadGraph, RC, ROAD_HALF } from './roads';
 import { LotStore, LOT_W, type Lot } from './lots';
 import { PROFILE_INDEX, ZONING, deriveProfiles, type DistrictProfile } from './profiles';
+import { LandmarkSystem } from './landmarkSys';
+import { LANDMARKS, landmarkAt } from './landmarks';
 import { makeCityProfile, type CityProfile } from './cityprofile';
 import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './town';
 import { MinHeap } from './heap';
@@ -110,6 +112,8 @@ export class Sim {
 
   cp: CityProfile;
   profiles: DistrictProfile[];
+  lm!: LandmarkSystem;
+  lastEventMonth = -99;
 
   constructor(public seed: number, force?: { terrain?: CityProfile['terrain']; origin?: CityProfile['origin'] }) {
     this.rng = new Rng(seed);
@@ -122,6 +126,8 @@ export class Sim {
     this.town = { g: this.g, city: this.cp, roads: this.roads, lots: this.lots, rng: this.rng, districts: [], profiles: this.profiles };
     this.town.profileAt = (x, y) => this.profileAt(x, y);
     layoutTown(this.town);
+    this.lm = new LandmarkSystem(this);
+    this.lm.sync();
     this.roads.blockFlags = Flag.Docks;
     this.roads.corridor = {
       blocked: (ax, ay, bx, by) => this.lots.inCorridor(ax, ay, bx, by, ROAD_HALF[RC.Local] + 0.05)
@@ -200,6 +206,7 @@ export class Sim {
     if (!ch) return;
     for (const e of ch.effects) this.applyEffect(e);
     this.resolved[cmd.event] = { month: this.month, choice: cmd.choice };
+    this.lastEventMonth = this.month;
     this.say(`${fill(this.pending.variant?.title ?? this.pending.def.title, this.pending.vars)}: ${fill(ch.label, this.pending.vars)}`);
     this.pending = null;
   }
@@ -209,6 +216,14 @@ export class Sim {
     if (this.pending) return;
     for (const def of EVENTS) {
       if (this.fired[def.id] !== undefined) continue;
+      if (def.landmark) {
+        const after = def.id.endsWith('_after');
+        if (this.month < this.lastEventMonth + (after ? 3 : 10)) continue; // proposals are spread out
+        if (!after && [...this.lm.states.values()].filter((q) => q.state === 'building').length >= 2) continue;
+        const ld = LANDMARKS.find((x) => x.id === def.landmark)!;
+        if (!this.lm.allowed(ld)) continue;
+        if (def.id.endsWith('_after') && ![...this.lm.states.values()].some((st) => LANDMARKS[st.def].id === ld.id && st.state === 'open')) continue;
+      }
       if (def.requires) {
         const q = def.requires;
         if (q.site && (!q.site.includes(this.cp.site) || this.g.docksCells.length < 4)) continue;
@@ -225,7 +240,8 @@ export class Sim {
       let variant: Variant | null = null;
       if (def.variants) {
         variant = def.variants.find((v) => (v.when.deal === undefined || v.when.deal === this.docks.deal?.id) &&
-          (v.when.late === undefined || v.when.late === (Number(vars.locked) > Math.max(2, Number(vars.planned) * 0.15)))) ?? null;
+          (v.when.late === undefined || v.when.late === (Number(vars.locked) > Math.max(2, Number(vars.planned) * 0.15))) &&
+          (v.when.served === undefined || v.when.served === this.lm.servedFor(def.landmark ?? ''))) ?? null;
         if (!variant) { this.fired[def.id] = this.month; continue; }
       }
       this.fired[def.id] = this.month;
@@ -294,6 +310,12 @@ export class Sim {
         this.say(SITE_TEXT[this.cp.site].parkLabel);
         break;
       }
+      case 'landmark': {
+        const def = LANDMARKS.find((x) => x.id === e.id)!;
+        if (!this.lm.place(e.id, e.site, e.pay)) { if (e.pay === 'city') this.money += def.cost; else this.money -= def.cost * 0.2; }
+        break;
+      }
+      case 'lmCarPark': this.lm.setCarPark(e.id); this.say('Car park extended'); break;
       case 'docksRoadRelief': this.docks.roadRelief = true; this.say('Bus lanes painted along the harbour roads'); break;
     }
   }
@@ -380,6 +402,7 @@ export class Sim {
   tick() {
     this.month++;
     this.progressConstruction();
+    this.lm.tick();
     this.aggregate();
     this.computeCongestion();
     this.computeDriveTimes();
@@ -441,7 +464,7 @@ export class Sim {
       this.cHomes[l.cell] += hh; this.cJobs[l.cell] += jj;
       if (l.type === BT.Ind) this.cInd[l.cell] += l.level;
       if (l.type === BT.Park || l.type === BT.Square) this.cPark[l.cell] += 1;
-      else if (l.type === BT.Landmark) this.cPark[l.cell] += 0.5;
+      else if (l.type === BT.Landmark) this.cPark[l.cell] += l.level > 0 ? (landmarkAt(l.lm)?.value ?? 0.5) * 3 : 0;
       this.zHomes[z] += hh; this.zJobs[z] += jj; h += hh; j += jj;
       if (l.flags & Flag.CarLocked) this.zCarLocked[z] += hh;
       jx += (jj + hh * 0.3) * l.x; jy += (jj + hh * 0.3) * l.y;
@@ -940,33 +963,58 @@ export class Sim {
     const gv = new Float64Array(ZONES);
     const desire: { a: number; b: number; trips: number }[] = [];
     let total = 0, transit = 0;
+    // attraction of open landmarks pulls ordinary trips toward their zone
+    const lmOpen = this.lm.open();
+    for (const o of lmOpen) attr[o.zone] += o.def.attr * (o.st.eventDay ? 1.5 : 1);
+    /** Route T trips from zone a to zone b: logistic car / transit choice, stations and desire lines. */
+    const route = (a: number, b: number, T: number, asc: number, extraDrive = 0) => {
+      const near = this.zoneNear[a] ?? [];
+      if (a === b || !near.length) { if (a !== b && T > 30 && zd(a, b) > 1.2) desire.push({ a, b, trips: T }); return; }
+      let best = Infinity, bs = -1;
+      for (const { s, w } of near) {
+        const v = w + this.egress[s * ZONES + b];
+        if (v < best) { best = v; bs = s; }
+      }
+      const drive = this.driveTime[a * ZONES + b] + TUNE.parkMin * Math.min(1, this.zJobs[b] / 2500) + extraDrive;
+      // logistic mode choice on the time difference; smooth, no hard cutoff
+      const share = bs >= 0 && best < Infinity ? 1 / (1 + Math.exp(TUNE.modeBeta * (best + asc - drive))) : 0;
+      const F = T * share;
+      if (T * (1 - share) > 30 && zd(a, b) > 1.2) desire.push({ a, b, trips: T * (1 - share) });
+      if (F <= 0.01) return;
+      transit += F; zTransit[a] += F;
+      const t = this.egressVia[bs * ZONES + b];
+      if (t >= 0) { stOD[bs * S + t] += F; stEntries[bs] += F; }
+    };
     for (let a = 0; a < ZONES; a++) {
       const P = this.zHomes[a] * TRIPS_PER_HOME;
       if (P <= 0) continue;
       let sum = 0;
       for (let b = 0; b < ZONES; b++) { gv[b] = attr[b] > 0 ? attr[b] * Math.exp(-zd(a, b) / TUNE.distDecay) : 0; sum += gv[b]; }
       if (sum <= 0) continue;
-      const near = this.zoneNear[a] ?? [];
       const asc = TUNE.transitASC + this.zCarLocked[a] * TUNE.carLockASC;
       for (let b = 0; b < ZONES; b++) {
         if (gv[b] <= 0) continue;
         const T = P * gv[b] / sum;
         total += T; zTrips[a] += T;
-        if (a === b || !near.length) { if (a !== b && T > 30 && zd(a, b) > 1.2) desire.push({ a, b, trips: T }); continue; }
-        let best = Infinity, bs = -1;
-        for (const { s, w } of near) {
-          const v = w + this.egress[s * ZONES + b];
-          if (v < best) { best = v; bs = s; }
-        }
-        const drive = this.driveTime[a * ZONES + b] + TUNE.parkMin * Math.min(1, this.zJobs[b] / 2500);
-        // logistic mode choice on the time difference; smooth, no hard cutoff
-        const share = bs >= 0 && best < Infinity ? 1 / (1 + Math.exp(TUNE.modeBeta * (best + asc - drive))) : 0;
-        const F = T * share;
-        if (T * (1 - share) > 30 && zd(a, b) > 1.2) desire.push({ a, b, trips: T * (1 - share) });
-        if (F <= 0.01) continue;
-        transit += F; zTransit[a] += F;
-        const t = this.egressVia[bs * ZONES + b];
-        if (t >= 0) { stOD[bs * S + t] += F; stEntries[bs] += F; }
+        route(a, b, T, asc);
+      }
+    }
+    // landmark visitors: extra trips from everywhere toward each open landmark (all-day, peaks, weekends) plus event-day crowds
+    for (const o of lmOpen) {
+      const day = o.def.pattern === 'weekend' ? 0.85 : o.def.pattern === 'events' ? 0.6 : 1;
+      const base = o.def.visitors * day, crowd = o.st.eventDay ? o.def.eventTrips : 0;
+      if (base + crowd <= 0) continue;
+      const w = new Float64Array(ZONES);
+      let ws = 0;
+      for (let a = 0; a < ZONES; a++) { if (this.zHomes[a] <= 0) continue; w[a] = this.zHomes[a] * Math.exp(-zd(a, o.zone) / (TUNE.distDecay * 2.2)); ws += w[a]; }
+      if (ws <= 0) continue;
+      const lockAsc = o.st.carPark ? TUNE.carLockASC : 0;
+      for (let a = 0; a < ZONES; a++) {
+        if (w[a] <= 0) continue;
+        const f = w[a] / ws;
+        if (base > 0) { total += base * f; zTrips[a] += base * f; route(a, o.zone, base * f, TUNE.transitASC + this.zCarLocked[a] * TUNE.carLockASC + lockAsc); }
+        // crowds on an event day cannot all park: driving costs a long walk from far-away parking unless the landmark has its own car park
+        if (crowd > 0) { total += crowd * f; zTrips[a] += crowd * f; route(a, o.zone, crowd * f, TUNE.transitASC - 1 + lockAsc, o.st.carPark ? 0 : 28); }
       }
     }
     for (let s = 0; s < S; s++)
@@ -1066,6 +1114,7 @@ export class Sim {
         capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice() })),
       event: this.eventInfo(),
       docks: this.docksInfo(),
+      landmarks: this.lm.info(),
       desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
       log: this.log.slice(-8), speed: this.speed,
     };

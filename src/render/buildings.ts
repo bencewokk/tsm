@@ -3,7 +3,7 @@ import { PAL, GROUND, pick, type Kind } from './forms';
 import { vhash } from './common';
 import type { DistrictProfile, Palette } from '../sim/profiles';
 import { designTower } from './towers';
-import { designLandmark } from './landmarks';
+import { designLandmark, LM_HEIGHT } from './landmarks';
 
 export interface Tree { x: number; z: number; size: number; h: number; pine: boolean; seed: number }
 
@@ -539,6 +539,7 @@ export function designLot(c: Ctx) {
 /** Massing used for planned (ghost) plots and construction scaffolds: footprint + height of the finished building. */
 export function massing(c: Ctx): { poly: Pt[]; h: number } {
   const { Q } = c;
+  if (c.kind === 'landmark') return { poly: Q.strip(0.15, 0.85, 0.15, 0.85), h: LM_HEIGHT[c.lmForm ?? 'cathedral'] ?? 30 };
   const poly = c.dens > 0 ? Q.strip(0.02, 0.98, 0, 0.7) : Q.strip(0.15, 0.85, 0.15, 0.7);
   const h = c.kind === 'tower' || c.kind === 'cbd' ? 40 + c.r(7) * 40 : c.kind === 'apart' ? 20 : c.kind === 'office' ? 30 : c.kind === 'core' ? 14 : c.kind === 'house' ? 8 : 12;
   return { poly, h };

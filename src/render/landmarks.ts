@@ -288,6 +288,9 @@ function brewery(c: Ctx) {
   tree(c, Q.at(0.3, 0.1), 6, 11);
 }
 
+/** Finished height (m) per form: used for the construction scaffold and crane. */
+export const LM_HEIGHT: Record<string, number> = { cathedral: 50, cityhall: 42, markethall: 22, opera: 34, museum: 26, university: 36, hospital: 28, stadium: 46, arena: 46, library: 30, tvtower: 160, skyscraper: 230, expo: 20, ferris: 80, lighthouse: 50, fort: 26, brewery: 60 };
+
 const FORMS: Record<string, (c: Ctx) => void> = { cathedral, cityhall, markethall, opera, museum, university, hospital, stadium, arena, library, tvtower, skyscraper, expo, ferris, lighthouse, fort, brewery };
 export const hasForm = (id: string) => id in FORMS;
 export function designLandmark(c: Ctx, form: string) {

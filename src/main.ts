@@ -100,6 +100,7 @@ hud.handlers.onToggle = (name, on) => {
   if (name === 'tilt') env.tilt = on;
 };
 
+hud.onFocusLandmark = (x, y) => { env.focus((x + 0.5) * CELL, (y + 0.5) * CELL, 800); };
 hud.onFocusDocks = () => {
   if (!state) return;
   const c = state.docks.centre;
@@ -246,7 +247,7 @@ function cellToScreen(x: number, y: number) {
   return { x: Math.round(r.left + (v.x + 1) / 2 * r.width), y: Math.round(r.top + (1 - v.y) / 2 * r.height) };
 }
 /** Dev helper: run the sim to a month in small batches, picking `deal` for the docks event and the first option otherwise. */
-async function ff(target: number, deal = 0) {
+async function ff(target: number, deal = 0, picks: Record<string, number> = {}) {
   // MessageChannel yields are not throttled in a hidden pane, unlike timers
   const sl = (_ms: number) => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(0); c.port2.postMessage(0); });
   send({ type: 'speed', speed: 0 });
@@ -255,7 +256,7 @@ async function ff(target: number, deal = 0) {
     const before = state.stats.month;
     if (state.event) {
       const id = state.event.id;
-      send({ type: 'choose', event: id, choice: id === 'docks_bought' ? deal : 0 });
+      send({ type: 'choose', event: id, choice: id === 'docks_bought' ? deal : (picks[id] ?? 0) });
       await until(() => !state!.event || state!.event.id !== id);
     } else {
       send({ type: 'step', months: Math.max(1, Math.min(4, target - before)) });

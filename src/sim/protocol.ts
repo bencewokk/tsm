@@ -116,6 +116,7 @@ export interface StateMsg {
   lines: LineInfo[];
   event: EventInfo | null;
   docks: DocksInfo;
+  landmarks: import('./landmarkSys').LandmarkInfo[];
   desire: DesireLine[];
   log: string[];
   speed: number;

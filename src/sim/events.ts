@@ -3,6 +3,8 @@
  * The sim evaluates triggers each month, fills placeholders from its state, and applies effects.
  */
 
+import { LANDMARKS, type SiteChoice, type LandmarkDef } from './landmarks';
+
 export type Trigger = {
   monthAtLeast?: number;
   popAtLeast?: number;
@@ -11,7 +13,7 @@ export type Trigger = {
 };
 
 /** Conditions select a text variant (all listed keys must match). */
-export type Cond = { deal?: string; late?: boolean };
+export type Cond = { deal?: string; late?: boolean; served?: boolean };
 
 /** An event only appears in cities whose profile matches (all listed keys). */
 export interface Requires { site?: ('harbour' | 'railyard' | 'mine')[]; origin?: string[]; history?: string[] }
@@ -29,6 +31,8 @@ export type Effect =
   | { kind: 'docksExtraPlots'; count: number }
   | { kind: 'docksPark' }
   | { kind: 'docksRoadRelief' }
+  | { kind: 'landmark'; id: string; site: SiteChoice; pay: 'city' | 'dev' }
+  | { kind: 'lmCarPark'; id: string }
   | { kind: 'log'; text: string };
 
 export interface DocksDeal {
@@ -43,7 +47,7 @@ export interface DocksDeal {
 
 export interface ChoiceDef { label: string; detail: string; effects: Effect[] }
 export interface Variant { when: Cond; title?: string; text: string; choices: ChoiceDef[] }
-export interface EventDef { id: string; trigger: Trigger; requires?: Requires; title: string; text: string; choices: ChoiceDef[]; variants?: Variant[] }
+export interface EventDef { id: string; trigger: Trigger; requires?: Requires; landmark?: string; title: string; text: string; choices: ChoiceDef[]; variants?: Variant[] }
 
 export const EVENTS: EventDef[] = [
   {
@@ -156,4 +160,53 @@ export const EVENTS: EventDef[] = [
 
 export function fill(text: string, vars: Record<string, string | number>): string {
   return text.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? String(vars[k]) : `{${k}}`));
+}
+
+// ---------------------------------------------------------------- landmark proposals: generated from the catalogue (landmarks.ts)
+const SITE_WORD: Record<SiteChoice, string> = { centre: 'in the city centre', station: 'next to a station', water: 'on the waterfront', hill: 'on the highest ground', edge: 'at the edge of town' };
+const m = (v: number) => `$${Math.round(v / 1e6)}M`;
+
+function proposal(def: LandmarkDef): EventDef {
+  const [a, b] = def.sites;
+  return {
+    id: 'lm_' + def.id,
+    landmark: def.id,
+    trigger: { monthAtLeast: def.unlock?.month ?? 24, popAtLeast: def.unlock?.pop ?? 8000 },
+    title: def.name + ': a proposal',
+    text: (def.pitch ?? '') + '<br><br><b>Brief:</b> a landmark is only a success if people can get to it. If there is no station within an <b>8-minute walk</b> when it opens, it gets a car park and its visitors stay in their cars for good. Where do you want it?',
+    choices: [
+      { label: `Build it ${SITE_WORD[a]} (the city pays ${m(def.cost)})`, detail: `Opens in ${def.buildMonths} months. Plots in the way are cleared.`, effects: [{ kind: 'money', amount: -def.cost }, { kind: 'landmark', id: def.id, site: a, pay: 'city' }] },
+      { label: `Developer deal: ${SITE_WORD[b]}`, detail: `The developer pays and adds ${m(def.cost * 0.2)} to the city. Unserved at opening, you owe a ${m(def.cost * 0.25)} penalty and it still gets its car park.`, effects: [{ kind: 'money', amount: def.cost * 0.2 }, { kind: 'landmark', id: def.id, site: b, pay: 'dev' }] },
+      { label: 'Decline', detail: 'Nothing is built.', effects: [] },
+    ],
+  };
+}
+
+function followup(def: LandmarkDef): EventDef | null {
+  if (!def.followup) return null;
+  return {
+    id: 'lm_' + def.id + '_after',
+    landmark: def.id,
+    trigger: { after: { event: 'lm_' + def.id, months: def.buildMonths + 8 } },
+    title: def.name + ' one year on',
+    text: '',
+    choices: [],
+    variants: [
+      { when: { served: true }, text: def.followup.served, choices: [
+        { label: 'Reward the operator (-$5M)', detail: 'Goodwill: nothing changes on the map.', effects: [{ kind: 'money', amount: -5e6 }] },
+        { label: 'Carry on', detail: '', effects: [] },
+      ] },
+      { when: { served: false }, text: def.followup.unserved, choices: [
+        { label: 'Extend the car park (-$6M)', detail: 'Keeps the road traffic moving; the trips stay car-locked.', effects: [{ kind: 'money', amount: -6e6 }, { kind: 'lmCarPark', id: def.id }] },
+        { label: 'Promise a station', detail: 'You will plan one.', effects: [] },
+      ] },
+    ],
+  };
+}
+
+for (const def of LANDMARKS) {
+  if (def.start) continue;
+  EVENTS.push(proposal(def));
+  const f = followup(def);
+  if (f) EVENTS.push(f);
 }

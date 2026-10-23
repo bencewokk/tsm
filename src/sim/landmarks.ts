@@ -68,14 +68,14 @@ export const LANDMARKS: LandmarkDef[] = [
   },
   {
     id: 'stadium', name: 'Football stadium', category: 'sport', form: 'stadium', size: [3.2, 2.6], sites: ['edge', 'station'], buildMonths: 16, cost: 62e6,
-    attr: 160, visitors: 700, pattern: 'events', eventTrips: 26000, eventEvery: 1, value: 0.4, night: 'floodlit', unlock: { month: 40, pop: 20000 },
+    attr: 160, visitors: 700, pattern: 'events', eventTrips: 26000, eventEvery: 2, value: 0.4, night: 'floodlit', unlock: { month: 40, pop: 20000 },
     pitch: 'The city club needs a proper stadium. On ordinary days it is nearly empty, but a match day brings tens of thousands within a couple of hours, almost all of them at the same time.',
     followup: { served: 'Match days work: the crowd leaves on the metro. The club wants a bigger ground.', unserved: 'Match-day traffic gridlocks half the town. Fans march on city hall demanding a station at the ground.' },
     requires: { wealthAtLeast: 0.15 },
   },
   {
     id: 'arena', name: 'Concert arena', category: 'leisure', form: 'arena', size: [2.2, 2.0], sites: ['station', 'edge'], buildMonths: 14, cost: 44e6,
-    attr: 120, visitors: 500, pattern: 'events', eventTrips: 14000, eventEvery: 1, value: 0.4, night: 'glow', unlock: { month: 48, pop: 25000 },
+    attr: 120, visitors: 500, pattern: 'events', eventTrips: 14000, eventEvery: 2, value: 0.4, night: 'glow', unlock: { month: 48, pop: 25000 },
     pitch: 'An arena operator offers a covered arena for concerts and shows. Evenings and weekends get sharp spikes of visitors, then nothing for days.',
     followup: { served: 'Sold-out nights and the last trains are packed. The operator offers to pay for late service.', unserved: 'Concert crowds spill across the bridges at midnight with no way home but taxis.' },
   },
