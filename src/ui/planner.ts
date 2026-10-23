@@ -8,6 +8,9 @@ export class Planner {
   draft: number[] = [];
   private pending: { x: number; y: number }[] = [];
   hover: { x: number; y: number } | null = null;
+  /** why the last Enter did not build (shown in the hint; the draft is kept so it can be fixed) */
+  notice = '';
+  private last: StateMsg | null = null;
 
   private water: Uint8Array;
   constructor(private send: (c: Command) => void, private terr: Terr) { this.water = terr.water; }
@@ -22,6 +25,7 @@ export class Planner {
   }
 
   click(s: StateMsg, x: number, y: number) {
+    this.notice = '';
     const st = this.stationAt(s, x, y);
     if (st) {
       if (this.draft[this.draft.length - 1] === st.id) return;
@@ -38,6 +42,7 @@ export class Planner {
 
   /** After each state: attach a freshly dug station to the draft. */
   onState(s: StateMsg) {
+    this.last = s;
     if (this.pending.length) {
       this.draft = this.draft.map((id) => {
         if (id >= 0) return id;
@@ -54,8 +59,8 @@ export class Planner {
     }
   }
 
-  undo() { this.draft.pop(); }
-  cancel() { this.draft = []; this.pending = []; }
+  undo() { this.draft.pop(); this.notice = ''; }
+  cancel() { this.draft = []; this.pending = []; this.notice = ''; }
 
   private commitWhenReady = 0;
 
@@ -64,7 +69,15 @@ export class Planner {
     this.commitWhenReady = 0;
     this.draft = this.draft.filter((id) => id >= 0);
     this.pending = [];
-    if (this.draft.length >= 2) this.send({ type: 'buildLine', stations: this.draft.slice() });
+    if (this.draft.length < 2) { this.notice = 'A line needs at least two stations.'; return; }
+    // refuse here with a reason (and keep the draft) instead of sending a command the sim will silently reject and then wiping the draft
+    if (this.last) {
+      const r = this.quote(this.last);
+      if (r.q && !r.q.ok) { this.notice = `Cannot build: segment ${r.q.badSeg + 1} is too steep. Add a station on easier ground, or Backspace.`; return; }
+      if (r.cost > this.last.stats.money) { this.notice = `Not enough money: the line costs ${money(r.cost)}, you have ${money(this.last.stats.money)}. Backspace removes the last station, or wait for more income.`; return; }
+    }
+    this.notice = '';
+    this.send({ type: 'buildLine', stations: this.draft.slice() });
     this.draft = [];
   }
 
@@ -111,7 +124,8 @@ export class Planner {
       if (q.by[4] > 0.05) extra += ` ${q.by[4].toFixed(1)} km is steeper than the metro limit and is built as a rack railway / funicular (x${RELIEF.rackMult} cost, slow).`;
       if (!q.ok) extra += ` <b class="neg">Too steep: segment ${q.badSeg + 1} climbs more than ${(RELIEF.maxRack * 100).toFixed(0)}%; add a station on easier ground.</b>`;
     }
-    return `Line draft: ${this.draft.length} stations, ${r.km.toFixed(1)} km${types}, ${r.trains} trains. Cost <b class="${ok ? '' : 'neg'}">${money(r.cost)}</b>.${extra} ` +
+    const warn = this.notice ? `<b class="neg">${this.notice}</b><br>` : '';
+    return `${warn}Line draft: ${this.draft.length} stations, ${r.km.toFixed(1)} km${types}, ${r.trains} trains. Cost <b class="${ok ? '' : 'neg'}">${money(r.cost)}</b>.${extra} ` +
       `<b>Enter</b> build · <b>Backspace</b> undo · <b>Esc</b> cancel`;
   }
 }

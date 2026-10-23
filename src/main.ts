@@ -11,7 +11,8 @@ import { lookUniforms } from './render/look';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
 import { Hud } from './ui/hud';
 import { Planner } from './ui/planner';
-import { CELL, N } from './sim/constants';
+import { CELL, N, STATION_COST, TRAIN_COST, METRO_SPEED } from './sim/constants';
+import { quoteLine } from './sim/relief';
 
 const params = new URLSearchParams(location.search);
 const seed = Number(params.get('seed') ?? 4821) | 0 || 4821;
@@ -350,11 +351,34 @@ async function ff(target: number, deal = 0, picks: Record<string, number> = {}) 
     }
   }
 }
-/** Test helper: fast-forward, take a docks deal, build a line through the villages (used for screenshots). */
+/** Test helper: the same path a player takes. Enters plan mode, clicks each cell with real pointer events on the canvas (the planner picks through the camera), then presses Enter with a real key event. Resolves with what the sim did. */
+async function uiLine(cells: [number, number][]) {
+  const sl = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  if (!state || !init || !planner) return { ok: false, why: 'not ready' };
+  const linesBefore = state.lines.length;
+  if (hud.tool !== 'plan') hud.setTool('plan');
+  const cx = cells.reduce((a, c) => a + c[0], 0) / cells.length, cy = cells.reduce((a, c) => a + c[1], 0) / cells.length;
+  const span = Math.max(...cells.map((c) => Math.hypot(c[0] - cx, c[1] - cy))) * CELL;
+  fly = null;
+  view(cx, cy, Math.max(1800, span * 2.6), 0, 0.01);
+  const cv = env.renderer.domElement;
+  const click = (x: number, y: number) => {
+    env.render();
+    const sc = cellToScreen(x, y);
+    const o = { clientX: sc.x, clientY: sc.y, button: 0, bubbles: true, pointerId: 1, pointerType: 'mouse' };
+    cv.dispatchEvent(new PointerEvent('pointerdown', o));
+    cv.dispatchEvent(new PointerEvent('pointerup', o));
+  };
+  for (const [x, y] of cells) { click(x, y); await sl(250); }
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+  for (let k = 0; k < 20 && state.lines.length === linesBefore && planner.draft.length; k++) await sl(150);
+  await sl(300);
+  return { ok: state.lines.length > linesBefore, draft: planner.draft.length, notice: planner.notice, lines: state.lines.length, log: state.log.slice(-2) };
+}
+/** Test helper: fast-forward, take a docks deal, build a line through the villages through the UI path (used for screenshots). The line is the longest prefix of the chain the budget and the terrain allow, as a player would stop adding stations. */
 async function demo(deal = 0, lineAt = 10) {
   const sl = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  const waitMonth = async (m: number) => { await ff(m, deal); await sl(200); };
-  await waitMonth(lineAt);
+  await ff(lineAt, deal); await sl(200);
   if (!state || !init || !planner) return;
   const vs = init.villages.slice().sort((a, b) => a.y - b.y);
   const pts: [number, number][] = [];
@@ -366,14 +390,22 @@ async function demo(deal = 0, lineAt = 10) {
     }
     pts.push([vs[k].x, vs[k].y]);
   }
-  for (const [x, y] of pts) {
+  const cells = pts.map(([x, y]) => {
     let cx = x, cy = y;
-    for (let r = 0; r < 4 && init.water[cy * N + cx]; r++) { cx = x + r; cy = y - r; }
-    planner.click(state, cx, cy);
-    await sl(120);
+    for (let r = 0; r < 4 && init!.water[cy * N + cx]; r++) { cx = x + r; cy = y - r; }
+    return [cx, cy] as [number, number];
+  });
+  const terr = { height: init.height, water: init.water };
+  const money0 = state.stats.money;
+  let n = cells.length;
+  for (; n >= 2; n--) {
+    const sub = cells.slice(0, n);
+    const q = quoteLine(sub.map(([x, y]) => ({ x, y })), terr);
+    const trains = Math.max(2, Math.round(((q.km / METRO_SPEED) * 60 * 2 + n + 4) / 5));
+    if (q.ok && q.cost + trains * TRAIN_COST + n * STATION_COST <= money0) break;
   }
-  planner.commit();
-  await sl(400);
+  if (n < 2) return { ok: false, why: 'nothing affordable' };
+  return uiLine(cells.slice(0, n));
 }
 /** Dev helper: save the canvas at full size to screenshots/<name>.png (served by the dev server only). */
 async function shot(name: string) {
@@ -399,4 +431,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, uiLine, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
