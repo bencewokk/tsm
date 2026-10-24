@@ -10,14 +10,18 @@ const CAUSE_TEXT: Record<string, string> = { hist: 'old village', rail: 'railway
  */
 export class Labels {
   group = new THREE.Group();
-  private sprites: { s: THREE.Sprite; big: boolean }[] = [];
+  private sprites: { s: THREE.Sprite; big: boolean; base: THREE.Vector3 }[] = [];
+  /** dev switch (`tsm.labels.avoid = false`) for before / after captures */
+  avoid = true;
+  private v = new THREE.Vector3();
+  private up = new THREE.Vector3();
 
   constructor(villages: Village[], site: string, docks: { x: number; y: number } | null, sample: (x: number, z: number) => number) {
     const add = (title: string, sub: string, x: number, y: number, big: boolean, lift: number) => {
       const s = this.make(title, sub, big);
       s.position.set((x + 0.5) * CELL, sample((x + 0.5) * CELL, (y + 0.5) * CELL) + lift, (y + 0.5) * CELL);
       this.group.add(s);
-      this.sprites.push({ s, big });
+      this.sprites.push({ s, big, base: s.position.clone() });
     };
     for (const v of villages) {
       const sub = v.kind === 'origin' ? 'old town' : v.kind === 'planned' ? 'planned quarter' : v.kind === 'garden' ? 'garden suburb' : v.cause ? CAUSE_TEXT[v.cause] ?? '' : '';
@@ -45,9 +49,37 @@ export class Labels {
     return sp;
   }
 
-  /** Fade with the camera distance; plan mode keeps them fully visible. */
-  update(dist: number, plan: boolean, night = 0) {
+  /**
+   * Fade with the camera distance; plan mode keeps them fully visible. With the camera given, tags do not overlap on screen:
+   * they are placed in order (old town first, then the others as listed), a tag that would overlap one already placed is lifted
+   * along the screen's up direction in steps, and if it still overlaps after three steps it is faded out for this frame.
+   */
+  update(dist: number, plan: boolean, night = 0, cam?: THREE.PerspectiveCamera, viewH = 900) {
     const t = plan ? 1 : THREE.MathUtils.smoothstep(dist, 2600, 4200);
-    for (const { s, big } of this.sprites) { (s.material as THREE.SpriteMaterial).color.setScalar(1 - 0.72 * night); (s.material as THREE.SpriteMaterial).opacity = big ? Math.max(t, THREE.MathUtils.smoothstep(dist, 1800, 3000) * 0.9) : t; s.visible = t > 0.02 || big; }
+    const placed: [number, number, number, number][] = [];
+    if (cam && this.avoid) { cam.updateMatrixWorld(); this.up.setFromMatrixColumn(cam.matrixWorld, 1).normalize(); }
+    const order = this.sprites.slice().sort((a, b) => Number(b.big) - Number(a.big));
+    for (const { s, big, base } of order) {
+      const m = s.material as THREE.SpriteMaterial;
+      m.color.setScalar(1 - 0.72 * night);
+      let op = big ? Math.max(t, THREE.MathUtils.smoothstep(dist, 1800, 3000) * 0.9) : t;
+      s.position.copy(base);
+      if (cam && this.avoid && op > 0.02) {
+        let ok = false;
+        for (let step = 0; step < 4 && !ok; step++) {
+          s.position.copy(base).addScaledVector(this.up, step * s.scale.y * 1.05);
+          this.v.copy(s.position).project(cam);
+          if (this.v.z > 1) { ok = true; break; }
+          const depth = s.position.distanceTo(cam.position);
+          const px = viewH / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) * depth);
+          const hw = (s.scale.x * px) / viewH, hh = (s.scale.y * px) / viewH;   // half extents in NDC units (y spans 2 = viewH)
+          const r: [number, number, number, number] = [this.v.x - hw / cam.aspect, this.v.y - hh, this.v.x + hw / cam.aspect, this.v.y + hh];
+          if (placed.every((q) => r[2] < q[0] || r[0] > q[2] || r[3] < q[1] || r[1] > q[3])) { placed.push(r); ok = true; }
+        }
+        if (!ok) { s.position.copy(base); op = 0; }
+      }
+      m.opacity = op;
+      s.visible = op > 0.02 || (big && !cam);
+    }
   }
 }
