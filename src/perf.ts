@@ -47,6 +47,13 @@ export class PerfMon {
   worker = { tick: new Ring(240), snap: new Ring(240) };
   info: Info = { calls: 0, triangles: 0, lines: 0, points: 0, geometries: 0, textures: 0, programs: 0 };
   private last = 0;
+  /** latest resolved GPU frame time (ms) and a counter of resolved samples (the render-quality controller reads them) */
+  lastGpu = 0;
+  gpuSeq = 0;
+  /** whether GPU timer queries are available */
+  get hasGpuTimer() { return !!this.tq; }
+  /** last frame interval (ms) */
+  lastInterval = 0;
   private t0 = 0;
   private renderer: THREE.WebGLRenderer | null = null;
   private gl: WebGL2RenderingContext | null = null;
@@ -66,7 +73,7 @@ export class PerfMon {
   }
 
   frameBegin(now: number) {
-    if (this.last) this.interval.push(now - this.last);
+    if (this.last) { this.lastInterval = now - this.last; this.interval.push(this.lastInterval); }
     this.last = now;
     this.t0 = performance.now();
     this.renderer?.info.reset();
@@ -81,7 +88,7 @@ export class PerfMon {
       if (tq.active) { gl.endQuery(tq.ext.TIME_ELAPSED_EXT); tq.pending.push(tq.active); tq.active = null; }
       while (tq.pending.length && gl.getQueryParameter(tq.pending[0], gl.QUERY_RESULT_AVAILABLE)) {
         const q = tq.pending.shift()!;
-        if (!gl.getParameter(tq.ext.GPU_DISJOINT_EXT)) this.gpu.push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6);
+        if (!gl.getParameter(tq.ext.GPU_DISJOINT_EXT)) { this.lastGpu = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; this.gpu.push(this.lastGpu); this.gpuSeq++; }
         gl.deleteQuery(q);
       }
     }

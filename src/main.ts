@@ -14,6 +14,7 @@ import { Planner } from './ui/planner';
 import { CELL, N } from './sim/constants';
 import { perf } from './perf';
 import { SunShadow, CarBlobs, SHADOW } from './render/shadows';
+import { Quality, qualityFromUrl, type QualityMode } from './render/quality';
 import { VS } from './render/common';
 
 const params = new URLSearchParams(location.search);
@@ -23,6 +24,8 @@ const app = document.getElementById('app')!;
 const env = new Env(app);
 perf.attach(env.renderer);
 if (params.get('perf') === '1') perf.show();
+// render quality (?quality=auto|high|performance, HUD button): the 3D scene's resolution scale
+const quality = new Quality((s) => env.setScale(s));
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
 const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean }) => worker.postMessage(c);
 
@@ -72,7 +75,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     state = m;
     if (!labels && init && terrain) {
       labels = new Labels(init.villages, init.city.site, m.docks.centre, (x, z) => terrain!.sample(x, z));
-      env.scene.add(labels.group);
+      env.addText(labels.group);
     }
     perf.step('life', () => { life?.setRoads(m.roads); if (newMonth) life?.setCity(m.stats.homes, m.stations); });
     if (newMonth) lastStateAt = performance.now();
@@ -126,6 +129,13 @@ hud.handlers.onToggle = (name, on) => {
   if (name === 'night') { nightTarget = on ? 1 : 0; fastDawn = !on; }
   if (name === 'desire') { desire.group.visible = on; if (on && state) desire.update(state.desire); }
 };
+
+quality.setMode(qualityFromUrl(params));
+const QUALITY_CYCLE: QualityMode[] = ['auto', 'high', 'performance'];
+const qualityLabel = () => `Quality: ${quality.mode === 'auto' ? `Auto (${Math.round(quality.scale * 100)}%)` : quality.mode === 'high' ? 'High' : 'Performance'}`;
+hud.handlers.onQuality = () => { quality.setMode(QUALITY_CYCLE[(QUALITY_CYCLE.indexOf(quality.mode) + 1) % 3]); hud.setQuality(qualityLabel()); };
+hud.setQuality(qualityLabel());
+let gpuSeq = 0;
 
 hud.onFocusLandmark = (x, y) => { env.focus((x + 0.5) * CELL, (y + 0.5) * CELL, 800); };
 hud.onFocusDocks = () => {
@@ -347,6 +357,11 @@ function drawFrame(now: number) {
   if (metro) { metro.setXray(xray); metro.animate(now / 1000); }
   env.render();
   perf.frameEnd();
+  // Auto quality: one sample per resolved GPU timer query (else the frame interval)
+  const fresh = perf.gpuSeq !== gpuSeq;
+  gpuSeq = perf.gpuSeq;
+  if (perf.hasGpuTimer) { if (fresh) quality.frame(now, perf.lastGpu, perf.lastInterval); } else quality.frame(now, null, perf.lastInterval);
+  if (quality.mode === 'auto') hud.setQuality(qualityLabel());
 }
 requestAnimationFrame(frame);
 
@@ -426,4 +441,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get sunShadow() { return sunShadow; }, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get sunShadow() { return sunShadow; }, quality, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };

@@ -23,6 +23,13 @@ export class Env {
    */
   linear = true;
   private composer: EffectComposer;
+  /**
+   * Render scale of the 3D scene (1 = full canvas resolution): the scene target is smaller and the output pass upscales it. Below 1 the
+   * map labels (`addText`) move to an overlay drawn afterwards at full resolution, so text stays sharp; the HUD is HTML anyway.
+   */
+  scale = 1;
+  overlay = new THREE.Scene();
+  private texts: THREE.Object3D[] = [];
   private daySky = new THREE.Color('#e9eef0');
   private duskSky = new THREE.Color('#e8cdb8');
   private nightSky = new THREE.Color('#1a2233');
@@ -96,6 +103,22 @@ export class Env {
   render() {
     if (this.linear) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
+    if (this.overlay.children.length) {
+      const r = this.renderer, ac = r.autoClear;
+      r.autoClear = false;
+      r.render(this.overlay, this.camera);
+      r.autoClear = ac;
+    }
+  }
+
+  /** Text that should stay sharp at any render scale (map labels). */
+  addText(o: THREE.Object3D) { this.texts.push(o); (this.scale < 1 ? this.overlay : this.scene).add(o); }
+
+  setScale(s: number) {
+    if (s === this.scale) return;
+    this.scale = s;
+    this.composer.setPixelRatio(this.renderer.getPixelRatio() * s);
+    for (const o of this.texts) (s < 1 ? this.overlay : this.scene).add(o);
   }
 
   focus(x: number, z: number, dist: number) {
