@@ -11,9 +11,12 @@ import { Ships } from './render/ships';
 import { Life } from './render/life';
 import { lookUniforms } from './render/look';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
-import { Hud } from './ui/hud';
+import { Hud, money } from './ui/hud';
+import { Sound } from './ui/sound';
+import { Ripple } from './render/ripple';
+import { GoalMarker } from './render/goalmarker';
 import { Planner } from './ui/planner';
-import { CELL, N, STATION_COST, TRAIN_COST, METRO_SPEED } from './sim/constants';
+import { CELL, N, STATION_COST, TRAIN_COST, METRO_SPEED, FARE } from './sim/constants';
 import { quoteLine } from './sim/relief';
 import { perf } from './perf';
 import { SunShadow, CarBlobs, SHADOW } from './render/shadows';
@@ -51,7 +54,17 @@ const desire = new DesireView();
 env.scene.add(desire.group);
 desire.group.visible = false;
 let lastStateAt = performance.now();
-const hud = new Hud(document.body, send, seed);
+const sound = new Sound();
+/** what the player's speed buttons / keys asked for last while planning (plan mode pauses the clock, leaving it resumes this speed) */
+let planResume = 0;
+let planning = false;
+const userSend = (c: Command) => { if (c.type === 'speed' && planning && c.speed > 0) planResume = c.speed; send(c); };
+const hud = new Hud(document.body, userSend, seed);
+hud.setSound(sound.enabled);
+let ripple: Ripple | null = null;
+let goalMarker: GoalMarker | null = null;
+let autoSpeed = false;
+for (const ev of ['pointerdown', 'keydown'] as const) window.addEventListener(ev, () => sound.unlock(), { capture: true });
 
 worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   const m = ev.data;
@@ -72,12 +85,17 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     env.scene.add(metro.group);
     markers = new ProjectMarkers((x, z) => terrain!.sample(x, z));
     env.scene.add(markers.group);
+    ripple = new Ripple(terrain.catchment.geometry);
+    env.scene.add(ripple.mesh);
+    goalMarker = new GoalMarker((x, z) => terrain!.sample(x, z));
+    env.scene.add(goalMarker.group);
     planner = new Planner(send, { height: m.height, water: m.water });
+    planner.onBlip = (k) => sound.play(k);
     const vx = m.villages.reduce((a, v) => a + v.x, 0) / m.villages.length;
     const vy = m.villages.reduce((a, v) => a + v.y, 0) / m.villages.length;
     env.focus((vx + 0.5) * CELL, (vy + 0.5) * CELL, 3600);
     send({ type: 'speed', speed: 0 });
-    hud.showIntro(m.city, seed, () => send({ type: 'speed', speed: 1 }));
+    hud.showIntro(m.city, seed, () => { sound.unlock(); send({ type: 'speed', speed: 1 }); });
   } else if (m.type === 'state') {
     if (m.graph) { graphReport = m.graph; for (const l of m.graph.log) (m.graph.defects ? console.warn : console.info)(l); }
     perf.size(m);
@@ -85,7 +103,13 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     const newMonth = !state || state.stats.month !== m.stats.month;
     const sig = (s: StateMsg) => JSON.stringify([s.lines.map((l) => [l.id, l.stations, l.trains]), s.stations.map((st) => (st.riders < 1200 ? 0 : st.riders < 5000 ? 1 : 2))]);
     const linesChanged = !state || sig(state) !== sig(m);
+    // a station came into service: ripple over the streets it just brought within an 8-minute walk
+    if (state && ripple && m.stations.some((st) => st.opened >= 0 && state!.stations.some((q) => q.id === st.id && q.opened < 0))) {
+      ripple.start(m.catchment, state.catchment, m.lines[m.lines.length - 1]?.color ?? '#2f7fc1');
+    }
+    if (newMonth && state) spawnFares(m);
     state = m;
+    { const gt = m.goals.find((g) => g.x !== undefined && g.y !== undefined); goalMarker?.set(gt ? { x: gt.x!, y: gt.y! } : null); }
     if (!labels && init && terrain) {
       labels = new Labels(init.villages, init.city.site, m.docks.centre, (x, z) => terrain!.sample(x, z));
       env.addText(labels.group);
@@ -114,6 +138,8 @@ send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin:
 let savedView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
 hud.handlers.onTool = (t) => {
   const c = env.controls;
+  if (t === 'plan' && !planning) { planning = true; planResume = state && state.speed > 0 ? state.speed : 0; if (planResume > 0) send({ type: 'speed', speed: 0 }); }
+  if (t !== 'plan' && planning) { planning = false; if (planResume > 0 && state && state.speed === 0 && !state.event) send({ type: 'speed', speed: planResume }); }
   if (t === 'plan') {
     savedView = { pos: env.camera.position.clone(), target: c.target.clone() };
     const dist = Math.max(2500, env.camera.position.distanceTo(c.target));
@@ -152,6 +178,70 @@ hud.setQuality(qualityLabel());
 let gpuSeq = 0;
 
 hud.onFocusLandmark = (x, y) => { env.focus((x + 0.5) * CELL, (y + 0.5) * CELL, 800); };
+/** Fly the camera to a place, keeping the viewing direction (the saved overview direction while planning). */
+function flyFocus(x: number, y: number, dist: number) {
+  const target = new THREE.Vector3((x + 0.5) * CELL, 0, (y + 0.5) * CELL);
+  const dir = (hud.tool === 'plan' && savedView ? savedView.pos.clone().sub(savedView.target) : env.camera.position.clone().sub(env.controls.target)).normalize();
+  flyTo(target.clone().addScaledVector(dir, dist), target);
+}
+hud.handlers.onSound = () => { sound.set(!sound.enabled); return sound.enabled; };
+hud.handlers.onAuto = (on) => { autoSpeed = on; };
+hud.handlers.onGoalFocus = (g) => { if (g.x !== undefined && g.y !== undefined) flyFocus(g.x, g.y, Math.max(1800, Math.min(3500, env.camera.position.distanceTo(env.controls.target)))); };
+hud.handlers.onMoment = (m) => {
+  const k = m.kind;
+  sound.play(k === 'open' ? 'open' : k === 'goal' ? 'goal' : k === 'growth' ? 'cranes' : k === 'tower' ? 'tower' : k === 'crowd' ? 'warn' : 'coin');
+  if (k === 'open') {
+    // ribbon-cutting: leave plan mode (the clock runs again) and fly out over the new line
+    const wasPlan = hud.tool === 'plan';
+    if (wasPlan) hud.setTool('view');
+    const sv = savedView;
+    const target = new THREE.Vector3((m.x + 0.5) * CELL, 0, (m.y + 0.5) * CELL);
+    const dir = (sv ? sv.pos.clone().sub(sv.target) : env.camera.position.clone().sub(env.controls.target)).normalize();
+    flyTo(target.clone().addScaledVector(dir, 2800), target);
+  }
+};
+
+// ------------------------------------------------------------------ fares popping over stations
+const floaters: { el: HTMLElement; x: number; y: number; t0: number }[] = [];
+const projV = new THREE.Vector3();
+function project(x: number, y: number, lift: number) {
+  projV.set(x * CELL, (terrain ? terrain.sample(x * CELL, y * CELL) : 0) + lift, y * CELL).project(env.camera);
+  if (projV.z > 1) return null;
+  const r = env.renderer.domElement.getBoundingClientRect();
+  return { x: r.left + (projV.x + 1) / 2 * r.width, y: r.top + (1 - projV.y) / 2 * r.height };
+}
+/** Each month every busy station shows what its fares came to ("+$12k"). Skipped months at fast speed keep the screen readable. */
+function spawnFares(m: StateMsg) {
+  if (m.speed >= 10 && m.stats.month % 3) return;
+  if (m.speed === 0) return;
+  const busy = m.stations.filter((st) => st.opened >= 0 && st.riders >= 250).sort((a, b) => b.riders - a.riders).slice(0, 10);
+  for (const st of busy) {
+    if (floaters.length > 30) break;
+    const el = document.createElement('div');
+    el.className = 'fl';
+    el.textContent = `+${money(st.riders * FARE * 30)}`;
+    hud.floatersEl().appendChild(el);
+    floaters.push({ el, x: st.x + (Math.random() - 0.5) * 0.8, y: st.y + (Math.random() - 0.5) * 0.8, t0: performance.now() });
+  }
+}
+function updateFloaters(now: number) {
+  for (let k = floaters.length - 1; k >= 0; k--) {
+    const f = floaters[k], age = (now - f.t0) / 1900;
+    const p = age < 1 ? project(f.x, f.y, 14) : null;
+    if (!p || age >= 1) { f.el.remove(); floaters.splice(k, 1); continue; }
+    f.el.style.transform = `translate(${p.x.toFixed(0)}px, ${(p.y - 10 - 46 * age).toFixed(0)}px)`;
+    f.el.style.opacity = String(Math.min(1, (1 - age) * 2.2));
+  }
+}
+let lastAutoCheck = 0;
+function autoSpeedTick(now: number) {
+  if (!autoSpeed || !state || planning || state.speed === 0 || now - lastAutoCheck < 600) return;
+  lastAutoCheck = now;
+  // quiet = no decision waiting and no headline in the last 9 seconds
+  const quiet = !state.event && now - hud.lastBigAt > 9000;
+  const want = quiet ? 3 : 1;
+  if (state.speed !== want) send({ type: 'speed', speed: want });
+}
 hud.onFocusDocks = () => {
   if (!state) return;
   const c = state.docks.centre;
@@ -265,10 +355,11 @@ canvas.addEventListener('pointercancel', endSpin);
 
 window.addEventListener('keydown', (e) => {
   if (typing(e.target)) return;
-  if (e.code === 'Space') { send({ type: 'speed', speed: state && state.speed > 0 ? 0 : 1 }); e.preventDefault(); }
-  else if (e.key === '1') send({ type: 'speed', speed: 1 });
-  else if (e.key === '2') send({ type: 'speed', speed: 3 });
-  else if (e.key === '3') send({ type: 'speed', speed: 10 });
+  if (e.code === 'Space') { userSend({ type: 'speed', speed: state && state.speed > 0 ? 0 : 1 }); e.preventDefault(); }
+  else if (e.key === '1') userSend({ type: 'speed', speed: 1 });
+  else if (e.key === '2') userSend({ type: 'speed', speed: 3 });
+  else if (e.key === '3') userSend({ type: 'speed', speed: 10 });
+  else if (e.key === '4') document.querySelector<HTMLButtonElement>('[data-auto]')?.click();
   else if (e.key === 'p' || e.key === 'P') hud.setTool(hud.tool === 'plan' ? 'view' : 'plan');
   else if (e.key === 'v' || e.key === 'V') hud.setTool('view');
   else if (e.key === 'h' || e.key === 'H') hud.toggle('heat');
@@ -347,6 +438,10 @@ function drawFrame(now: number) {
   paperAndLabels();
   life?.animate(dt * (state && state.speed > 0 ? 1 : 0.4), now / 1000, env.night);
   ships?.animate(now / 1000);
+  ripple?.animate(dt);
+  goalMarker?.animate(now / 1000, env.camera.position.distanceTo(env.controls.target));
+  updateFloaters(now);
+  autoSpeedTick(now);
   xray += (xrayTarget - xray) * Math.min(1, dt * 5);
   if (Math.abs(xray - xrayTarget) < 0.002) xray = xrayTarget;
   applyXray(xray);
@@ -491,7 +586,7 @@ async function shotUI(name: string) {
   const clone = document.body.cloneNode(true) as HTMLElement;
   clone.querySelectorAll('canvas, script').forEach((e) => e.remove());
   const html = new XMLSerializer().serializeToString(clone).replace(/^<body[^>]*>/, '').replace(/<\/body>$/, '');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')}</style>${html}</div></foreignObject></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')} *{animation:none !important;transition:none !important}</style>${html}</div></foreignObject></svg>`;
   const img = new Image();
   await new Promise((r, j) => { img.onload = r; img.onerror = j; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
   g.drawImage(img, 0, 0);

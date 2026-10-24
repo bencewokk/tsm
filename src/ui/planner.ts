@@ -11,12 +11,16 @@ export class Planner {
   /** why the last Enter did not build (shown in the hint; the draft is kept so it can be fixed) */
   notice = '';
   private last: StateMsg | null = null;
+  /** stations dug while planning that are not on a line yet: Backspace / Esc / leaving plan mode gives the full price back */
+  dug = new Set<number>();
+  /** UI sound hook */
+  onBlip?: (k: 'dig' | 'undo' | 'warn') => void;
 
   private water: Uint8Array;
   constructor(private send: (c: Command) => void, private terr: Terr) { this.water = terr.water; }
 
   stationAt(s: StateMsg, x: number, y: number) {
-    let best = null as null | { id: number; x: number; y: number }, bd = 2.6;
+    let best = null as null | { id: number; x: number; y: number }, bd = 3.05;
     for (const st of s.stations) {
       const d = Math.hypot(st.x - x, st.y - y);
       if (d < bd) { bd = d; best = st; }
@@ -34,6 +38,8 @@ export class Planner {
       return;
     }
     if (this.water[Math.floor(y) * 128 + Math.floor(x)]) return;
+    if (s.stats.money < STATION_COST) { this.notice = `Not enough money to dig another station (${money(STATION_COST)}).`; this.onBlip?.('warn'); return; }
+    this.onBlip?.('dig');
     // placeholder keeps click order while the worker digs the station
     this.pending.push({ x, y });
     this.draft.push(-this.pending.length);
@@ -48,6 +54,7 @@ export class Planner {
         if (id >= 0) return id;
         const c = this.pending[-id - 1];
         const st = c && s.stations.find((q) => q.x === c.x && q.y === c.y);
+        if (st) this.dug.add(st.id);
         return st ? st.id : id;
       });
       if (this.draft.every((id) => id >= 0)) this.pending = [];
@@ -59,8 +66,12 @@ export class Planner {
     }
   }
 
-  undo() { this.draft.pop(); this.notice = ''; }
-  cancel() { this.draft = []; this.pending = []; this.notice = ''; }
+  /** Take a station dug in this planning session back (full refund); stations that were already on the map stay. */
+  private refund(id: number) {
+    if (id >= 0 && this.dug.delete(id)) this.send({ type: 'removeStation', id, full: true });
+  }
+  undo() { const id = this.draft.pop(); if (id !== undefined) { this.refund(id); this.onBlip?.('undo'); } this.notice = ''; }
+  cancel() { for (const id of this.draft) this.refund(id); for (const id of [...this.dug]) this.refund(id); this.draft = []; this.pending = []; this.notice = ''; }
 
   private commitWhenReady = 0;
 
@@ -78,6 +89,7 @@ export class Planner {
     }
     this.notice = '';
     this.send({ type: 'buildLine', stations: this.draft.slice() });
+    this.dug.clear();
     this.draft = [];
   }
 
@@ -107,7 +119,7 @@ export class Planner {
   }
 
   hint(s: StateMsg): string {
-    if (!this.draft.length) return `Click anywhere on land to dig a station (${money(STATION_COST)}), or click existing stations in order. Blue = within an 8-minute walk over the streets (slower uphill). Drag to pan, wheel to zoom.`;
+    if (!this.draft.length) return `<b>Time is paused while you plan.</b> Click anywhere on land to dig a station (${money(STATION_COST)}), or click existing stations in order. Blue = within an 8-minute walk over the streets (slower uphill). Drag to pan, wheel to zoom.`;
     const r = this.quote(s);
     const q = r.q;
     const ok = r.cost <= s.stats.money && (!q || q.ok);
@@ -125,7 +137,8 @@ export class Planner {
       if (!q.ok) extra += ` <b class="neg">Too steep: segment ${q.badSeg + 1} climbs more than ${(RELIEF.maxRack * 100).toFixed(0)}%; add a station on easier ground.</b>`;
     }
     const warn = this.notice ? `<b class="neg">${this.notice}</b><br>` : '';
-    return `${warn}Line draft: ${this.draft.length} stations, ${r.km.toFixed(1)} km${types}, ${r.trains} trains. Cost <b class="${ok ? '' : 'neg'}">${money(r.cost)}</b>.${extra} ` +
+    const paid = this.draft.filter((id) => this.dug.has(id)).length * STATION_COST;
+    return `${warn}Line draft: ${this.draft.length} stations, ${r.km.toFixed(1)} km${types}, ${r.trains} trains. Cost <b class="${ok ? '' : 'neg'}">${money(r.cost)}</b>${paid ? ` (+ ${money(paid)} already paid for new stations; Backspace / Esc refunds them)` : ''}, you have ${money(s.stats.money)}.${extra} ` +
       `<b>Enter</b> build · <b>Backspace</b> undo · <b>Esc</b> cancel`;
   }
 }

@@ -1,7 +1,7 @@
 import { N, CELL, METRO_SPEED, TRAIN_CAP, LINE_COLORS } from './constants';
 import { quoteLine, type Terr, type LineQuote } from './relief';
 
-export interface Station { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; /** metres below ground level of the platforms (deep stations cost more and add access time) */ depth: number }
+export interface Station { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; /** metres below ground level of the platforms (deep stations cost more and add access time) */ depth: number; /** month the station first came into service (-1 while it is only dug) */ opened: number }
 export interface Line {
   id: number;
   color: string;
@@ -55,7 +55,7 @@ export class Metro {
     if (x < 0 || y < 0 || x >= N || y >= N || water[Math.floor(y) * N + Math.floor(x)]) return null;
     if (this.stations.some((s) => Math.hypot(s.x - x, s.y - y) < 3)) return null;
     const id = this.nextStation++;
-    const s: Station = { id, x, y, name: NAMES[(id - 1) % NAMES.length] + (id > NAMES.length ? ` ${Math.ceil(id / NAMES.length)}` : ''), riders: 0, underwater: false, depth: 0 };
+    const s: Station = { id, x, y, name: NAMES[(id - 1) % NAMES.length] + (id > NAMES.length ? ` ${Math.ceil(id / NAMES.length)}` : ''), riders: 0, underwater: false, depth: 0, opened: -1 };
     this.stations.push(s);
     return s;
   }
@@ -71,12 +71,16 @@ export class Metro {
     return quoteLine(pts, this.terr);
   }
 
-  addLine(ids: number[]): Line | null {
+  /** upgrades unlocked by goals: scale of line speed and of train capacity */
+  speedMul = 1;
+  capMul = 1;
+
+  addLine(ids: number[], month = 0): Line | null {
     const clean = ids.filter((id, k) => this.station(id) && ids.indexOf(id) === k);
     if (clean.length < 2) return null;
     const q = this.quote(clean);
     if (!q.ok) return null;
-    clean.forEach((id, k) => { const st = this.station(id)!; st.depth = Math.max(st.depth, q.depth[k]); });
+    clean.forEach((id, k) => { const st = this.station(id)!; st.depth = Math.max(st.depth, q.depth[k]); if (st.opened < 0) st.opened = month; });
     const id = this.nextLine++;
     const roundTrip = (q.km / METRO_SPEED) * 60 * 2 + clean.length * 1 + 4;
     const trains = Math.max(2, Math.round(roundTrip / 5)); // aim for a 5 minute headway
@@ -94,13 +98,13 @@ export class Metro {
     for (let k = 1; k < l.stations.length; k++) {
       const a = this.station(l.stations[k - 1])!, b = this.station(l.stations[k])!;
       const km = (Math.hypot(a.x - b.x, a.y - b.y) * CELL) / 1000;
-      const t = (km / METRO_SPEED) * 60 * (l.rack[k - 1] ? 1.8 : 1) + 0.6;
+      const t = (km / (METRO_SPEED * this.speedMul)) * 60 * (l.rack[k - 1] ? 1.8 : 1) + 0.6;
       l.segTime.push(t);
       ride += t;
     }
     const roundTrip = ride * 2 + 4;
     l.headway = Math.max(2, roundTrip / Math.max(1, l.trains));
-    l.capacity = (60 / l.headway) * TRAIN_CAP;
+    l.capacity = (60 / l.headway) * TRAIN_CAP * this.capMul;
     if (l.segLoad.length !== l.segTime.length) l.segLoad = l.segTime.map(() => 0);
   }
 

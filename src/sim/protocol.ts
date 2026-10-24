@@ -16,7 +16,7 @@ export interface InitMsg {
   profiles: import('./profiles').DistrictProfile[];
 }
 
-export interface StationInfo { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; depth: number }
+export interface StationInfo { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; depth: number; opened: number }
 export interface LineInfo {
   id: number;
   color: string;
@@ -134,6 +134,12 @@ export interface StateMsg {
   /** latest project notifications (newest last) */
   notices: { month: number; text: string; x: number; y: number; color: string }[];
   desire: DesireLine[];
+  /** the active goal of each track, newest headline moments (each has a unique seq), unlocked upgrades */
+  goals: import('./goals').GoalInfo[];
+  goalsDone: number;
+  goalsTotal: number;
+  moments: import('./goals').Moment[];
+  unlocks: string[];
   log: string[];
   speed: number;
   /** worker timings of the tick and snapshot that produced this message (ms, dev perf overlay) */
@@ -143,7 +149,7 @@ export interface StateMsg {
 export type Command =
   | { type: 'speed'; speed: number }
   | { type: 'placeStation'; x: number; y: number }
-  | { type: 'removeStation'; id: number }
+  | { type: 'removeStation'; id: number; full?: boolean }
   | { type: 'buildLine'; stations: number[] }
   | { type: 'setTrains'; line: number; trains: number }
   | { type: 'deleteLine'; line: number }

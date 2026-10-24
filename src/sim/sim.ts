@@ -23,6 +23,7 @@ import { GRAPHCHECK, validateGraph, graphDefects, formatReport, type GraphReport
 import { T, T_CAP, TERR, updateTerritories } from './territory';
 import { planReserves, applyReserve } from './reserves';
 import { evaluateSquares, SQ } from './squares';
+import { GoalSystem, type Moment } from './goals';
 import { RELIEF, hAt, toblerFactor, slopeField, viewField, zoneEffort } from './relief';
 
 /** Tunable knobs for the growth model. */
@@ -68,6 +69,14 @@ export const TUNE = {
   growth: 0.032,
   minGrowth: 180,
 };
+
+/**
+ * The station boom: a station's first months are a gold rush. Plots in its walk catchment rank first for the next buildings, may start on
+ * slightly lower land value and may upgrade after three months instead of eight to ten, and the catchment can spend its own small pools
+ * (refilled every month by each young station, scaled by how busy it is) when the city-wide demand pool is dry. Towers do not use the boom
+ * (the density field's height cap is untouched). `BOOM.on = false` gives the old behaviour for before / after numbers.
+ */
+export const BOOM = { on: true, months: 30, full: 14, res: 40, com: 46, thresh: 0.12, rank: 0.4, lvBonus: 0.15, upBonus: 0.1, fastAge: 3, zoneOps: 10 };
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 /** land value factor by distance to the nearest road (cells) */
@@ -149,6 +158,18 @@ export class Sim {
   projects = new ProjectSystem(this);
   hazards = new HazardSystem(this);
   lastEventMonth = -99;
+  // goals, headlines and the station boom
+  goals = new GoalSystem(this);
+  unlocks: string[] = [];
+  moments: Moment[] = [];
+  private momentSeq = 0;
+  private lines0 = 0;
+  /** 0..1 per cell: how strongly a young station's walk catchment is being developed this month (see computeBoom) */
+  boom = new Float32Array(N * N);
+  /** pools only plots in a young station's catchment may spend; refilled each month while a station is in its boom */
+  boomRes = 0; boomCom = 0;
+  /** stations that already got their "cranes arrive" headline / first tower headline */
+  private stationFlags = new Map<number, number>();
 
   constructor(public seed: number, force?: { terrain?: CityProfile['terrain']; origin?: CityProfile['origin'] }) {
     this.rng = new Rng(seed);
@@ -213,19 +234,31 @@ export class Sim {
         this.say(site ? `${st.name} station dug on the ${site.name} station site (half price: the land was safeguarded)` : `${st.name} station dug`);
         break;
       }
-      case 'removeStation': if (m.removeStation(cmd.id)) this.money += STATION_COST * 0.5; break;
+      case 'removeStation': if (m.removeStation(cmd.id)) this.money += STATION_COST * (cmd.full ? 1 : 0.5); break;
       case 'buildLine': {
         const q = m.quote(cmd.stations);
         if (!q.ok) { this.say(`Line not built: segment ${q.badSeg + 1} climbs ${(Math.abs(q.segs[q.badSeg].grade) * 100).toFixed(0)}%, more than even a rack railway manages (${(RELIEF.maxRack * 100).toFixed(0)}%). Add stations on easier ground.`); return; }
         const est = q.cost + 2 * TRAIN_COST;
         if (this.money < est) { this.say(`Line needs ${(est / 1e6).toFixed(0)}M, not enough money`); return; }
-        const l = m.addLine(cmd.stations);
+        const l = m.addLine(cmd.stations, this.month);
         if (!l) return;
         const cost = q.cost + l.trains * TRAIN_COST;
         this.money -= cost; this.buildSpend += cost;
         const bits = [q.by[1] > 0.05 ? `${q.by[1].toFixed(1)} km bored tunnel` : '', q.by[2] > 0.05 ? `${q.by[2].toFixed(1)} km viaduct` : '', q.by[4] > 0.05 ? `${q.by[4].toFixed(1)} km rack railway` : '', q.wkm > 0.05 ? `${q.wkm.toFixed(1)} km under water` : ''].filter(Boolean);
         this.say(`Line ${l.id} opened: ${l.stations.length} stations, ${l.lengthKm.toFixed(1)} km${bits.length ? ` (${bits.join(', ')})` : ''}`);
         this.refreshTransit();
+        {
+          const sts = l.stations.map((id) => m.station(id)!);
+          let hx = 0, hy = 0;
+          for (const st of sts) { hx += st.x / sts.length; hy += st.y / sts.length; }
+          let homes = 0, jobs = 0;
+          for (let i = 0; i < N * N; i++) if (this.walkToStation(i) <= 8) { homes += this.cHomes[i]; jobs += this.cJobs[i]; }
+          const first = this.lines0 === 0;
+          this.lines0++;
+          this.moment('open', `Line ${l.id} opens: ${sts[0].name} to ${sts[sts.length - 1].name}`,
+            `${l.stations.length} stations over ${l.lengthKm.toFixed(1)} km. ${Math.round(homes).toLocaleString('en-US')} homes and ${Math.round(jobs).toLocaleString('en-US')} jobs now lie within an 8-minute walk of a station. Land values are already moving${first ? ': watch for cranes round the stations' : ''}.`,
+            l.color, hx, hy, true);
+        }
         break;
       }
       case 'setTrains': {
@@ -473,6 +506,12 @@ export class Sim {
     if (this.log.length > 40) this.log.shift();
   }
 
+  /** A headline-worthy event for the UI (toast / newspaper card / sound). Content is plain data, never random. */
+  moment(kind: Moment['kind'], title: string, text: string, color: string, x: number, y: number, big = false) {
+    this.moments.push({ seq: ++this.momentSeq, month: this.month, kind, title, text, color, x, y, big });
+    if (this.moments.length > 24) this.moments.shift();
+  }
+
   // ---------------------------------------------------------------- monthly tick
   tick() {
     this.month++;
@@ -487,6 +526,7 @@ export class Sim {
     this.computeLandValue();
     for (let i = 0; i < N * N; i++) this.lvS[i] += (this.lv[i] - this.lvS[i]) * TUNE.lvLag;
     this.field.update(this);
+    this.computeBoom();
     if (this.month % 12 === 0) updateTerritories(this);
     if (this.month % SQ.everyMonths === 6) evaluateSquares(this);
     this.grow();
@@ -500,6 +540,8 @@ export class Sim {
     this.projects.tick();
     this.hazards.tick();
     this.finance();
+    this.goals.tick();
+    this.networkMoments();
     this.checkEvents();
   }
 
@@ -880,6 +922,75 @@ export class Sim {
     return Math.min(1, p);
   }
 
+  /** Per-cell boom strength from young stations' walk fields, and this month's refill of the boom pools. */
+  private computeBoom() {
+    this.boom.fill(0);
+    if (!BOOM.on) { this.boomRes = 0; this.boomCom = 0; return; }
+    const m = this.metro;
+    let rate = 0;
+    for (const st of m.stations) {
+      if (st.opened < 0) continue;
+      const age = this.month - st.opened;
+      if (age >= BOOM.months) continue;
+      const k = m.sIndex.get(st.id);
+      if (k === undefined || !this.walk[k]) continue;
+      const w = age <= BOOM.full ? 1 : 1 - (age - BOOM.full) / (BOOM.months - BOOM.full);
+      rate += w * clamp(0.5 + st.riders / 1500, 0.5, 1.6);
+      const wk = this.walk[k];
+      for (let i = 0; i < N * N; i++) { const t = wk[i]; if (t < 10) { const f = w * (1 - t / 10); if (f > this.boom[i]) this.boom[i] = f; } }
+    }
+    this.boomRes = Math.min(this.boomRes + rate * BOOM.res, rate * BOOM.res * 6 + 1);
+    this.boomCom = Math.min(this.boomCom + rate * BOOM.com, rate * BOOM.com * 6 + 1);
+    if (rate === 0) { this.boomRes = 0; this.boomCom = 0; }
+  }
+
+  /** The young station that owns a plot's boom (shortest walk), for headlines. */
+  private boomStation(cell: number) {
+    const m = this.metro;
+    let best: { id: number; name: string; x: number; y: number } | null = null, bt = 10;
+    for (const st of m.stations) {
+      if (st.opened < 0 || this.month - st.opened >= BOOM.months) continue;
+      const k = m.sIndex.get(st.id);
+      if (k === undefined || !this.walk[k]) continue;
+      const t = this.walk[k][cell];
+      if (t < bt) { bt = t; best = st; }
+    }
+    return best;
+  }
+
+  /** Once-per-station / once-per-line headlines: first cranes, first tower, first riders, overcrowding. */
+  private networkMoments() {
+    const m = this.metro;
+    for (const l of m.lines) {
+      const f = this.lineFlags.get(l.id) ?? 0;
+      const first = m.station(l.stations[0]);
+      if (!(f & 1) && l.riders > 0) {
+        this.lineFlags.set(l.id, f | 1);
+        this.moment('riders', `Line ${l.id}: first riders`, `${Math.round(l.riders).toLocaleString('en-US')} trips a day at $${FARE} a fare is $${Math.round(l.riders * FARE * 30 / 1000)}k a month. Stations in busy streets earn more: watch where the riders come from.`, l.color, first?.x ?? 0, first?.y ?? 0, false);
+      }
+      if (!(f & 2) && l.crowd > 1.05) {
+        this.lineFlags.set(l.id, (this.lineFlags.get(l.id) ?? 0) | 2);
+        this.moment('crowd', `Line ${l.id} is overcrowded`, `Peak load is ${Math.round(l.crowd * 100)}% of capacity: platforms are packed and the rating is falling. Add trains with the + button, or open a parallel line.`, '#d9534f', first?.x ?? 0, first?.y ?? 0, false);
+      }
+    }
+    // first tower beside a station
+    let any = false;
+    for (const st of m.stations) if (st.opened >= 0 && !((this.stationFlags.get(st.id) ?? 0) & 2)) { any = true; break; }
+    if (!any) return;
+    for (const l of this.lots.lots) {
+      if (!l.alive || l.level < 3 || l.constr || l.hgt < 36 || (l.type !== BT.Res && l.type !== BT.Com)) continue;
+      for (const st of m.stations) {
+        const f = this.stationFlags.get(st.id) ?? 0;
+        if (st.opened < 0 || (f & 2)) continue;
+        const k = m.sIndex.get(st.id);
+        if (k === undefined || !this.walk[k] || this.walk[k][l.cell] > 8) continue;
+        this.stationFlags.set(st.id, f | 2);
+        this.moment('tower', `A ${l.hgt} m tower tops out by ${st.name}`, `${this.month - st.opened} months after the station opened, ${l.type === BT.Res ? 'homes' : 'offices'} rise ${l.hgt} m above the street. Land beside a busy station is the most valuable in the city.`, '#8e5bb5', l.x, l.y, false);
+      }
+    }
+  }
+  private lineFlags = new Map<number, number>();
+
   // ---------------------------------------------------------------- growth
   private grow() {
     const workers = this.homes * WORKERS_PER_HOME;
@@ -923,6 +1034,7 @@ export class Sim {
       const jit = this.rng.next() * 0.12;
       const pf = this.profiles[l.prof], fr = (0.5 + pf.landUseMix.res) * pf.growthRate, fc = (0.5 + pf.landUseMix.com) * pf.growthRate, fi = (0.5 + pf.landUseMix.ind) * pf.growthRate;
       const maxL = F.maxLevel(l.x, l.y);
+      const bm = this.boom[l.cell];
       if (t === BT.None) {
         const tt0 = TERR.on ? this.town.terr[l.cell] : 0;
         // heavy industry does not care about land value: it builds wherever its territory is
@@ -936,18 +1048,18 @@ export class Sim {
         const heavy = tt === T.Port || tt === T.Industry;
         // satellites grow by their own rule (homes by the works, round the station of a rail town or a served garden suburb): a local pull on top of land value
         const sb = sat[l.cell];
-        if (v + sb >= spawnR && !heavy) res.push({ l, s: (v + sb + jit + fill) * fr, kind: BT.Res, to: 1, h: 0 });
-        if (v >= spawnC && !heavy) com.push({ l, s: (v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12 + fill + 0.3 * Math.min(1, this.cSquare[l.cell])) * fc, kind: BT.Com, to: 1, h: 0 });
+        if (v + sb + BOOM.lvBonus * bm >= spawnR && !heavy) res.push({ l, s: (v + sb + jit + fill + BOOM.rank * bm) * fr, kind: BT.Res, to: 1, h: 0 });
+        if (v + BOOM.lvBonus * bm >= spawnC && !heavy) com.push({ l, s: (BOOM.rank * bm + v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12 + fill + 0.3 * Math.min(1, this.cSquare[l.cell])) * fc, kind: BT.Com, to: 1, h: 0 });
         if (!TERR.on || heavy) ind.push({ l, s: (0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit) * fi, kind: BT.Ind, to: 1, h: 0 });
       } else if (t === BT.Res && lv < 3) {
         const cap = l.flags & Flag.CarLocked ? 2 : 3;
         if (lv + 1 > cap || lv + 1 > maxL) continue;
-        if (v + sat[l.cell] * 0.5 > TUNE.upLV[lv] - 0.1 * pR && l.age >= (lv === 1 ? 10 : 8)) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: lv + 1, h: this.pickHeight(l, lv + 1, true) });
+        if (v + sat[l.cell] * 0.5 + BOOM.upBonus * bm > TUNE.upLV[lv] - 0.1 * pR && l.age >= (bm > 0.3 ? BOOM.fastAge : lv === 1 ? 10 : 8)) res.push({ l, s: v + 0.05 + jit + BOOM.rank * bm, kind: BT.Res, to: lv + 1, h: this.pickHeight(l, lv + 1, true) });
         // where the field allows a tower and the value is high, a low building is replaced by a tower directly (no stop at mid-rise)
         if (lv === 1 && cap === 3 && maxL === 3 && F.hmaxAt(l.x, l.y) >= 40 && v > TUNE.upLV[2] && l.age >= 12) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: 3, h: this.pickHeight(l, 3, true) });
       } else if (t === BT.Com && lv < 3) {
         if (lv + 1 > maxL) continue;
-        if (v > TUNE.comUpLV[lv] - 0.1 * pC && l.age >= (lv === 1 ? 5 : 10)) com.push({ l, s: v + 0.1 + jit, kind: BT.Com, to: lv + 1, h: this.pickHeight(l, lv + 1, true) });
+        if (v + BOOM.upBonus * bm > TUNE.comUpLV[lv] - 0.1 * pC && l.age >= (bm > 0.3 ? BOOM.fastAge : lv === 1 ? 5 : 10)) com.push({ l, s: v + 0.1 + jit + BOOM.rank * bm, kind: BT.Com, to: lv + 1, h: this.pickHeight(l, lv + 1, true) });
         if (lv === 1 && maxL === 3 && F.hmaxAt(l.x, l.y) >= 40 && v > TUNE.comUpLV[2] && l.age >= 10) com.push({ l, s: v + 0.1 + jit, kind: BT.Com, to: 3, h: this.pickHeight(l, 3, true) });
       } else if ((t === BT.Res || t === BT.Com) && lv === 3 && l.hgt > 0 && l.age >= 24 && !(l.flags & Flag.CarLocked)) {
         // a better-connected centre rebuilds its towers taller
@@ -979,15 +1091,18 @@ export class Sim {
         if (ops >= maxOps) break;
         // an anchor tower may be financed on credit (regional demand) while the pool is in debt, as long as the debt stays under ~2 months of growth
         const credit = c.to === 3 && c.h >= 36 && poolKey !== 'indPool' && this[poolKey] > -TUNE.towerCredit * B;
+        // a plot in a young station's catchment may spend the station's own boom pool (never for an anchor tower: the height cap is untouched)
+        const bp = poolKey === 'resPool' ? 'boomRes' : poolKey === 'comPool' ? 'boomCom' : null;
+        const useBoom = !!bp && BOOM.on && !(c.to === 3 && c.h >= 36) && this.boom[c.l.cell] > BOOM.thresh && this[bp] > 0;
         // an exhausted pool stops ordinary starts, but the scan goes on: an anchor tower further down the list may still start on credit
         // (the old `break` here ended the scan at the first ordinary candidate, so with the pool in debt no tower was ever looked at)
-        if (this[poolKey] <= keep && !credit) continue;
+        if (this[poolKey] <= keep && !credit && !useBoom) continue;
         if (taken.has(c.l.id)) continue;
         // growth lags: only a few towers and mid-rises start each month
         if (c.to === 3 && towers >= TUNE.maxTowerStarts) continue;
         if (c.to === 2 && mids >= TUNE.maxMidStarts) continue;
         const z = this.zoneOf(c.l.cell);
-        if (zoneOps[z] >= 6) continue;
+        if (zoneOps[z] >= (useBoom ? BOOM.zoneOps : 6)) continue;
         let h = c.h, plan: AsmPlan | null = null;
         if (c.to === 3 && c.kind !== BT.Ind && h >= 36) {
           // a tall building consumes several plots: assemble a site, or settle for what one plot allows
@@ -997,12 +1112,22 @@ export class Sim {
         }
         const wEff = plan ? Math.hypot(plan.quad[2] - plan.quad[0], plan.quad[3] - plan.quad[1]) : c.l.w;
         const add = this.capacity(c.l, c.kind, c.to, h, wEff) - (c.l.type === c.kind ? this.capacity(c.l, c.kind, c.l.level, c.l.hgt) : 0);
-        if (add > Math.max(0, this[poolKey]) * 2.5 + 10 && !(credit && add <= B * 3)) { if (c.to === 3 && h >= 36 && keep === 0) keep = start * TUNE.saveShare; continue; }
-        this[poolKey] -= add;
+        const avail = useBoom ? this[bp!] : this[poolKey];
+        if (add > Math.max(0, avail) * 2.5 + 10 && !(credit && add <= B * 3)) { if (c.to === 3 && h >= 36 && keep === 0) keep = start * TUNE.saveShare; continue; }
+        if (useBoom) {
+          this[bp!] -= add;
+          const bs = this.boomStation(c.l.cell);
+          if (bs && !((this.stationFlags.get(bs.id) ?? 0) & 1)) {
+            this.stationFlags.set(bs.id, (this.stationFlags.get(bs.id) ?? 0) | 1);
+            this.moment('growth', `Cranes at ${bs.name}`, `The first new ${c.kind === BT.Res ? 'homes' : 'shops and offices'} are going up beside the station, ${this.month - this.metro.station(bs.id)!.opened} months after it opened.`, '#e0a526', c.l.x, c.l.y, false);
+          }
+        } else this[poolKey] -= add;
         taken.add(c.l.id); zoneOps[z]++; ops++;
         if (c.to === 3) towers++; else if (c.to === 2) mids++;
         if (plan) {
-          const months = Math.max(3, Math.min(11, Math.round(h / 11)));
+          // beside a young station the crews work shifts: a quarter fewer months of structure (the height itself is still the field's)
+          const months0 = Math.max(3, Math.min(11, Math.round(h / 11)));
+          const months = BOOM.on && this.boom[c.l.cell] > 0.3 ? Math.max(3, Math.round(months0 * 0.75)) : months0;
           this.asm.start(plan, { type: c.kind, level: 3, hgt: h, months, label: `${c.kind === BT.Res ? 'Residential' : 'Office'} tower (${h} m)` });
           continue;
         }
@@ -1479,6 +1604,7 @@ export class Sim {
       assemblies: this.asm.infos(),
       projects: this.projects.infos(), notices: this.projects.notices.slice(-5),
       desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
+      goals: this.goals.infos(), goalsDone: this.goals.count(), goalsTotal: this.goals.total(), moments: this.moments.slice(-10), unlocks: this.unlocks.slice(),
       log: this.log.slice(-8), speed: this.speed,
     };
   }
