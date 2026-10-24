@@ -35,7 +35,9 @@ export type Effect =
   | { kind: 'lmCarPark'; id: string }
   | { kind: 'log'; text: string }
   /** a choice on a development project instance (projects.ts) */
-  | { kind: 'project'; inst: number; choice: number };
+  | { kind: 'project'; inst: number; choice: number }
+  /** a decision on defences against a natural hazard (hazards.ts) */
+  | { kind: 'hazard'; id: string; choice: number };
 
 export interface DocksDeal {
   id: string;

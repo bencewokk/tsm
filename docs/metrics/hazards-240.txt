@@ -1,0 +1,20 @@
+== seed 4821 coast/port, 240 months
+   strikes: {}; defences: {}
+== seed 187 hills/rail-junction, 240 months
+   m11	flood	in central Millford	hit 7, wrecked 3, clean-up $4.2M
+   m14	landslide	in central Fernway	hit 4, wrecked 4, clean-up $3.6M
+   m70	landslide	in outer east Fernway	hit 4, wrecked 4, clean-up $3.6M
+   m71	landslide	defences built (-$9M)
+   m121	flood	in south-east Millford	hit 8, wrecked 4, clean-up $4.8M
+   m121	flood	defences built (-$14M)
+   strikes: {"flood":2,"landslide":2}; defences: {"landslide":0.75,"flood":1}
+== seed 304 coast/planned-capital, 240 months
+   m61	flood	in outer east Kestrel Hill	hit 8, wrecked 0, clean-up $4.8M
+   m83	flood	in outer south Kestrel Hill	hit 8, wrecked 1, clean-up $4.8M
+   m83	flood	defences built (-$14M)
+   strikes: {"flood":2}; defences: {"flood":1}
+== seed 57 river/market-town, 240 months
+   m38	flood	near Harbour station	hit 8, wrecked 4, clean-up $4.8M
+   m72	flood	in outer north-east Saltmarsh	hit 8, wrecked 2, clean-up $4.8M
+   m72	flood	defences built (-$14M)
+   strikes: {"flood":2}; defences: {"flood":1}

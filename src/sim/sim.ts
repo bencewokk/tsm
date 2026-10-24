@@ -18,6 +18,7 @@ import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './
 import { MinHeap } from './heap';
 import { pruneRoads, promoteJunctions, inCoreXY } from './hierarchy';
 import { ProjectSystem, PACE } from './projects';
+import { HazardSystem } from './hazards';
 import { GRAPHCHECK, validateGraph, graphDefects, formatReport, type GraphReport } from './graphcheck';
 import { T, T_CAP, TERR, updateTerritories } from './territory';
 import { planReserves, applyReserve } from './reserves';
@@ -144,6 +145,7 @@ export class Sim {
   lm!: LandmarkSystem;
   asm = new AssemblySystem(this);
   projects = new ProjectSystem(this);
+  hazards = new HazardSystem(this);
   lastEventMonth = -99;
 
   constructor(public seed: number, force?: { terrain?: CityProfile['terrain']; origin?: CityProfile['origin'] }) {
@@ -301,6 +303,14 @@ export class Sim {
       this.pending = { def, variant, vars };
       return;
     }
+    // hazard defences (hazards.ts): asked after repeated floods / landslides
+    const hz = this.hazards.nextDecision();
+    if (hz) {
+      const hid = hz.id.slice(4);
+      const def: EventDef = { id: hz.id, trigger: {}, title: hz.title, text: hz.text, choices: hz.choices.map((c, k) => ({ ...c, effects: [{ kind: 'hazard', id: hid, choice: k }] })) };
+      this.pending = { def, variant: null, vars: {} };
+      return;
+    }
     // development projects: queued decisions, one at a time and spaced out
     if (this.month < this.projects.lastDecision + PACE.decisionGap) return;
     const d = this.projects.nextDecision();
@@ -378,6 +388,7 @@ export class Sim {
       }
       case 'lmCarPark': this.lm.setCarPark(e.id); this.say('Car park extended'); break;
       case 'project': this.projects.choose(e.inst, e.choice); this.projects.lastDecision = this.month; break;
+      case 'hazard': this.hazards.choose(e.id, e.choice); break;
       case 'docksRoadRelief': this.docks.roadRelief = true; this.say('Bus lanes painted along the harbour roads'); break;
     }
   }
@@ -485,6 +496,7 @@ export class Sim {
     this.repairRoads();
     this.checkGraph(`month ${this.month}`);
     this.projects.tick();
+    this.hazards.tick();
     this.finance();
     this.checkEvents();
   }

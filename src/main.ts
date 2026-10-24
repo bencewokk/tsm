@@ -7,6 +7,7 @@ import { MetroView } from './render/metro';
 import { DesireView } from './render/desire';
 import { Labels } from './render/labels';
 import { ProjectMarkers } from './render/markers';
+import { Ships } from './render/ships';
 import { Life } from './render/life';
 import { lookUniforms } from './render/look';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
@@ -26,6 +27,7 @@ const send = (c: Command | { type: 'start'; seed: number; terrain?: string; orig
 
 let init: InitMsg | null = null;
 let markers: ProjectMarkers | null = null;
+let ships: Ships | null = null;
 /** dev: latest road graph validation from the worker (`tsm.graph`) */
 let graphReport: StateMsg['graph'] | null = null;
 let terrain: TerrainView | null = null;
@@ -51,6 +53,8 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     env.scene.add(city.group);
     life = new Life((x, z) => terrain!.sample(x, z), m.water);
     env.scene.add(life.group);
+    ships = new Ships(m.water, seed);
+    env.scene.add(ships.group);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
     env.scene.add(metro.group);
     markers = new ProjectMarkers((x, z) => terrain!.sample(x, z));
@@ -314,6 +318,7 @@ function frame(now: number) {
   city?.animate(frac, now / 1000);
   paperAndLabels();
   life?.animate(dt * (state && state.speed > 0 ? 1 : 0.4), now / 1000, env.night);
+  ships?.animate(now / 1000);
   xray += (xrayTarget - xray) * Math.min(1, dt * 5);
   if (Math.abs(xray - xrayTarget) < 0.002) xray = xrayTarget;
   applyXray(xray);
@@ -426,6 +431,7 @@ async function shot(name: string) {
   if (city) city.roadMat.emissiveIntensity = env.night * 0.05;
   paperAndLabels();
   life?.animate(0, performance.now() / 1000, env.night);
+  ships?.animate(performance.now() / 1000);
   env.render();
   const url = env.renderer.domElement.toDataURL('image/png');
   await fetch(`/__shot?name=${encodeURIComponent(name)}`, { method: 'POST', body: url });

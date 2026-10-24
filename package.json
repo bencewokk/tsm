@@ -20,7 +20,8 @@
     "graph": "tsx scripts/graph.ts",
     "catch": "tsx scripts/catch.ts",
     "events": "tsx scripts/events.ts",
-    "suburb": "tsx scripts/suburb.ts"
+    "suburb": "tsx scripts/suburb.ts",
+    "hazards": "tsx scripts/hazards.ts"
   },
   "dependencies": {
     "three": "^0.186.1"
