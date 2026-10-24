@@ -18,6 +18,8 @@ drift by up to 2x between runs. Comparisons below are therefore taken as interle
   GPU timer queries; works in a hidden pane where requestAnimationFrame does not run). Scenarios: `await import('/scripts/perf-scenarios.js')`,
   then `__ff(month)` (one month per message, times the main-thread apply), `__line()` (test line), `__scen()` (overview / street, day / night,
   x-ray, heatmap, plan mode), `__ab()` (interleaved GPU cost of parts), `__shots(tag)` (parity captures `screenshots/perf-<tag>-*.png`).
+  `__live(seconds, speed)` plays the sim (10 = top speed) while rendering frames back to back.
+- **Render parity:** `npm run parity -- [seed] [months] [every] [--budget ms]` checks that the incremental city view matches a freshly built one.
 - "wall" = CPU + GPU per frame with a sync after each frame (no pipelining, an upper bound); "gpu" = GPU timer query.
 
 ## Baseline (commit 2c2e072)
@@ -97,3 +99,98 @@ Half resolution (scene and post): 32.2 -> 17.8 ms with tilt-shift, 28.4 -> 18.0 
 - Captures (seed 4821, month 240, same cameras): `screenshots/perf-before-m240-*.jpg` (tilt-shift) and `screenshots/perf-noblur-m240-*.jpg`
   (overview day / night, street, mid zoom, x-ray, plan mode). The only intended difference is no blur (cars are placed at random each load).
 - For the planned visual pass: drop "shallow depth of field" from the architect's-model look; the T key is free.
+
+## Fix 2: main-thread city rebuild (top cost 1)
+
+Profile (headless `--render`, `node --cpu-prof`): `buildChunk` re-ran the building designer for every plot of a 16 x 16-cell chunk when any
+one of them changed (about 7 chunks a month, a few hundred plots each); then the tree layers (up to 30k instances) were rebuilt from
+scratch and their full 7.7 MB instance buffers uploaded every month, and wild trees re-sampled the terrain 5 times per cell every month.
+
+What changed (`src/render/city.ts`, `layers.ts`, `poly.ts`; commits bc83d0d, 1f12ca4, 070c149, ed8578b):
+- Each chunk keeps, per plot, its vertex range in the merged arrays and its signature; a rebuilt chunk copies unchanged plots out of the
+  old arrays (in runs) and designs only the changed ones. Bounding spheres come from cached per-plot boxes. Same arrays in the same order.
+- Trees: per-plot, per-street and wild instances are precomputed records (matrix and linear colour); the layers are refilled by copying,
+  only when a chunk, a site, the roads or the plot shapes changed; wild-tree candidates are computed once; uploads cover only the used part.
+- The rebuild is a queue of small steps (roads, occupancy, designs six plots at a time, chunk assembly, construction sites, assembly sites)
+  run within 6 ms per frame. Every step prepares off-scene and a final commit step swaps everything in at once, so a month still changes in
+  one frame. If the next message arrives first, the rest of the queue is finished then. `tsm.shot` flushes first.
+- Road normals computed on the typed arrays (identical to computeVertexNormals), hex colours converted once, no per-frame allocations in `animate`.
+- Parity: `npm run parity` (incremental view vs a fresh view, optionally time-sliced with `--budget`) and an exact comparison against the
+  original implementation (`scripts/parity_base.ts`, not committed): all chunk geometry arrays and all tree and crane instance matrices and
+  colours identical, seeds 4821, 187 and 304, months 12-96.
+
+Main-thread apply per monthly message, headless, A/B in one process (new vs the original `CityView`; docs/perf/bench-final.txt).
+"diff" = work done in the message handler (including its first step); "longest step" = the most a single frame gets:
+
+| seed | line | months | before | after (total) | diff | longest step |
+|---|---|---|---|---|---|---|
+| 4821 | no | 12 / 60 / 120 / 240 | 325 / 254 / 89 / 408 | 61 / 38 / 20 / 87 | 12 / 8 / 7 / 24 | 31 / 18 / 12 / 69 (roads) |
+| 4821 | yes | 12 / 60 / 120 / 240 | 160 / 259 / 251 / 187 | 30 / 64 / 59 / 39 | 6 / 7 / 11 / 8 | 21 / 48 / 22 / 18 |
+| 187 | no | 12 / 60 / 120 / 240 | 165 / 140 / 138 / 38 | 41 / 24 / 33 / 6 | 9 / 3 / 7 / 2 | 16 / 15 / 18 / 5 |
+| 187 | yes | 12 / 60 / 120 / 240 | 158 / 158 / 139 / 217 | 38 / 25 / 36 / 45 | 9 / 2 / 9 / 13 | 17 / 14 / 18 / 16 |
+| 304 | no | 12 / 60 / 120 / 240 | 103 / 88 / 112 / 48 | 20 / 24 / 21 / 10 | 6 / 5 / 5 / 1 | 15 / 14 / 13 / 17 |
+| 304 | yes | 12 / 60 / 120 / 240 | 90 / 126 / 181 / 171 | 20 / 36 / 47 / 43 | 8 / 10 / 10 / 11 | 13 / 16 / 13 / 31 |
+
+All in ms, mean of the 6 months before each checkpoint. The machine was contended during this run, so the ratio is what holds: 4-7x less
+work, and at most one step (usually 10-20 ms) per frame instead of the whole 90-400 ms in one frame.
+
+Browser, seed 4821 with the line, months 60-360, one month per message: apply in the message handler p50 11-18 ms (before 75-360),
+p95 20-60 ms; rebuild slices in the following frames p50 7-8 ms, p95 10-14 ms on a quiet machine (26-30 ms while it was saturated).
+At the top speed (a month every 150 ms) the main thread now spends 20-60 ms of every 150 ms on the city, before 140-400 ms (saturated).
+This is derived from the measured per-message work: the hidden pane could not run a real 60 Hz frame loop alongside (see "Synthetic vs real").
+
+## Fix 3: GPU (top cost 2)
+
+Interleaved A/B in one page at month 240, overview, day (GPU ms per frame; the GPU was shared with another worker's tab):
+- Blur removal (fix 1): 31.2 -> 23.3.
+- Leaf crowns as an indexed icosahedron (12 vertices instead of 60; the material is flat shaded, so the shading is unchanged): 25.2 -> 22.6.
+- Metro viaducts instanced (deck, stripe, piers: one instanced mesh each per line instead of a mesh per 25 m segment): draw calls 755 -> 446.
+- `setPaper` no longer parses a colour string and allocates a Color every frame.
+
+Where the frame goes now (month 240, overview, A/B of skipping each part): shadow map render 10.1 ms of about 24, buildings 2.7,
+trees 1.9, terrain 1.4, metro 0.8, water and roads under 0.7 each. The shadow pass is fill-bound: a 2048 map instead of 4096 saves 5.3 ms.
+
+## Fix 4: sim tick (top cost 3) and protocol (top cost 5)
+
+- `field.update`: the centrality of the smaller centres does not move and is cached (the main centre grows with population and is still
+  computed every month). `computeDriveTimes`: zone-pair distances and midpoints are static and cached. `computeLandValue` no longer
+  allocates arrays per cell. A/B in one process with an exact equality check every month (`scripts/simab.ts`, not committed):
+  field.update 6.6 -> 3.6 ms (4821) and 13.7 -> 5.0 ms (187); computeDriveTimes 3.2 -> 0.5 ms and 4.6 -> 0.8 ms. Populations at months 60, 120
+  and 240 are identical to the baseline on every seed and mode (the sim stays deterministic and unchanged).
+- The worker transfers the snapshot's typed arrays (fresh copies every month) instead of structured-cloning them.
+- Sim tick now 10-23 ms per month at month 240 (20-72 ms in the noisy baseline run), well inside the 150 ms of the top speed.
+- Not done: delta snapshots (the message is 310-395 KB and its clone was under 1 ms, not worth the protocol churn while master changes it).
+
+## Memory
+
+Browser, seed 4821 with the line, months 30 to 360 in 30-month steps: geometries on the GPU track the scene's live geometries
+(always 4 fewer: hidden overlays) between 126 and 371 as construction sites come and go; textures stay at 14; JS heap 150-265 MB
+(mostly the typed arrays of the chunk geometry, kept for the incremental rebuild). No growth that does not follow the city.
+Headless: heap 22-28 MB, array buffers 55-110 MB with the render view.
+
+## Targets
+
+- 60 fps at overview on a 20-year city at 1080p on Iris Xe: not reached. GPU about 22-24 ms per frame (from about 31-35 ms), CPU frame 5-9 ms.
+  The rest is the 4096 x 4096 shadow map re-rendered every frame (about 10 ms, fill-bound) and per-pixel shading. Not reachable without a
+  visual trade-off. Measured options, for a decision (none applied):
+  1. Shadow map 2048 instead of 4096: -5.3 ms (softer shadow edges, 4.7 m per texel instead of 2.3 m).
+  2. Re-render the shadow map only when the sun has moved more than a small angle or geometry changed: up to -10 ms on the frames that skip it
+     (shadow edges step slightly at dusk; shadows of moving cars, trains and crane jibs update less often).
+  3. Render scale 0.67, upscaled: about -9 ms (softer image).
+  With 1 and 2 together the overview frame would be around 13-15 ms on this GPU.
+- The sim keeps up at the top speed: tick 10-23 ms of the 150 ms per month, and the main thread no longer stalls on each message.
+- Memory is stable over 360 months (above).
+
+## Synthetic vs real
+
+- Hidden Browser pane: requestAnimationFrame does not run, so frame times come from frames rendered back to back with a GPU sync after
+  each (an upper bound, no CPU / GPU overlap) plus GPU timer queries, not from a real 60 Hz loop. The rebuild slices were driven by the
+  measuring script the way the frame loop drives them.
+- CityView apply timings are also measured headless (three.js geometry building in Node, no GPU upload).
+- The machine was shared with another worker's dev server, sim and browser tab throughout: absolute numbers vary 2-3x between runs;
+  the before / after figures above come from interleaved A/B runs in the same process or page.
+
+## For the visual pass and HANDOVER (not edited here)
+
+- Drop "shallow depth of field" from the architect's-model look: the blur passes are gone (user decision). The T key is free.
+- `tsm.env.linear = false` (dev) renders straight to the canvas: 3 ms cheaper, but transparent layers then blend after tone mapping and read paler.

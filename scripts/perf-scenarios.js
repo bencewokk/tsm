@@ -107,6 +107,34 @@ window.__ab = async (rounds = 5, frames = 8, only = null) => {
   return out;
 };
 
+/**
+ * Live run: the sim plays at `speed` (10 = top speed, a month every 150 ms) while frames are rendered back to back (each with a GPU
+ * sync, as in __scen), so message handling and the city's rebuild slices land between frames as they would in the browser's loop.
+ * Reports the frame times (wall), months advanced and the main-thread apply per message.
+ */
+window.__live = async (seconds = 10, speed = 10) => {
+  const P = tsm.perf.mon;
+  P.apply.clear(); P.msgAt.clear(); for (const r of P.steps.values()) r.clear(); P.worker.tick.clear();
+  const m0 = tsm.state.stats.month, frames = [];
+  const gl = tsm.env.renderer.getContext(), px = new Uint8Array(4);
+  const yieldNow = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(0); c.port2.postMessage(0); });
+  tsm.send({ type: 'speed', speed });
+  const t0 = performance.now();
+  while (performance.now() - t0 < seconds * 1000) {
+    if (tsm.state.event) tsm.send({ type: 'choose', event: tsm.state.event.id, choice: 0 });
+    const t = performance.now();
+    tsm.perf.frame();
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    frames.push(performance.now() - t);
+    await yieldNow();
+  }
+  tsm.send({ type: 'speed', speed: 0 });
+  frames.sort((a, b) => a - b);
+  const q = (p) => +frames[Math.min(frames.length - 1, Math.floor(p * frames.length))].toFixed(1);
+  const r = tsm.perf.report();
+  return { months: tsm.state.stats.month - m0, frames: frames.length, frameP50: q(0.5), frameP95: q(0.95), frameP99: q(0.99), frameMax: q(1), apply: r.apply, cityFrame: r.steps.city, msgPerSec: r.msgPerSec, workerTick: r.worker.tick };
+};
+
 /** Parity captures (screenshots/perf-<tag>-<view>.png) at fixed cameras. */
 window.__shots = async (tag) => {
   const V = tsm.init.villages, o = V[0];
