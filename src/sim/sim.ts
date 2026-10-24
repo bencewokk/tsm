@@ -57,6 +57,7 @@ export const TUNE = {
   intensify: 0.35,       // sort bonus for upgrades where the field allows well above mid-rise (0 at 20 m, full at 60 m)
   towerPriority: 0.2,    // sort bonus for 36 m+ towers: they take the demand pool before mid-rise upgrades do
   maxTowerStarts: 4,     // per month: towers rise over months, not all at once
+  towerCredit: 3.2,      // months of growth an anchor tower may borrow from the regional demand pool (was 2: after a line opened the pool sat below that for 15-20 months, so no tower could start)
   maxMidStarts: 30,
   distDecay: 2.6,
   parkMin: 9,
@@ -939,8 +940,10 @@ export class Sim {
       for (const c of list) {
         if (ops >= maxOps) break;
         // an anchor tower may be financed on credit (regional demand) while the pool is in debt, as long as the debt stays under ~2 months of growth
-        const credit = c.to === 3 && c.h >= 36 && poolKey !== 'indPool' && this[poolKey] > -2 * B;
-        if (this[poolKey] <= keep && !credit) { if (list.length && c.to !== 3) break; continue; }
+        const credit = c.to === 3 && c.h >= 36 && poolKey !== 'indPool' && this[poolKey] > -TUNE.towerCredit * B;
+        // an exhausted pool stops ordinary starts, but the scan goes on: an anchor tower further down the list may still start on credit
+        // (the old `break` here ended the scan at the first ordinary candidate, so with the pool in debt no tower was ever looked at)
+        if (this[poolKey] <= keep && !credit) continue;
         if (taken.has(c.l.id)) continue;
         // growth lags: only a few towers and mid-rises start each month
         if (c.to === 3 && towers >= TUNE.maxTowerStarts) continue;

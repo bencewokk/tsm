@@ -551,7 +551,11 @@ export class ProjectSystem {
     const plan = this.planAt(t, p.plan.cx, p.plan.cy, p.plan.ang, p.plan.ld);
     if (!plan || plan.members.length < 2) { this.end(p, 'aborted', 'site no longer available'); return; }
     plan.plaza = this.plazaFor(plan, c.plaza ?? 0);
-    const b = c.build!;
+    // density discipline: a project never builds above what the density-and-height field allows at the site (no towers without transit)
+    const hm = sim.field.hmaxAt(p.x, p.y);
+    const b = { ...c.build! };
+    if (b.level === 3 && hm < 36) { b.level = 2; b.hgt = 0; }
+    else if (b.level === 3) b.hgt = Math.round(Math.min(b.hgt, hm));
     const a = sim.asm.start(plan, { type: b.type === 'res' ? BT.Res : BT.Com, level: b.level, hgt: b.hgt, months: b.months, label: `${t.name} ${p.place}`, form: 'project' });
     // the developer captures regional demand, as the docks do
     const cap = plan.members.reduce((s, l) => s + sim.capacity(l, b.type === 'res' ? BT.Res : BT.Com, b.level, b.hgt), 0) * 0.6;

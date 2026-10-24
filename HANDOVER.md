@@ -1,20 +1,19 @@
 # HANDOVER (read this first, then PROGRESS.md)
 
 ## Current state
-- Branch `master`. Round 5 (bug and feature tasks): task 1 line building in the browser (e3fb2f3), task 2 stable car colours (be788b8), task 3 road graph repair, validation and junction plates, task 4 dynamic repeatable development projects (`src/sim/projects.ts`; see `git log`); details in PROGRESS "Round 5". `npx tsc --noEmit` and `npm run build` pass. Nothing is pushed or deployed. A separate performance agent works on its own branch and removes all blur (tilt-shift, depth of field, the T key): do not touch blur code and do not add any blur.
+- Branch `master`. Round 5 (bug and feature tasks): task 1 line building in the browser (e3fb2f3), task 2 stable car colours (be788b8), task 3 road graph repair, validation and junction plates, task 4 dynamic repeatable development projects (`src/sim/projects.ts`), then the Next queue from item 1 (towers) on; see `git log`; details in PROGRESS "Round 5". `npx tsc --noEmit` and `npm run build` pass. Nothing is pushed or deployed. A separate performance agent works on its own branch and removes all blur (tilt-shift, depth of field, the T key): do not touch blur code and do not add any blur.
 - Round 3 queue steps 1-8 are all done (several partial, see PROGRESS.md sections "Step 3b" to "Step 8" and "Camera controls") plus playability (every seed has a buildable route), tower retune and x-ray fix.
 - Run: `npm run dev` (http://127.0.0.1:5173, IPv4), `npm run build`, `npx tsc --noEmit`. Add `?seed=4821` (the reference seed for all before/after captures).
 - Full controls: Space pause; 1/2/3 speed (1x/3x/10x); P plan mode, V back to view. WASD or arrow keys pan over the ground relative to the view (speed scales with camera distance, Shift faster, ignored while typing in a field). Middle-drag orbits (horizontal yaw, vertical pitch clamped; in plan mode only yaw, the map stays top-down). Wheel zoom; left-drag orbits, right-drag pans. In plan mode: click stations in order, Enter builds, Backspace undoes, Esc cancels. Toggles: H heatmap, X x-ray, Z zones, N night, L desire lines (moved from D), T tilt-shift (on by default, off in plan mode). Left HUD panel lists running development projects (with the latest notifications) and landmarks (click a row to fly there); project decisions open as City hall dialogs.
 
 ## Next (in this order)
-1. 60 m towers are still slow on 4821 and 187 (only one by month 60 with a good line opened around month 24). See PROGRESS "Step 3b" and `npm run towers`. Task 4 fixed one cause: assembled sites failed to merge when their outline grazed a neighbour (13 -> 3 failures, towers opened 27 -> 35 by month 120); re-measure first.
-2. Squares rarely form (1 each on 2 of 4 seeds). Check the squarePressure threshold, spacing and yearly cadence (`src/sim/squares.ts`, `SQ`), `npm run structure`.
-3. Lots kept empty on purpose read as car parks (kept vacant plots, `src/render/buildings.ts`, `src/sim/reserves.ts`): give them a clear read (fence, planting, hoarding) or build them.
-4. Labels overlap (The Docks vs the old town tag): add simple collision avoidance in `src/render/labels.ts`.
-5. Factory-town satellites barely grow (4-50 homes on some seeds, `npm run satellites`): give satellites their own growth rules.
-6. The commuter suburb gets a metro stub (or a station site) instead of only a collector ring.
-7. The campus lawn should be tied to the university landmark.
-8. Optional extras from the skipped list: a true funicular line type, moving trains and ships, flood / landslide events, terraces / vineyards, ravines, retaining walls. Any further visual pass: no depth of field or other blur (the user does not want it; the performance branch removes tilt-shift).
+1. Squares rarely form (1 each on 2 of 4 seeds). Check the squarePressure threshold, spacing and yearly cadence (`src/sim/squares.ts`, `SQ`), `npm run structure`.
+2. Lots kept empty on purpose read as car parks (kept vacant plots, `src/render/buildings.ts`, `src/sim/reserves.ts`): give them a clear read (fence, planting, hoarding) or build them.
+3. Labels overlap (The Docks vs the old town tag): add simple collision avoidance in `src/render/labels.ts`.
+4. Factory-town satellites barely grow (4-50 homes on some seeds, `npm run satellites`): give satellites their own growth rules.
+5. The commuter suburb gets a metro stub (or a station site) instead of only a collector ring.
+6. The campus lawn should be tied to the university landmark.
+7. Optional extras from the skipped list: a true funicular line type, moving trains and ships, flood / landslide events, terraces / vineyards, ravines, retaining walls. Any further visual pass: no depth of field or other blur (the user does not want it; the performance branch removes tilt-shift).
 
 ## Scripts, dev flags, where things are
 - Scripts (all `npm run <name> -- args`): `headless` (seed months deal [--line] [--map]), `seeds`, `metrics` ([months] [--line] [--baseline] [seeds]), `terrain` (landform survey), `impact` (terrain gameplay numbers), `routes` (about 50 seeds per landform, must report 0 unbuildable), `towers` (tower timing, no metro vs test line), `zones` (territory shares), `structure` (empty space and squares), `satellites` (`-- 96 [seeds]`). Helpers in `scripts/lib.ts` (`testLine`). `scripts/make_grid.py` builds contact sheets (needs PIL).
