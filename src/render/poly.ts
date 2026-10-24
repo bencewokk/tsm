@@ -106,7 +106,13 @@ class Acc {
   }
 }
 
-const _c = new THREE.Color();
+const hexCache = new Map<number, THREE.Color>();
+/** sRGB hex -> working (linear) colour, converted once per hex value (the conversion is three pow calls); do not mutate the result. */
+export function hexColor(hex: number): THREE.Color {
+  let c = hexCache.get(hex);
+  if (!c) { c = new THREE.Color().setHex(hex); hexCache.set(hex, c); }
+  return c;
+}
 
 /** Accumulates flat-shaded triangles for the windowed / glass / plain / ghost materials. */
 export class MB {
@@ -124,12 +130,12 @@ export class MB {
     if (l < 1e-7) return;
     nx /= l; ny /= l; nz /= l;
     if (nx * hint[0] + ny * hint[1] + nz * hint[2] < 0) { const t = b; b = c; c = t; nx = -nx; ny = -ny; nz = -nz; }
-    _c.setHex(color);
+    const col = hexColor(color);
     const A = this.acc[m];
     for (const p of [a, b, c]) {
       A.pos.push(p[0] - this.ox, p[1] - this.oy, p[2] - this.oz);
       A.nrm.push(nx, ny, nz);
-      A.col.push(_c.r, _c.g, _c.b);
+      A.col.push(col.r, col.g, col.b);
       A.aH.push(p[1] - this.baseY);
       A.seed.push(this.seed);
     }

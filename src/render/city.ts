@@ -51,6 +51,30 @@ interface Grow {
 
 const imul = Math.imul;
 
+/**
+ * BufferGeometry.computeVertexNormals for an indexed mesh, on the typed arrays directly (same arithmetic, same float32 rounding,
+ * same results), without a Vector3 round trip per vertex: the road mesh is rebuilt whenever the street graph changes.
+ */
+export function vertexNormals(g: THREE.BufferGeometry) {
+  const P = (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array, I = g.index!.array;
+  const Nm = new Float32Array(P.length);
+  for (let i = 0; i < I.length; i += 3) {
+    const a = I[i] * 3, b = I[i + 1] * 3, c = I[i + 2] * 3;
+    const cbx = P[c] - P[b], cby = P[c + 1] - P[b + 1], cbz = P[c + 2] - P[b + 2];
+    const abx = P[a] - P[b], aby = P[a + 1] - P[b + 1], abz = P[a + 2] - P[b + 2];
+    const x = cby * abz - cbz * aby, y = cbz * abx - cbx * abz, z = cbx * aby - cby * abx;
+    // read all three first, then write (as three does: a repeated vertex gets the face once)
+    const ax = Nm[a] + x, ay = Nm[a + 1] + y, az = Nm[a + 2] + z, bx = Nm[b] + x, by = Nm[b + 1] + y, bz = Nm[b + 2] + z, cx = Nm[c] + x, cy = Nm[c + 1] + y, cz = Nm[c + 2] + z;
+    Nm[a] = ax; Nm[a + 1] = ay; Nm[a + 2] = az; Nm[b] = bx; Nm[b + 1] = by; Nm[b + 2] = bz; Nm[c] = cx; Nm[c + 1] = cy; Nm[c + 2] = cz;
+  }
+  for (let i = 0; i < Nm.length; i += 3) {
+    const x = Nm[i], y = Nm[i + 1], z = Nm[i + 2];
+    const k = 1 / (Math.sqrt(x * x + y * y + z * z) || 1);
+    Nm[i] = x * k; Nm[i + 1] = y * k; Nm[i + 2] = z * k;
+  }
+  g.setAttribute('normal', new THREE.BufferAttribute(Nm, 3));
+}
+
 const sameBytes = (a: Uint8Array, b: Uint8Array) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
 
 export class CityView {
@@ -358,7 +382,7 @@ export class CityView {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.setIndex(idx);
-    g.computeVertexNormals();
+    vertexNormals(g);
     this.staged.push(() => { this.roads.geometry.dispose(); this.roads.geometry = g; });
     this.roadsDirty = true;
   }

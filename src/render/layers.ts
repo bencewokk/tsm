@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { hexColor } from './poly';
 
 /** Unit geometries, base at y = 0, footprint [-0.5, 0.5] in x and z. */
 export function unitGeos() {
@@ -66,7 +67,7 @@ export class Layer {
     const i = this.n++;
     const a = this.d, o = i * 8;
     a[o] = x; a[o + 1] = y; a[o + 2] = z; a[o + 3] = w; a[o + 4] = h; a[o + 5] = d; a[o + 6] = rot; a[o + 7] = yoff;
-    this.mesh.setColorAt(i, Layer.c.setHex(color));
+    this.mesh.setColorAt(i, hexColor(color));
     this.set(i, 1);
     return i;
   }
@@ -83,8 +84,9 @@ export class Layer {
     Layer.s.set(w, Math.max(0.01, h), d);
     Layer.q.setFromAxisAngle(Layer.up, rot);
     Layer.m.compose(Layer.v, Layer.q, Layer.s);
-    Layer.c.setHex(color);
-    out.push(x, y, z, w, h, d, rot, yoff, ...Layer.m.elements, Layer.c.r, Layer.c.g, Layer.c.b);
+    const c = hexColor(color);
+    const e = Layer.m.elements;
+    out.push(x, y, z, w, h, d, rot, yoff, e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8], e[9], e[10], e[11], e[12], e[13], e[14], e[15], c.r, c.g, c.b);
   }
 
   /** Append the records rec[o .. o + n * REC) (see `rec`). */
