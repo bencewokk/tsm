@@ -15,6 +15,7 @@ import type { InitMsg } from '../sim/protocol';
 import { landmarkAt, LANDMARKS } from '../sim/landmarks';
 import { designLot, massing, pad, tree as ctxTree, FOOT, type Ctx, type Tree } from './buildings';
 import { buildSite, siteSig, type Site } from './sites';
+import { NightLights } from './lights';
 
 // road widths (m) by class, and the narrow cobbled lanes of the old cores
 const ROAD_W = [20, 11.5, 7];
@@ -106,6 +107,7 @@ export class CityView {
   craneMat: THREE.MeshStandardMaterial;
   scafMat: THREE.LineBasicMaterial;
   roads: THREE.Mesh;
+  lights: NightLights;
   railMesh: THREE.Mesh;
   private L: Record<string, Layer>;
   private craneMast: Layer;
@@ -177,7 +179,8 @@ export class CityView {
 
     this.railMesh = this.buildRail();
     this.harbour = new Harbour(water, flags, sample, plainInst, init.city.terrain === 'coast', init.city.site === 'harbour');
-    this.group.add(this.roads, this.railMesh, this.chunkGroup, this.growGroup, this.siteGroup, ...Object.values(this.L).map((l) => l.mesh), this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
+    this.lights = new NightLights(sample, water);
+    this.group.add(this.lights.group, this.roads, this.railMesh, this.chunkGroup, this.growGroup, this.siteGroup, ...Object.values(this.L).map((l) => l.mesh), this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
   }
 
   ground(x: number, z: number) {
@@ -251,6 +254,7 @@ export class CityView {
    */
   update(s: StateMsg, budgetMs = Infinity) {
     if (this.pending) this.flush();
+    this.lights.setStations(s.stations);
     this.queue = []; this.names = []; this.qi = 0; this.staged = []; this.designed.clear();
     if (s.roads.version !== this.roadVersion) { const r = s.roads; this.step('roads', () => { this.roadVersion = r.version; this.rebuildRoads(r); }); }
     this.rebuild(s);
@@ -480,6 +484,7 @@ export class CityView {
     g.setIndex(idx);
     vertexNormals(g);
     this.staged.push(() => { this.roads.geometry.dispose(); this.roads.geometry = g; });
+    this.step('lights', () => this.lights.setRoads(r, widths, this.coreEdge));
     this.roadsDirty = true;
   }
 

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { N, CELL, Flag } from '../sim/constants';
 import { VS } from './common';
 import { T_COLORS } from '../sim/territory';
+import { skyLight } from './look';
+import { VFX } from './vfx';
 
 export interface TerrainView {
   mesh: THREE.Mesh;
@@ -56,6 +58,7 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
 
   const pos = new Float32Array(V * V * 3);
   const col = new Float32Array(V * V * 3);
+  const grassA = new Float32Array(V * V);   // 1 on open grass (fields), 0 on sand, water, woodland, rock, docks
   const uv = new Float32Array(V * V * 2);
   const sand = new THREE.Color('#e6dcc2');
   const low = new THREE.Color('#cdd9b6');
@@ -98,6 +101,30 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
       }
       if (vs[k] > 0 && vs[k] > 0.2) c.lerp(wood, vs[k] * 0.4);
       if (vd[k] > 0 && vw[k] < 0.6) c.lerp(concrete, Math.min(1, vd[k] * 1.6));
+      if (vw[k] < 0.05 && hm > 5 && !(vd[k] > 0.05)) {
+        const wooded = Math.min(1, Math.max(0, (slope - 0.06) / 0.07)), rocky = Math.min(1, Math.max(0, (slope - 0.2) / 0.14)) + Math.min(1, Math.max(0, (hm - 100) / 50));
+        grassA[k] = Math.max(0, 1 - Math.max(wooded, Math.min(1, rocky), vs[k] * 2, vf[k] * 1.5)) * Math.min(1, (hm - 5) / 4);
+      }
+      // macro colour patches (fresher green, drier yellow-green) baked into the vertex colour: free at run time
+      if (VFX.is('ground') && vw[k] < 0.6) {
+        const wx = vx * CELL, wz = vy * CELL;
+        let pat = vnoise(wx * 0.0011, wz * 0.0011) * 0.6 + vnoise(wx * 0.0043 + 7, wz * 0.0043 + 7) * 0.4;
+        pat = Math.max(0, Math.min(1, (pat - 0.5) * 2.4 + 0.5));
+        const amt = 0.55 * grassA[k] + 0.2;
+        c.r *= 1 + ((0.9 + (1.07 - 0.9) * pat) - 1) * amt; c.g *= 1 + ((1.04 + (1.03 - 1.04) * pat) - 1) * amt; c.b *= 1 + ((0.95 + (0.9 - 0.95) * pat) - 1) * amt;
+      }
+      // cavity: ground lower than its surroundings (valleys, folds) darkens a little, ridges and knolls lighten (baked, so it costs nothing per frame)
+      if (VFX.is('ground') && vw[k] < 0.6) {
+        let sum = 0, cnt = 0;
+        for (let dy = -3; dy <= 3; dy += 3) for (let dx = -3; dx <= 3; dx += 3) {
+          if (!dx && !dy) continue;
+          const xx = Math.min(N, Math.max(0, vx + dx)), yy = Math.min(N, Math.max(0, vy + dy));
+          sum += vh[yy * V + xx]; cnt++;
+        }
+        const curv = Math.max(-1, Math.min(1, (h - sum / cnt) / (9 * VS)));
+        const f = 1 + curv * 0.09;
+        c.multiplyScalar(f);
+      }
       col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
     }
   const indices: number[] = [];
@@ -110,6 +137,7 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.setAttribute('aGrass', new THREE.BufferAttribute(grassA, 1));
   geo.setIndex(indices);
   geo.computeVertexNormals();
 
@@ -117,11 +145,36 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   // layered cork: alternating 10 m layers with a thin darker edge where each layer ends (the contour of a cardboard / cork model)
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying float vTsmWY;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTsmWY = (modelMatrix * vec4(transformed, 1.0)).y;');
+      .replace('#include <common>', '#include <common>\nvarying float vTsmWY;\nvarying vec2 vTsmXZ;\nvarying float vTsmGrass;\nattribute float aGrass;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTsmWY = (modelMatrix * vec4(transformed, 1.0)).y;\nvTsmXZ = (modelMatrix * vec4(transformed, 1.0)).xz;\nvTsmGrass = aGrass;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vTsmWY;')
+      .replace('#include <common>', `#include <common>
+        varying float vTsmWY;
+        varying vec2 vTsmXZ;
+        varying float vTsmGrass;
+        float tsmH2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+`)
       .replace('#include <color_fragment>', `#include <color_fragment>
+        #ifdef TSM_GROUND
+        {
+          // open ground: large soft colour patches, then a field pattern (tints, ploughed rows, hedgerows) that fades in with the grass attribute
+          vec2 q = vTsmXZ;
+          float gr = clamp(vTsmGrass, 0.0, 1.0);
+          float ca = 0.9, sa = 0.43;
+          vec2 p = vec2(q.x * ca - q.y * sa, q.x * sa + q.y * ca) / 210.0;
+          vec2 w = fwidth(p) * 1.4;   // derivatives outside the branch below
+          if (gr > 0.02) {
+          vec2 id = floor(p);
+          vec2 f = fract(p);
+          float fh = tsmH2(id);
+          vec3 ftint = mix(vec3(0.93, 0.98, 0.9), vec3(1.07, 1.05, 0.88), fh);
+          float hedge = 1.0 - smoothstep(0.0, 1.0, min(min(f.x, 1.0 - f.x) / max(w.x, 1e-4), min(f.y, 1.0 - f.y) / max(w.y, 1e-4)));
+          float fieldMask = gr * step(0.42, tsmH2(id + 3.7));   // not every parcel is a field: some stay meadow
+          diffuseColor.rgb *= mix(vec3(1.0), ftint, fieldMask * 0.8);
+          diffuseColor.rgb *= 1.0 - hedge * fieldMask * 0.16 * (1.0 - smoothstep(2200.0, 6500.0, length(vTsmXZ - cameraPosition.xz)) * 0.5);
+          }
+        }
+        #endif
         {
           float band = vTsmWY / ${(10 * VS).toFixed(2)};
           float on = smoothstep(2.0, 4.5, vTsmWY / ${VS.toFixed(2)});
@@ -132,7 +185,10 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.03, 0.995, 0.93), on * 0.55);
         }`);
   };
-  material.customProgramCacheKey = () => 'tsm-cork';
+  const groundDefs = () => { material.defines = VFX.is('ground') ? { TSM_GROUND: '' } : {}; };
+  groundDefs();
+  VFX.onChange((n) => { if (n === 'ground') { groundDefs(); material.needsUpdate = true; } });
+  material.customProgramCacheKey = () => 'tsm-cork' + VFX.key('ground');
   const mesh = new THREE.Mesh(geo, material);
   mesh.receiveShadow = true;
   mesh.name = 'terrain';
@@ -245,7 +301,11 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
 
   return {
     mesh, water, heat, heatTex, material, waterMat, catchment, contours, zones, paper, skirt,
-    setPaper(a: number) { paper.visible = a > 0.01; paperMat.opacity = a; waterMat.color.copy(WHITE).lerp(PAPER_WATER, a * 0.7); },   // every frame: no allocations
+    setPaper(a: number) {
+      if (VFX.is('ground') && a < 0.7) a *= 0.7;   // in the 3D view the map paper only tints the far ground, so hills keep their shading
+      paper.visible = a > 0.01; paperMat.opacity = a; waterMat.color.copy(WHITE).lerp(PAPER_WATER, a * 0.7);
+      if (VFX.is('sky')) paperMat.color.copy(skyLight); else paperMat.color.setRGB(1, 1, 1);   // the sheet is unlit: follow the light so it does not glow at dusk
+    },   // every frame: no allocations
     setZones(terr: Uint8Array, w: Uint8Array) {
       for (let i = 0; i < N * N; i++) {
         const t = terr[i], c = T_COLORS[t] ?? [0, 0, 0];

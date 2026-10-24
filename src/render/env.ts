@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { GradePass } from './grade';
+import { Sky } from './sky';
+import { VFX } from './vfx';
+import { skyLight, lookUniforms } from './look';
 import { MAP, VS } from './common';
 import { strataTexture } from './terrain';
 
@@ -23,6 +26,8 @@ export class Env {
    */
   linear = true;
   private composer: EffectComposer;
+  sky = new Sky();
+  private grade!: GradePass;
   /**
    * Render scale of the 3D scene (1 = full canvas resolution): the scene target is smaller and the output pass upscales it. Below 1 the
    * map labels (`addText`) move to an overlay drawn afterwards at full resolution, so text stays sharp; the HUD is HTML anyway.
@@ -89,7 +94,10 @@ export class Env {
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.composer.addPass(new OutputPass());
+    this.grade = new GradePass();
+    this.composer.addPass(this.grade);
+    this.scene.add(this.sky.group);
+    VFX.onChange((n) => { if (n === 'sky' || n === 'grade') this.applyTime(); });
 
     window.addEventListener('resize', () => {
       this.camera.aspect = container.clientWidth / container.clientHeight;
@@ -101,6 +109,9 @@ export class Env {
   }
 
   render() {
+    this.sky.follow(this.camera);
+    lookUniforms.uTime.value = performance.now() / 1000;
+    lookUniforms.uPx.value = this.composer.renderTarget1.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     if (this.linear) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
     if (this.overlay.children.length) {
@@ -128,7 +139,7 @@ export class Env {
     this.controls.update();
   }
 
-  /** Recompute sun / sky from timeOfDay. */
+  /** Recompute sun / sky / light colours from timeOfDay. */
   applyTime() {
     const a = this.timeOfDay * Math.PI * 2; // 0 = noon
     const elev = Math.cos(a); // 1 noon, -1 midnight
@@ -139,13 +150,70 @@ export class Env {
     const day = THREE.MathUtils.smoothstep(elev, -0.25, 0.3);
     this.night = 1 - day;
     const dusk = Math.max(0, 1 - Math.abs(elev - 0.0) / 0.35) * 0.8;
-    this.sun.intensity = 0.15 + 2.4 * day;
-    this.sun.color.setHSL(0.09, 0.5 * dusk + 0.15, 0.92 - dusk * 0.12);
-    this.hemi.intensity = 0.35 + 1.15 * day;
-    this.hemi.color.set(day > 0.5 ? 0xf4f6f8 : 0x9fb0d0);
-    const sky = this.nightSky.clone().lerp(this.daySky, day).lerp(this.duskSky, dusk * 0.5);
-    (this.scene.background as THREE.Color).copy(sky);
-    (this.scene.fog as THREE.Fog).color.copy(sky);
-    this.renderer.toneMappingExposure = 0.85 + 0.2 * day;
+    const sky = VFX.is('sky'), grade = VFX.is('grade');
+    // share of lit windows by the hour: busy evening, quiet small hours, waking towards dawn (t = timeOfDay, 0.2 dusk .. 0.5 midnight .. 0.8 dawn)
+    const tn = this.timeOfDay;
+    lookUniforms.uLitP.value = VFX.is('bld') ? 0.7 - 0.4 * THREE.MathUtils.smoothstep(tn, 0.22, 0.5) + 0.22 * THREE.MathUtils.smoothstep(tn, 0.6, 0.8) : 0.52;
+    this.sun.intensity = sky ? 0.2 + 2.85 * day : 0.15 + 2.4 * day;   // night stays near 0.15: SunShadow redraws less often the weaker the sun
+    this.hemi.intensity = sky ? 0.85 + 0.25 * day : 0.35 + 1.15 * day;
+    if (!sky) {
+      // the classic look
+      this.sun.color.setHSL(0.09, 0.5 * dusk + 0.15, 0.92 - dusk * 0.12);
+      this.hemi.color.set(day > 0.5 ? 0xf4f6f8 : 0x9fb0d0);
+      this.hemi.groundColor.set(0xd9d4c4);
+      const cl = this.nightSky.clone().lerp(this.daySky, day).lerp(this.duskSky, dusk * 0.5);
+      (this.scene.background as THREE.Color).copy(cl);
+      const f = this.scene.fog as THREE.Fog;
+      f.color.copy(cl); f.near = 9000; f.far = 26000;
+      this.sky.group.visible = false;
+      this.renderer.toneMappingExposure = 0.85 + 0.2 * day;
+    } else {
+      sampleKeys(elev, this.keys);
+      const k = this.keys;
+      this.sun.color.copy(k.sun);
+      this.hemi.color.copy(k.hemiS); this.hemi.groundColor.copy(k.hemiG);
+      (this.scene.background as THREE.Color).copy(k.hor);
+      const f = this.scene.fog as THREE.Fog;
+      f.color.copy(k.hor).lerp(k.table, 0.12);
+      f.near = 3200; f.far = 21000;
+      this.sky.group.visible = true;
+      const u = this.sky.u;
+      u.uZenith.value.copy(k.zen); u.uHorizon.value.copy(k.hor); u.uSunCol.value.copy(k.sun); u.uTable.value.copy(k.table);
+      u.uNight.value = this.night;
+      u.uSunDir.value.copy(this.sun.position).sub(this.sun.target.position).normalize();
+      this.renderer.toneMappingExposure = 1.0 + 0.1 * day;
+      // tint for unlit layers (the paper): sun and sky light as one colour, 1 at full daylight
+      const sl = skyLight, si = this.sun.intensity * 0.12, hi = this.hemi.intensity * 0.5, n = 1 / 0.92;
+      sl.r = Math.min(1, (k.sun.r * si + k.hemiS.r * hi) * n); sl.g = Math.min(1, (k.sun.g * si + k.hemiS.g * hi) * n); sl.b = Math.min(1, (k.sun.b * si + k.hemiS.b * hi) * n);
+    }
+    // display-space grade
+    const g = this.grade.grade;
+    if (grade) {
+      g.uSat.value = 1.1 - 0.12 * this.night; g.uContrast.value = 1.07 - 0.06 * this.night;
+      // cool shadows and warm highlights
+      g.uShadow.value.set(0.97, 0.99, 1.04 + 0.05 * this.night); g.uHigh.value.set(1.015 + 0.03 * dusk, 1.0, 0.98 - 0.05 * dusk);
+      g.uVig.value = 0.22;
+    } else { g.uSat.value = 1; g.uContrast.value = 1; g.uShadow.value.set(1, 1, 1); g.uHigh.value.set(1, 1, 1); g.uVig.value = 0; }
   }
+  private keys = { hor: new THREE.Color(), zen: new THREE.Color(), sun: new THREE.Color(), hemiS: new THREE.Color(), hemiG: new THREE.Color(), table: new THREE.Color() };
+}
+
+/** Time-of-day palette keyed by the sun's elevation (-1 midnight .. 1 noon), interpolated linearly. */
+const KEYS = [
+  { e: -1.0, hor: '#16203a', zen: '#04070f', sun: '#a9c0f0', hemiS: '#7f9bd6', hemiG: '#2a3552', table: '#161a24' },
+  { e: -0.25, hor: '#1f2a48', zen: '#070c18', sun: '#a9c0f0', hemiS: '#7f9bd6', hemiG: '#2a3552', table: '#1a1f2c' },
+  { e: 0.0, hor: '#e8a47e', zen: '#46598a', sun: '#ff8a4a', hemiS: '#9aa6cc', hemiG: '#8c7566', table: '#a8907c' },
+  { e: 0.16, hor: '#f0c79e', zen: '#6a90c0', sun: '#ffb676', hemiS: '#bccae6', hemiG: '#b49c82', table: '#c6b098' },
+  { e: 0.34, hor: '#e0d8cc', zen: '#78a4d4', sun: '#ffe6c4', hemiS: '#cfdcf0', hemiG: '#b5a891', table: '#ccc3b4' },
+  { e: 0.7, hor: '#d4e1ec', zen: '#76aae0', sun: '#fff7ee', hemiS: '#dbe8f9', hemiG: '#b9b09c', table: '#cfcac0' },
+  { e: 1.0, hor: '#d4e1ec', zen: '#76aae0', sun: '#fff8f0', hemiS: '#dbe8f9', hemiG: '#b9b09c', table: '#cfcac0' },
+];
+type Pal = { hor: THREE.Color; zen: THREE.Color; sun: THREE.Color; hemiS: THREE.Color; hemiG: THREE.Color; table: THREE.Color };
+const KC = KEYS.map((k) => ({ e: k.e, hor: new THREE.Color(k.hor), zen: new THREE.Color(k.zen), sun: new THREE.Color(k.sun), hemiS: new THREE.Color(k.hemiS), hemiG: new THREE.Color(k.hemiG), table: new THREE.Color(k.table) }));
+function sampleKeys(e: number, out: Pal) {
+  let i = 1;
+  while (i < KC.length - 1 && e > KC[i].e) i++;
+  const a = KC[i - 1], b = KC[i], t = Math.max(0, Math.min(1, (e - a.e) / (b.e - a.e)));
+  out.hor.copy(a.hor).lerp(b.hor, t); out.zen.copy(a.zen).lerp(b.zen, t); out.sun.copy(a.sun).lerp(b.sun, t);
+  out.hemiS.copy(a.hemiS).lerp(b.hemiS, t); out.hemiG.copy(a.hemiG).lerp(b.hemiG, t); out.table.copy(a.table).lerp(b.table, t);
 }
