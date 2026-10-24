@@ -12,6 +12,8 @@ export const lookUniforms = {
   uLitP: { value: 0.5 },
   /** pixels per metre at distance 1 in the scene target (point sprites are sized in world metres) */
   uPx: { value: 900 },
+  /** share of tree instances kept (1 near, less at overview): the rest shrink away by a per-instance hash */
+  uTreeKeep: { value: 1 },
 };
 
 /** Colour and strength of the ambient + sun light as a tint (1 = full daylight); set by `Env.applyTime`, used to dim unlit layers (the map paper). */
@@ -19,7 +21,7 @@ export const skyLight = new THREE.Color(1, 1, 1);
 
 /** every material patched below, so a switch can recompile them */
 const patched: THREE.Material[] = [];
-VFX.onChange((n) => { if (n === 'bld' || n === 'night') for (const m of patched) m.needsUpdate = true; });
+VFX.onChange((n) => { if (n === 'bld' || n === 'night' || n === 'thin') for (const m of patched) m.needsUpdate = true; });
 
 /**
  * Architect's-model building shader: matte boxes, a cheap ambient-occlusion darkening near the base, window rows by day and warm lit
@@ -167,4 +169,30 @@ export function patchBuildingMaterial(mat: THREE.MeshStandardMaterial, glass = f
   };
   defs();
   VFX.onChange((n) => { if (n === 'bld') defs(); });
+}
+
+/**
+ * Far view: thin the trees out with distance. Each instance gets a stable random rank from its instance id; above the kept share it
+ * shrinks to nothing (degenerate triangles never reach the rasteriser) and the survivors grow a little so the canopy keeps its coverage.
+ * At overview the speckle of tens of thousands of crowns turns into a few readable groves.
+ */
+export function patchTreeMaterial(mat: THREE.Material) {
+  patched.push(mat);
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTreeKeep = lookUniforms.uTreeKeep;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+#ifdef TSM_THIN
+uniform float uTreeKeep;
+#endif`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        #if defined(TSM_THIN) && defined(USE_INSTANCING)
+          float tsmR = fract(sin(float(gl_InstanceID) * 12.9898) * 43758.5453);
+          transformed *= clamp((uTreeKeep - tsmR) / 0.12, 0.0, 1.0) * (1.0 + (1.0 - uTreeKeep) * 0.5);
+        #endif`);
+  };
+  mat.customProgramCacheKey = () => 'tsm-tree' + VFX.key('thin');
+  const defs = () => { mat.defines = { ...(mat.defines ?? {}) }; if (VFX.is('thin')) mat.defines.TSM_THIN = ''; else delete mat.defines.TSM_THIN; };
+  defs();
+  VFX.onChange((n) => { if (n === 'thin') defs(); });
 }

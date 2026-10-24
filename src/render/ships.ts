@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { CELL, N } from '../sim/constants';
+import { lookUniforms } from './look';
+import { VFX } from './vfx';
 
 /**
  * Ships under way on open water: a few coasters and ferries sail slow loops in the bay or along a wide river, so the water is not
@@ -9,6 +11,8 @@ export class Ships {
   group = new THREE.Group();
   private hulls: THREE.InstancedMesh;
   private decks: THREE.InstancedMesh;
+  private wakes: THREE.InstancedMesh;
+  private wakeMat: THREE.MeshBasicMaterial;
   private routes: { cx: number; cz: number; rx: number; rz: number; rot: number; speed: number; phase: number; dir: number; color: THREE.Color }[] = [];
   private m = new THREE.Matrix4(); private q = new THREE.Quaternion(); private v = new THREE.Vector3(); private s = new THREE.Vector3();
 
@@ -47,7 +51,13 @@ export class Ships {
     this.decks = new THREE.InstancedMesh(hull, new THREE.MeshStandardMaterial({ color: 0xf1eee6, roughness: 0.7 }), Math.max(1, this.routes.length));
     this.hulls.count = this.decks.count = this.routes.length;
     this.hulls.frustumCulled = this.decks.frustumCulled = false;
-    this.group.add(this.hulls, this.decks);
+    // wakes: a V of foam arms and a turbulent streak behind the stern, fading with distance (vertex alpha); flat, unlit, tinted down at night
+    this.wakeMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    this.wakes = new THREE.InstancedMesh(wakeGeometry(), this.wakeMat, Math.max(1, this.routes.length));
+    this.wakes.count = this.routes.length; this.wakes.frustumCulled = false; this.wakes.renderOrder = 2;
+    VFX.onChange((n, v) => { if (n === 'water') this.wakes.visible = v; });
+    this.wakes.visible = VFX.is('water');
+    this.group.add(this.hulls, this.decks, this.wakes);
     this.animate(0);
   }
 
@@ -65,8 +75,35 @@ export class Ships {
       this.m.compose(this.v, this.q, this.s); this.hulls.setMatrixAt(i, this.m); this.hulls.setColorAt(i, r.color);
       this.v.set(x - Math.sin(ang) * 14, 15, z - Math.cos(ang) * 14); this.s.set(10, 8, 16);
       this.m.compose(this.v, this.q, this.s); this.decks.setMatrixAt(i, this.m);
+      this.v.set(x, 1.0, z); this.s.set(1, 1, 1);
+      this.m.compose(this.v, this.q, this.s); this.wakes.setMatrixAt(i, this.m);
     });
     this.hulls.instanceMatrix.needsUpdate = true; this.decks.instanceMatrix.needsUpdate = true;
+    this.wakes.instanceMatrix.needsUpdate = true;
+    const dim = 1 - 0.7 * lookUniforms.uNight.value;
+    this.wakeMat.color.setRGB(dim, dim, dim);
     if (this.hulls.instanceColor) this.hulls.instanceColor.needsUpdate = true;
   }
+}
+
+/** Local space: the ship sails towards +z; the wake lies behind it. Vertex colours carry the alpha (rgb white). */
+function wakeGeometry(): THREE.BufferGeometry {
+  const pos: number[] = [], col: number[] = [], idx: number[] = [];
+  const strip = (pts: [number, number, number, number][]) => {   // x, z, half-width, alpha along a centre line; alpha is 0 at both edges so the foam is soft
+    const base = pos.length / 3;
+    pts.forEach(([x, z, hw, a], k) => {
+      pos.push(x - hw, 0, z, x, 0, z, x + hw, 0, z);
+      col.push(1, 1, 1, 0, 1, 1, 1, a, 1, 1, 1, 0);
+      if (k) { const o = base + (k - 1) * 3; idx.push(o, o + 1, o + 3, o + 1, o + 4, o + 3, o + 1, o + 2, o + 4, o + 2, o + 5, o + 4); }
+    });
+  };
+  // turbulent centre streak
+  strip([[0, -24, 4, 0.0], [0, -36, 8, 0.4], [0, -100, 13, 0.22], [0, -190, 20, 0.0]]);
+  // the two arms of the V, drifting outwards
+  for (const sd of [1, -1]) strip([[sd * 7, 22, 1.5, 0.0], [sd * 11, 4, 3, 0.5], [sd * 27, -60, 4.5, 0.3], [sd * 52, -150, 6, 0.0]]);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+  g.setIndex(idx);
+  return g;
 }

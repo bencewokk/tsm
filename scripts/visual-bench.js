@@ -24,6 +24,7 @@ window.__cap = async (tag, only) => {
   for (const [vn, v] of Object.entries(views)) for (const [pn, p] of Object.entries(PHASES)) {
     if (only && !only.includes(`${vn}-${pn}`)) continue;
     tsm.phase(p); tsm.view(...v); tsm.env.controls.update();
+    for (let i = 0; i < 24; i++) tsm.env.render();   // the lens eases towards its target one step per render
     await tsm.shot(`visual-${tag}-${vn}-${pn}`); out.push(`${vn}-${pn}`);
   }
   tsm.phase(0.05); tsm.view(...views.overview);

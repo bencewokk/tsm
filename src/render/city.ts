@@ -4,7 +4,7 @@ import { N, CELL, Flag, BT } from '../sim/constants';
 import type { StateMsg, LotsMsg, RoadsMsg } from '../sim/protocol';
 import type { Village } from '../sim/terrain';
 import { vhash, VS } from './common';
-import { patchBuildingMaterial } from './look';
+import { patchBuildingMaterial, patchTreeMaterial } from './look';
 import { Layer, REC, unitGeos } from './layers';
 import { kindOf, SITE, PAL, type Kind } from './forms';
 import { Harbour } from './harbour';
@@ -16,6 +16,7 @@ import { landmarkAt, LANDMARKS } from '../sim/landmarks';
 import { designLot, massing, pad, tree as ctxTree, FOOT, type Ctx, type Tree } from './buildings';
 import { buildSite, siteSig, type Site } from './sites';
 import { NightLights } from './lights';
+import { VFX } from './vfx';
 
 // road widths (m) by class, and the narrow cobbled lanes of the old cores
 const ROAD_W = [20, 11.5, 7];
@@ -108,6 +109,8 @@ export class CityView {
   scafMat: THREE.LineBasicMaterial;
   roads: THREE.Mesh;
   lights: NightLights;
+  /** lane markings and crosswalks: a separate mesh that fades out beyond mid zoom (thin lines would only shimmer from far) */
+  roadMarks: THREE.Mesh;
   railMesh: THREE.Mesh;
   private L: Record<string, Layer>;
   private craneMast: Layer;
@@ -159,13 +162,16 @@ export class CityView {
     this.lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true });
     this.polyMats = { wall: this.wallMat, glass: this.glassMat, plain: this.plainMat, ghost: this.ghostMat, lamp: this.lampMat };
     this.treeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true });
+    patchTreeMaterial(this.treeMat);
     this.craneMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
     this.scafMat = new THREE.LineBasicMaterial({ color: 0xb59b5f, transparent: true, opacity: 0.9 });
     const plainInst = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });
+    patchTreeMaterial(trunkMat);
     this.L = {
       leaf: new Layer(indexedFlat(g.sphere), this.treeMat, 60000),
       pine: new Layer(g.cone, this.treeMat, 20000),
-      trunk: new Layer(g.cyl, plainInst, 40000, false),
+      trunk: new Layer(g.cyl, trunkMat, 40000, false),
     };
     this.craneMast = new Layer(g.box, this.craneMat, 2000);
     const jib = new THREE.BoxGeometry(1, 1, 1);
@@ -180,7 +186,17 @@ export class CityView {
     this.railMesh = this.buildRail();
     this.harbour = new Harbour(water, flags, sample, plainInst, init.city.terrain === 'coast', init.city.site === 'harbour');
     this.lights = new NightLights(sample, water);
-    this.group.add(this.lights.group, this.roads, this.railMesh, this.chunkGroup, this.growGroup, this.siteGroup, ...Object.values(this.L).map((l) => l.mesh), this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
+    const markMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    markMat.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vMkPos;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvMkPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vMkPos;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= 1.0 - smoothstep(900.0, 2400.0, distance(vMkPos, cameraPosition));');
+    };
+    markMat.customProgramCacheKey = () => 'tsm-marks';
+    this.roadMarks = new THREE.Mesh(new THREE.BufferGeometry(), markMat);
+    this.roadMarks.receiveShadow = true; this.roadMarks.frustumCulled = false; this.roadMarks.renderOrder = 3;
+    VFX.onChange((n, v) => { if (n === 'roads') this.roadMarks.visible = v; });
+    this.group.add(this.lights.group, this.roads, this.roadMarks, this.railMesh, this.chunkGroup, this.growGroup, this.siteGroup, ...Object.values(this.L).map((l) => l.mesh), this.craneMast.mesh, this.craneJib.mesh, this.harbour.group);
   }
 
   ground(x: number, z: number) {
@@ -478,6 +494,53 @@ export class CityView {
     };
     for (let n = 0; n < nNodes; n++) if (maxW[n]) { if (plate(n)) plateAt(n, 0, plateCol(n), liftOf(minCls[n]) + 0.03); else disc(n, nodeW(n) / 2, nodeCol[n], ROADFX.on ? liftOf(minCls[n]) + 0.01 : 0.27); }
     for (const n of rondNodes) { disc(n, 8.5, KERB, ROADFX.on ? 0.66 : 0.3); disc(n, 6.8, new THREE.Color(0x9fbf86), ROADFX.on ? 0.7 : 0.34); }
+    // lane markings and crosswalks (separate mesh, see roadMarks)
+    {
+      const mp: number[] = [], mc: number[] = [], mi: number[] = [];
+      let mb = 0;
+      if (VFX.is('roads')) {
+        const WH = new THREE.Color(0xeeebe0), YE = new THREE.Color(0xeed98a);
+        const bar = (cx: number, cz: number, ux: number, uz: number, len: number, wid: number, lift: number, c: THREE.Color) => {
+          const nx = -uz, nz = ux, hl = len / 2, hw = wid / 2, y = yAt(cx, cz) + lift;
+          const x0 = cx - ux * hl, z0 = cz - uz * hl, x1 = cx + ux * hl, z1 = cz + uz * hl;
+          mp.push(x0 + nx * hw, y, z0 + nz * hw, x0 - nx * hw, y, z0 - nz * hw, x1 + nx * hw, y, z1 + nz * hw, x1 - nx * hw, y, z1 - nz * hw);
+          for (let q = 0; q < 4; q++) mc.push(c.r, c.g, c.b);
+          mi.push(mb, mb + 2, mb + 1, mb + 1, mb + 2, mb + 3); mb += 4;
+        };
+        const clsLift = (cls: number) => liftOf(cls) + 0.1;
+        for (let k = 0; k < r.ea.length; k++) {
+          const cls = r.cls[k];
+          if (cls > 1 || this.coreEdge.has(r.ids[k])) continue;
+          const a = r.ea[k], b = r.eb[k];
+          const ax = r.nodes[a * 2] * CELL, az = r.nodes[a * 2 + 1] * CELL, bx = r.nodes[b * 2] * CELL, bz = r.nodes[b * 2 + 1] * CELL;
+          const L = Math.hypot(bx - ax, bz - az);
+          if (L < 30) continue;
+          const ux = (bx - ax) / L, uz = (bz - az) / L, nx = -uz, nz = ux, w = widths[k];
+          const sa = plate(a) ? setback(k, a) + 1.5 : 0, sb = plate(b) ? setback(k, b) + 1.5 : 0;
+          const lift = clsLift(cls);
+          const median = cls === 0 && degAll[a] <= 2 && degAll[b] <= 2;
+          // centre dashes (not where a planted median runs), kept clear of the junction plates and the crosswalks
+          const t0 = sa + (plate(a) ? 4.5 : 0), t1 = L - sb - (plate(b) ? 4.5 : 0);
+          if (!median && t1 - t0 > 8) for (let t = t0 + 1; t + 3 < t1; t += 8) bar(ax + ux * (t + 1.5), az + uz * (t + 1.5), ux, uz, 3, cls === 0 ? 0.3 : 0.22, lift, cls === 0 ? WH : YE);
+          // arterials: a solid edge line each side
+          if (cls === 0 && t1 - t0 > 6) for (const sd of [1, -1]) bar(ax + ux * (t0 + t1) / 2 + nx * (w / 2 - 1.1) * sd, az + uz * (t0 + t1) / 2 + nz * (w / 2 - 1.1) * sd, ux, uz, t1 - t0, 0.22, lift, WH);
+          // zebra crossings on the arms that meet a junction plate
+          for (const [n, s0, dir] of [[a, sa, 1], [b, sb, -1]] as [number, number, number][]) {
+            if (!plate(n) || L < 36) continue;
+            const px = (n === a ? ax : bx) + ux * dir * (s0 + 1.8), pz = (n === a ? az : bz) + uz * dir * (s0 + 1.8);
+            const nb = Math.floor((w - 2.4) / 1.1);
+            for (let q = 0; q < nb; q++) { const o = (q - (nb - 1) / 2) * 1.1; bar(px + nx * o, pz + nz * o, ux, uz, 3.0, 0.55, lift, WH); }
+          }
+        }
+      }
+      const mg = new THREE.BufferGeometry();
+      mg.setAttribute('position', new THREE.Float32BufferAttribute(mp, 3));
+      mg.setAttribute('color', new THREE.Float32BufferAttribute(mc, 3));
+      mg.setIndex(mi);
+      const mn = new Float32Array(mp.length); for (let i = 1; i < mn.length; i += 3) mn[i] = 1;
+      mg.setAttribute('normal', new THREE.BufferAttribute(mn, 3));
+      this.staged.push(() => { this.roadMarks.geometry.dispose(); this.roadMarks.geometry = mg; });
+    }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));

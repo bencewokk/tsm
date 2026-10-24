@@ -8,6 +8,48 @@ import { VFX } from './vfx';
 const h01 = (i: number, k: number) => { let h = (i * 2654435761 + k * 40503) | 0; h = Math.imul(h ^ (h >>> 15), 2246822519); h = Math.imul(h ^ (h >>> 13), 3266489917); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
 
 /**
+ * The city's lights seen in the water: a 512 x 512 emissive map over the map (1 texel = 12.5 m) with a soft warm glow at every lamp and a
+ * cool one at every station; the water material shows it scaled by the night factor (its transparency over land masks the rest). Redrawn
+ * only when the lamps change. A cheap stand-in for reflections: no extra render pass, one texture upload.
+ */
+export const shoreGlow = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return { c, t };
+})();
+const glowSprite = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const g = c.getContext('2d')!;
+  const r = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  r.addColorStop(0, 'rgba(255,255,255,0.9)'); r.addColorStop(0.35, 'rgba(255,255,255,0.28)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 32, 32);
+  return c;
+})();
+function drawGlow(street: { pos: number[]; col: number[] }, stations: { pos: number[]; col: number[] }) {
+  const g = shoreGlow.c.getContext('2d')!, S = 512, k = S / (N * CELL);
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = '#000'; g.fillRect(0, 0, S, S);
+  g.globalCompositeOperation = 'lighter';
+  const tinted = (list: { pos: number[]; col: number[] }, rad: number, a: number) => {
+    for (let i = 0; i < list.pos.length / 3; i++) {
+      g.globalAlpha = a * Math.min(1.2, (list.col[i * 3] + list.col[i * 3 + 1]) * 0.55);
+      g.drawImage(glowSprite, list.pos[i * 3] * k - rad, list.pos[i * 3 + 2] * k - rad, rad * 2, rad * 2);
+    }
+  };
+  tinted(street, 5, 0.16);
+  tinted(stations, 9, 0.5);
+  g.globalAlpha = 1;
+  // warm tint: the sprites are white, multiply by amber
+  g.globalCompositeOperation = 'multiply';
+  g.fillStyle = 'rgb(255,176,96)'; g.fillRect(0, 0, S, S);
+  g.globalCompositeOperation = 'source-over';
+  shoreGlow.t.needsUpdate = true;
+}
+
+/**
  * Night lights as additive glow sprites in ONE draw call (THREE.Points, no textures, no lights): street lamps along every street
  * (sodium amber on arterials, warm white on collectors, gas amber in the old cores, sparse on local streets) and a larger glow over
  * each station. They are a fake bloom: a bright core with a soft halo that is sized in world metres, so it shrinks to a speck at
@@ -119,6 +161,7 @@ export class NightLights {
     this.pts.geometry.dispose();
     this.pts.geometry = g;
     this.streetN = A.size.length;
+    drawGlow(A, B);
   }
 
   get count() { return this.streetN; }

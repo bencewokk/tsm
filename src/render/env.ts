@@ -110,7 +110,15 @@ export class Env {
 
   render() {
     this.sky.follow(this.camera);
+    // camera feel: the lens widens as the camera comes down to street level (more perspective close in, a compressed model view far out);
+    // eased towards its target so a zoom never snaps. 32 degrees at overview, as before.
+    {
+      const d = this.camera.position.distanceTo(this.controls.target);
+      const tf = VFX.is('cam') ? 32 + 12 * (1 - THREE.MathUtils.smoothstep(d, 400, 4800)) : 32;
+      if (Math.abs(this.camera.fov - tf) > 0.01) { this.camera.fov += (tf - this.camera.fov) * 0.2; this.camera.updateProjectionMatrix(); }
+    }
     lookUniforms.uTime.value = performance.now() / 1000;
+    lookUniforms.uTreeKeep.value = VFX.is('thin') ? 1 - 0.55 * THREE.MathUtils.smoothstep(this.camera.position.distanceTo(this.controls.target), 3000, 6000) : 1;
     lookUniforms.uPx.value = this.composer.renderTarget1.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     if (this.linear) this.composer.render();
     else this.renderer.render(this.scene, this.camera);

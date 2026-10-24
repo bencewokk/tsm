@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { N, CELL, Flag } from '../sim/constants';
 import { VS } from './common';
 import { T_COLORS } from '../sim/territory';
-import { skyLight } from './look';
+import { skyLight, nightHooks } from './look';
+import { shoreGlow } from './lights';
 import { VFX } from './vfx';
 
 export interface TerrainView {
@@ -195,6 +196,9 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
 
   // skirt: a pale plinth under the model, like a base board
   const waterMat = new THREE.MeshPhysicalMaterial({ map: waterTexture(wmask), color: '#ffffff', roughness: 0.07, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.05, transparent: true, opacity: 0.93 });
+  // the city's lights in the water (night): see lights.ts shoreGlow
+  waterMat.emissive.set(0xffffff); waterMat.emissiveMap = shoreGlow.t; waterMat.emissiveIntensity = 0;
+  nightHooks.push((n) => { waterMat.emissiveIntensity = VFX.is('water') ? n * 1.6 : 0; });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(N * CELL, N * CELL), waterMat);
   water.rotation.x = -Math.PI / 2;
   water.position.set((N * CELL) / 2, 0.3, (N * CELL) / 2);
