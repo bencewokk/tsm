@@ -1,0 +1,118 @@
+m18	#1	land_buyup	in east Holloway (44,57)	proposed
+m18	#1	land_buyup	in east Holloway (44,57)	deal 1: Lantern Land Co.: mid-rise with a square, station due m54, -$8M
+m29	#2	station_quarter	near Market station (53,32)	proposed
+m29	#2	station_quarter	near Market station (53,32)	declined
+m32	#3	vacant_infill	in south-east Kestrel Hill (80,106)	proposed
+m32	#3	vacant_infill	in south-east Kestrel Hill (80,106)	deal 0: Go ahead
+m38	#1	land_buyup	in east Holloway (44,57)	opened
+m38	#4	vacant_infill	in east Kestrel Hill (82,101)	proposed
+m38	#4	vacant_infill	in east Kestrel Hill (82,101)	deal 0: Go ahead
+m46	#3	vacant_infill	in south-east Kestrel Hill (80,106)	opened
+m48	#5	vacant_infill	in south Millford (73,34)	proposed
+m48	#5	vacant_infill	in south Millford (73,34)	deal 0: Go ahead
+m54	#1	land_buyup	in east Holloway (44,57)	promise broken, site goes car-first
+m54	#4	vacant_infill	in east Kestrel Hill (82,101)	opened
+m54	#6	vacant_infill	in west Holloway (21,56)	proposed
+m54	#6	vacant_infill	in west Holloway (21,56)	deal 0: Go ahead
+m62	#5	vacant_infill	in south Millford (73,34)	opened
+m63	#7	station_quarter	near Harbour station (74,24)	proposed
+m63	#7	station_quarter	near Harbour station (74,24)	deal 1: Yes, as dense as they like, +$10M
+m68	#6	vacant_infill	in west Holloway (21,56)	opened
+m70	#8	land_buyup	in north-east Fernway (66,53)	proposed
+m70	#8	land_buyup	in north-east Fernway (66,53)	deal 2: Meridian Homes: houses with garages, +$6M
+m82	#9	land_buyup	in south Oldbridge (51,46)	proposed
+m82	#9	land_buyup	in south Oldbridge (51,46)	deal 0: Civic Land Co.: towers, fast, station due m102, +$22M
+m88	#7	station_quarter	near Harbour station (74,24)	opened
+m88	#8	land_buyup	in north-east Fernway (66,53)	opened car-first
+m90	#10	vacant_infill	in east Kestrel Hill (83,103)	proposed
+m90	#10	vacant_infill	in east Kestrel Hill (83,103)	deal 0: Go ahead
+m96	#11	vacant_infill	in north-east Saltmarsh (97,50)	proposed
+m96	#11	vacant_infill	in north-east Saltmarsh (97,50)	deal 0: Go ahead
+m102	#9	land_buyup	in south Oldbridge (51,46)	promise broken, clawback -$12M, site goes car-first
+m103	#9	land_buyup	in south Oldbridge (51,46)	opened car-first (promise broken)
+m104	#12	institution_expansion	in north-east Fernway (66,56)	proposed
+m104	#12	institution_expansion	in north-east Fernway (66,56)	deal 0: Give them city land, -$12M
+m105	#10	vacant_infill	in east Kestrel Hill (83,103)	opened
+m106	#13	land_buyup	near Chapel station (65,42)	proposed
+m106	#13	land_buyup	near Chapel station (65,42)	deal 1: Crown Homes: mid-rise with a square, -$10M
+m108	#13	land_buyup	near Chapel station (65,42)	assembly failed
+m108	#14	vacant_infill	in south-east Kestrel Hill (79,108)	proposed
+m108	#14	vacant_infill	in south-east Kestrel Hill (79,108)	deal 0: Go ahead
+m111	#11	vacant_infill	in north-east Saltmarsh (97,50)	opened
+m114	#15	vacant_infill	in central Saltmarsh (91,56)	proposed
+m114	#15	vacant_infill	in central Saltmarsh (91,56)	deal 0: Go ahead
+m124	#14	vacant_infill	in south-east Kestrel Hill (79,108)	opened
+m125	#16	estate_renewal	in central Saltmarsh (98,57)	proposed
+m125	#16	estate_renewal	in central Saltmarsh (98,57)	refurbished
+m126	#12	institution_expansion	in north-east Fernway (66,56)	opened
+m129	#15	vacant_infill	in central Saltmarsh (91,56)	opened
+m130	#17	land_buyup	in south Oldbridge (52,45)	proposed
+m130	#17	land_buyup	in south Oldbridge (52,45)	deal 2: Beacon Living: houses with garages, +$4M
+m132	#18	vacant_infill	in east Kestrel Hill (81,100)	proposed
+m132	#18	vacant_infill	in east Kestrel Hill (81,100)	deal 0: Go ahead
+m142	#19	land_buyup	in south Millford (74,37)	proposed
+m142	#19	land_buyup	in south Millford (74,37)	deal 1: Fairway Housing Trust: mid-rise with a square, station due m178, -$8M
+m146	#18	vacant_infill	in east Kestrel Hill (81,100)	opened
+m148	#17	land_buyup	in south Oldbridge (52,45)	opened car-first
+m154	#20	land_buyup	near Market station (56,31)	proposed
+m154	#20	land_buyup	near Market station (56,31)	deal 2: Meridian Partners: houses with garages, +$4M
+m158	#21	vacant_infill	in south Brindle (26,81)	proposed
+m158	#21	vacant_infill	in south Brindle (26,81)	deal 0: Go ahead
+m163	#19	land_buyup	in south Millford (74,37)	opened
+m166	#22	land_buyup	in south Oldbridge (49,42)	proposed
+m166	#22	land_buyup	in south Oldbridge (49,42)	deal 1: Lantern Housing Trust: mid-rise with a square, station due m199, -$10M
+m173	#20	land_buyup	near Market station (56,31)	opened car-first
+m173	#21	vacant_infill	in south Brindle (26,81)	opened
+m173	#23	waterfront_regen	in north Saltmarsh (91,44)	proposed
+m173	#23	waterfront_regen	in north Saltmarsh (91,44)	declined
+m178	#19	land_buyup	in south Millford (74,37)	promise broken, site goes car-first
+m179	#24	estate_renewal	in north-east Holloway (39,51)	proposed
+m179	#24	estate_renewal	in north-east Holloway (39,51)	deal 0: Rebuild it denser, +$6M
+m182	#25	institution_expansion	in north-east Fernway (66,57)	proposed
+m182	#25	institution_expansion	in north-east Fernway (66,57)	deal 1: Let them buy the plots, +$5M
+m184	#26	vacant_infill	in east Kestrel Hill (81,103)	proposed
+m184	#26	vacant_infill	in east Kestrel Hill (81,103)	deal 0: Go ahead
+m186	#22	land_buyup	in south Oldbridge (49,42)	opened
+m189	#27	estate_renewal	in central Holloway (29,57)	proposed
+m189	#27	estate_renewal	in central Holloway (29,57)	deal 0: Rebuild it denser, +$5M
+m197	#24	estate_renewal	in north-east Holloway (39,51)	opened
+m198	#28	vacant_infill	in south-west Brindle (19,80)	proposed
+m198	#28	vacant_infill	in south-west Brindle (19,80)	deal 0: Go ahead
+m199	#22	land_buyup	in south Oldbridge (49,42)	promise broken, site goes car-first
+m199	#26	vacant_infill	in east Kestrel Hill (81,103)	opened
+m202	#29	vacant_infill	in south-east Brindle (31,78)	proposed
+m202	#29	vacant_infill	in south-east Brindle (31,78)	deal 0: Go ahead
+m208	#25	institution_expansion	in north-east Fernway (66,57)	opened
+m209	#27	estate_renewal	in central Holloway (29,57)	opened
+m211	#30	estate_renewal	in north Holloway (31,48)	proposed
+m211	#30	estate_renewal	in north Holloway (31,48)	deal 0: Rebuild it denser, +$5M
+m213	#28	vacant_infill	in south-west Brindle (19,80)	opened
+m215	#31	waterfront_regen	in north Millford (77,16)	proposed
+m215	#31	waterfront_regen	in north Millford (77,16)	deal 1: Mid-rise and a promenade, -$8M
+m216	#29	vacant_infill	in south-east Brindle (31,78)	opened
+m224	#32	vacant_infill	in east Kestrel Hill (82,103)	proposed
+m224	#32	vacant_infill	in east Kestrel Hill (82,103)	deal 0: Go ahead
+m231	#30	estate_renewal	in north Holloway (31,48)	opened
+m231	#33	estate_renewal	in outer north-west Fernway (53,51)	proposed
+m231	#33	estate_renewal	in outer north-west Fernway (53,51)	deal 0: Rebuild it denser, +$8M
+m239	#31	waterfront_regen	in north Millford (77,16)	opened
+m239	#32	vacant_infill	in east Kestrel Hill (82,103)	opened
+m240	#34	vacant_infill	in south-west Brindle (25,79)	proposed
+m240	#34	vacant_infill	in south-west Brindle (25,79)	deal 0: Go ahead
+
+seed 187, 240 months (20 years), population 158286, lines 1, 28818 ms
+per type: instances / distinct sites / quarters / outcomes
+  land_buyup               8 at 7 sites in 4 quarters | done car-first 7, aborted 1 | mean gap 21.1 months | promises: kept 0, broken 4, open 0
+  station_quarter          2 at 2 sites in 2 quarters | declined 1, done 1 | mean gap 34.0 months
+  vacant_infill           15 at 10 sites in 5 quarters | done 14, assembling 1 | mean gap 14.9 months
+  estate_renewal           5 at 5 sites in 3 quarters | refurbished 1, done 3, building 1 | mean gap 26.5 months
+  works_rezoning           0 at 0 sites in 0 quarters | 
+  waterfront_regen         2 at 2 sites in 2 quarters | declined 1, done 1 | mean gap 42.0 months
+  institution_expansion    2 at 1 sites in 1 quarters | done 2 | mean gap 78.0 months
+money: m0 150M, m24 12M, m48 -29M, m72 -86M, m96 -143M, m120 -258M, m144 -282M, m168 -282M, m192 -178M, m216 -108M
+total instances 34; most running at once 4 (assemblies at once 4):
+   #22 land_buyup in south Oldbridge (building)
+   #24 estate_renewal in north-east Holloway (assembling)
+   #25 institution_expansion in north-east Fernway (assembling)
+   #26 vacant_infill in east Kestrel Hill (assembling)
+area trust / interest at the end: Fernway 1.00/1.01, Millford 0.75/1.66, Kestrel Hill 1.00/0.85, Holloway 0.55/0.75, Oldbridge 0.40/1.50, Brindle 1.00/0.85, Saltmarsh 1.10/1.71

@@ -17,6 +17,7 @@ import { makeCityProfile, type CityProfile } from './cityprofile';
 import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './town';
 import { MinHeap } from './heap';
 import { pruneRoads, promoteJunctions, inCoreXY } from './hierarchy';
+import { ProjectSystem, PACE } from './projects';
 import { GRAPHCHECK, validateGraph, graphDefects, formatReport, type GraphReport } from './graphcheck';
 import { T, T_CAP, TERR, updateTerritories } from './territory';
 import { planReserves, applyReserve } from './reserves';
@@ -141,6 +142,7 @@ export class Sim {
   profiles: DistrictProfile[];
   lm!: LandmarkSystem;
   asm = new AssemblySystem(this);
+  projects = new ProjectSystem(this);
   lastEventMonth = -99;
 
   constructor(public seed: number, force?: { terrain?: CityProfile['terrain']; origin?: CityProfile['origin'] }) {
@@ -294,6 +296,14 @@ export class Sim {
       this.pending = { def, variant, vars };
       return;
     }
+    // development projects: queued decisions, one at a time and spaced out
+    if (this.month < this.projects.lastDecision + PACE.decisionGap) return;
+    const d = this.projects.nextDecision();
+    if (d) {
+      const inst = Number(d.id.slice(5)), p = this.projects.list.find((q) => q.id === inst)!;
+      const def: EventDef = { id: d.id, trigger: {}, title: d.title, text: d.text, choices: d.choices.map((c, k) => ({ ...c, effects: [{ kind: 'project', inst, choice: k }] })) };
+      this.pending = { def, variant: null, vars: p.vars };
+    }
   }
 
   docksLots(): Lot[] { return this.liveLots.filter((l) => l.flags & Flag.Docks); }
@@ -362,6 +372,7 @@ export class Sim {
         break;
       }
       case 'lmCarPark': this.lm.setCarPark(e.id); this.say('Car park extended'); break;
+      case 'project': this.projects.choose(e.inst, e.choice); this.projects.lastDecision = this.month; break;
       case 'docksRoadRelief': this.docks.roadRelief = true; this.say('Bus lanes painted along the harbour roads'); break;
     }
   }
@@ -468,6 +479,7 @@ export class Sim {
     if (this.month % 6 === 0) { const pr = pruneRoads(this, 10), pj = promoteJunctions(this.town); if (pr + pj > 0) this.roads.rasterize(this.g.road); }
     this.repairRoads();
     this.checkGraph(`month ${this.month}`);
+    this.projects.tick();
     this.finance();
     this.checkEvents();
   }
@@ -1349,6 +1361,7 @@ export class Sim {
       docks: this.docksInfo(),
       landmarks: this.lm.info(),
       assemblies: this.asm.infos(),
+      projects: this.projects.infos(), notices: this.projects.notices.slice(-5),
       desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
       log: this.log.slice(-8), speed: this.speed,
     };

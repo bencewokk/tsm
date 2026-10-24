@@ -1,0 +1,128 @@
+m16	#1	land_buyup	in south-east Ashcombe (75,102)	proposed
+m16	#1	land_buyup	in south-east Ashcombe (75,102)	deal 1: Lantern Land Co.: mid-rise with a square, station due m52, -$8M
+m25	#1	land_buyup	in south-east Ashcombe (75,102)	promise kept
+m31	#2	estate_renewal	near Harbour station (35,78)	proposed
+m31	#2	estate_renewal	near Harbour station (35,78)	declined
+m34	#3	works_rezoning	in south-east Saltmarsh (42,86)	proposed
+m34	#3	works_rezoning	in south-east Saltmarsh (42,86)	deal 0: Rezone with a park, -$10M
+m35	#1	land_buyup	in south-east Ashcombe (75,102)	opened (promise kept)
+m39	#4	station_quarter	near Riverside station (27,107)	proposed
+m39	#4	station_quarter	near Riverside station (27,107)	deal 1: Yes, as dense as they like, +$10M
+m54	#3	works_rezoning	in south-east Saltmarsh (42,86)	opened
+m54	#5	land_buyup	in outer east Saltmarsh (53,83)	proposed
+m54	#5	land_buyup	in outer east Saltmarsh (53,83)	deal 2: Fairway Partners: houses with garages, +$6M
+m59	#6	station_quarter	near Harbour station (36,79)	proposed
+m59	#6	station_quarter	near Harbour station (36,79)	deal 0: Yes, with a square at the entrance
+m63	#4	station_quarter	near Riverside station (27,107)	opened
+m66	#7	institution_expansion	in east Ashcombe (79,103)	proposed
+m66	#7	institution_expansion	in east Ashcombe (79,103)	deal 1: Let them buy the plots, +$6M
+m71	#5	land_buyup	in outer east Saltmarsh (53,83)	opened car-first
+m74	#8	land_buyup	in south Saltmarsh (38,87)	proposed
+m74	#8	land_buyup	in south Saltmarsh (38,87)	deal 2: Meridian Homes: houses with garages, +$7M
+m78	#6	station_quarter	near Harbour station (36,79)	opened
+m78	#9	works_rezoning	in outer south Saltmarsh (44,97)	proposed
+m79	#9	works_rezoning	in outer south Saltmarsh (44,97)	deal 0: Rezone with a park, station due m116, -$9M
+m81	#10	waterfront_regen	in east Holloway (36,107)	proposed
+m81	#10	waterfront_regen	in east Holloway (36,107)	deal 1: Mid-rise and a promenade, -$6M
+m85	#7	institution_expansion	in east Ashcombe (79,103)	opened
+m90	#11	land_buyup	in south-east Saltmarsh (47,91)	proposed
+m90	#11	land_buyup	in south-east Saltmarsh (47,91)	deal 2: Northgate Homes: houses with garages, +$7M
+m94	#8	land_buyup	in south Saltmarsh (38,87)	opened car-first
+m102	#9	works_rezoning	in outer south Saltmarsh (44,97)	opened
+m102	#10	waterfront_regen	in east Holloway (36,107)	opened
+m105	#12	waterfront_regen	in outer west Ashcombe (50,95)	proposed
+m105	#12	waterfront_regen	in outer west Ashcombe (50,95)	deal 0: Waterfront towers, +$29M
+m108	#13	land_buyup	in north-east Saltmarsh (45,75)	proposed
+m108	#13	land_buyup	in north-east Saltmarsh (45,75)	deal 1: Crown Homes: mid-rise with a square, -$7M
+m109	#11	land_buyup	in south-east Saltmarsh (47,91)	opened car-first
+m112	#14	works_rezoning	in east Saltmarsh (44,82)	proposed
+m112	#14	works_rezoning	in east Saltmarsh (44,82)	declined
+m116	#9	works_rezoning	in outer south Saltmarsh (44,97)	promise broken, site goes car-first
+m116	#15	land_buyup	in west Saltmarsh (31,80)	proposed
+m116	#15	land_buyup	in west Saltmarsh (31,80)	deal 0: Quayside Housing Trust: towers, fast, +$19M
+m122	#16	vacant_infill	in east Brindle (110,115)	proposed
+m122	#16	vacant_infill	in east Brindle (110,115)	deal 0: Go ahead
+m124	#17	land_buyup	in north Holloway (29,103)	proposed
+m124	#17	land_buyup	in north Holloway (29,103)	deal 2: Beacon Living: houses with garages, +$6M
+m129	#13	land_buyup	in north-east Saltmarsh (45,75)	opened
+m129	#18	station_quarter	near Quay station (33,112)	proposed
+m129	#18	station_quarter	near Quay station (33,112)	deal 0: Yes, with a square at the entrance
+m133	#12	waterfront_regen	in outer west Ashcombe (50,95)	opened
+m136	#19	land_buyup	in outer south-west Saltmarsh (29,91)	proposed
+m136	#19	land_buyup	in outer south-west Saltmarsh (29,91)	deal 1: Fairway Housing Trust: mid-rise with a square, station due m171, -$9M
+m138	#15	land_buyup	in west Saltmarsh (31,80)	opened
+m138	#20	vacant_infill	in central Brindle (101,110)	proposed
+m138	#20	vacant_infill	in central Brindle (101,110)	deal 0: Go ahead
+m140	#16	vacant_infill	in east Brindle (110,115)	opened
+m142	#21	vacant_infill	in outer north Saltmarsh (38,50)	proposed
+m142	#21	vacant_infill	in outer north Saltmarsh (38,50)	deal 0: Go ahead
+m145	#17	land_buyup	in north Holloway (29,103)	opened car-first
+m145	#20	vacant_infill	in central Brindle (101,110)	assembly failed
+m145	#22	station_quarter	near Bellfield station (44,82)	proposed
+m145	#22	station_quarter	near Bellfield station (44,82)	deal 1: Yes, as dense as they like, +$9M
+m148	#23	works_rezoning	in north-east Holloway (35,102)	proposed
+m148	#23	works_rezoning	in north-east Holloway (35,102)	declined
+m150	#24	land_buyup	in east Saltmarsh (51,80)	proposed
+m150	#24	land_buyup	in east Saltmarsh (51,80)	deal 0: Quayside Properties: towers, fast, +$19M
+m151	#18	station_quarter	near Quay station (33,112)	opened
+m153	#19	land_buyup	in outer south-west Saltmarsh (29,91)	opened
+m156	#21	vacant_infill	in outer north Saltmarsh (38,50)	opened
+m156	#25	institution_expansion	in east Ashcombe (81,96)	proposed
+m156	#25	institution_expansion	in east Ashcombe (81,96)	deal 1: Let them buy the plots, +$6M
+m161	#26	station_quarter	near Orchard station (72,100)	proposed
+m161	#26	station_quarter	near Orchard station (72,100)	declined
+m168	#27	works_rezoning	in south-east Saltmarsh (44,93)	proposed
+m168	#27	works_rezoning	in south-east Saltmarsh (44,93)	deal 0: Rezone with a park, station due m203, -$12M
+m169	#22	station_quarter	near Bellfield station (44,82)	opened
+m170	#28	vacant_infill	in west Brindle (99,112)	proposed
+m170	#28	vacant_infill	in west Brindle (99,112)	deal 0: Go ahead
+m171	#19	land_buyup	in outer south-west Saltmarsh (29,91)	promise broken, site goes car-first
+m171	#24	land_buyup	in east Saltmarsh (51,80)	opened
+m176	#25	institution_expansion	in east Ashcombe (81,96)	opened
+m179	#29	waterfront_regen	in south-east Holloway (36,114)	proposed
+m179	#29	waterfront_regen	in south-east Holloway (36,114)	declined
+m182	#30	vacant_infill	in east Brindle (111,114)	proposed
+m182	#30	vacant_infill	in east Brindle (111,114)	deal 0: Go ahead
+m184	#31	works_rezoning	in east Saltmarsh (50,85)	proposed
+m184	#31	works_rezoning	in east Saltmarsh (50,85)	deal 1: Rezone dense, +$9M
+m187	#28	vacant_infill	in west Brindle (99,112)	opened
+m191	#27	works_rezoning	in south-east Saltmarsh (44,93)	opened
+m194	#32	vacant_infill	in north Brindle (104,105)	proposed
+m194	#32	vacant_infill	in north Brindle (104,105)	deal 0: Go ahead
+m198	#30	vacant_infill	in east Brindle (111,114)	opened
+m202	#33	vacant_infill	in west Brindle (98,111)	proposed
+m202	#33	vacant_infill	in west Brindle (98,111)	deal 0: Go ahead
+m203	#27	works_rezoning	in south-east Saltmarsh (44,93)	promise broken, site goes car-first
+m207	#31	works_rezoning	in east Saltmarsh (50,85)	opened
+m211	#32	vacant_infill	in north Brindle (104,105)	opened
+m213	#34	waterfront_regen	in outer south-east Ashcombe (74,112)	proposed
+m213	#34	waterfront_regen	in outer south-east Ashcombe (74,112)	deal 1: Mid-rise and a promenade, station due m255, -$5M
+m216	#33	vacant_infill	in west Brindle (98,111)	opened
+m226	#35	vacant_infill	in outer north Saltmarsh (31,40)	proposed
+m226	#35	vacant_infill	in outer north Saltmarsh (31,40)	deal 0: Go ahead
+m228	#36	works_rezoning	in south Saltmarsh (34,93)	proposed
+m228	#36	works_rezoning	in south Saltmarsh (34,93)	deal 0: Rezone with a park, station due m258, -$17M
+m232	#37	institution_expansion	in east Ashcombe (80,94)	proposed
+m232	#37	institution_expansion	in east Ashcombe (80,94)	deal 1: Let them buy the plots, +$6M
+m234	#34	waterfront_regen	in outer south-east Ashcombe (74,112)	opened
+m234	#36	works_rezoning	in south Saltmarsh (34,93)	promise kept
+m240	#35	vacant_infill	in outer north Saltmarsh (31,40)	opened
+
+seed 4821, 240 months (20 years), population 184437, lines 3, 24171 ms
+per type: instances / distinct sites / quarters / outcomes
+  land_buyup               9 at 9 sites in 3 quarters | done 4, done car-first 5 | mean gap 16.8 months | promises: kept 1, broken 1, open 0
+  station_quarter          5 at 5 sites in 3 quarters | done 4, declined 1 | mean gap 30.5 months
+  vacant_infill            8 at 6 sites in 2 quarters | done 7, aborted 1 | mean gap 14.9 months
+  estate_renewal           1 at 1 sites in 1 quarters | declined 1
+  works_rezoning           7 at 7 sites in 2 quarters | done 2, done car-first 2, declined 2, building 1 | mean gap 32.3 months | promises: kept 1, broken 2, open 0
+  waterfront_regen         4 at 4 sites in 2 quarters | done 3, declined 1 | mean gap 44.0 months | promises: kept 0, broken 0, open 1
+  institution_expansion    3 at 2 sites in 1 quarters | done 2, assembling 1 | mean gap 83.0 months
+  m233 spur for #36 works_rezoning: built
+money: m0 150M, m24 57M, m48 50M, m72 16M, m96 42M, m120 90M, m144 119M, m168 317M, m192 491M, m216 621M
+total instances 37; most running at once 5 (assemblies at once 5):
+   #12 waterfront_regen in outer west Ashcombe (building)
+   #13 land_buyup in north-east Saltmarsh (building)
+   #15 land_buyup in west Saltmarsh (assembling)
+   #16 vacant_infill in east Brindle (assembling)
+   #17 land_buyup in north Holloway (assembling)
+area trust / interest at the end: Ashcombe 1.20/1.75, Holloway 1.10/1.72, Brindle 1.00/0.85, Saltmarsh 0.50/1.71

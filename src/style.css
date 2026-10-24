@@ -28,7 +28,7 @@ button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
 .spacer { flex: 1; }
 .speed { display: flex; gap: 4px; }
 .speed button { min-width: 38px; }
-.side { position: absolute; top: 76px; left: 12px; width: 210px; padding: 10px 12px; }
+.side { position: absolute; top: 76px; left: 12px; width: 210px; padding: 10px 12px; max-height: calc(100vh - 76px - 200px); overflow-y: auto; overflow-x: hidden; }
 .h { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
 .row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12px; }
 .row b { font-variant-numeric: tabular-nums; font-weight: 600; }
@@ -99,6 +99,16 @@ button.mini { padding: 0 6px; font-size: 11px; line-height: 16px; }
 .ticker:empty { display: none; }
 
 .lmh { margin-top: 8px; }
+.news { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 2px; max-width: 260px; }
+.news .small { line-height: 1.25; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.lm.proj { flex-direction: column; align-items: stretch; gap: 0; }
+.lm.proj .t { display: flex; justify-content: space-between; align-items: center; gap: 4px; min-width: 0; }
+.lm.proj .t > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lmlist { overflow-x: hidden; }
+.lm > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lm.proj .pl { font-size: 10px; padding-left: 13px; }
+.lm.proj .bd { display: flex; gap: 3px; flex-wrap: wrap; justify-content: flex-end; }
 .lmlist { display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow: auto; }
 .lm { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 2px 6px; font-size: 11px; text-align: left; }
 .lm i { font-style: normal; font-size: 10px; padding: 0 5px; border-radius: 8px; white-space: nowrap; }

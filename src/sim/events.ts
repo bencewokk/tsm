@@ -33,7 +33,9 @@ export type Effect =
   | { kind: 'docksRoadRelief' }
   | { kind: 'landmark'; id: string; site: SiteChoice; pay: 'city' | 'dev' }
   | { kind: 'lmCarPark'; id: string }
-  | { kind: 'log'; text: string };
+  | { kind: 'log'; text: string }
+  /** a choice on a development project instance (projects.ts) */
+  | { kind: 'project'; inst: number; choice: number };
 
 export interface DocksDeal {
   id: string;

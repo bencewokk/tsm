@@ -22,7 +22,7 @@ import { LANDMARKS, LANDMARK_INDEX, type LandmarkDef } from './landmarks';
 import type { Sim } from './sim';
 import type { Lot } from './lots';
 
-export type AsmKind = 'tower' | 'landmark' | 'docks' | 'square';
+export type AsmKind = 'tower' | 'landmark' | 'docks' | 'square' | 'project';
 export const ASM_PHASES = ['assembling', 'hoardings up', 'demolition', 'site cleared', 'foundations', 'structure', 'facade'] as const;
 
 export interface AsmPlan {
@@ -59,12 +59,22 @@ export interface AssemblyInfo {
 }
 
 const close = (x1: number, y1: number, x2: number, y2: number) => Math.hypot(x1 - x2, y1 - y2) < 0.06;
+/** the quad moved inwards by d (cells) along each corner's bisector, approximately */
+function insetQuad(q: number[], d: number): number[] {
+  const cx = (q[0] + q[2] + q[4] + q[6]) / 4, cy = (q[1] + q[3] + q[5] + q[7]) / 4;
+  const out: number[] = [];
+  for (let k = 0; k < 4; k++) {
+    const x = q[k * 2], y = q[k * 2 + 1], L = Math.hypot(x - cx, y - cy) || 1;
+    out.push(x + ((cx - x) / L) * d * 1.41, y + ((cy - y) / L) * d * 1.41);
+  }
+  return out;
+}
 
 export class AssemblySystem {
   list: Assembly[] = [];
   private nextId = 1;
   docksPending = false;
-  stats = { planTry: 0, planSeedBad: 0, planNoWindow: 0, planNoConvex: 0, started: 0, finished: 0, aborted: 0, closedStreets: 0, rerouted: 0, holdouts: 0, reshaped: 0 };
+  stats = { planTry: 0, planSeedBad: 0, planNoWindow: 0, planNoConvex: 0, started: 0, finished: 0, aborted: 0, closedStreets: 0, rerouted: 0, holdouts: 0, reshaped: 0, insetMerges: 0 };
 
   constructor(private sim: Sim) {}
 
@@ -427,7 +437,14 @@ export class AssemblySystem {
     const saved = keep.map((l) => ({ l, was: l.alive }));
     void saved;
     for (const l of keep) lots.remove(l);
-    const L = lots.tryAddQuad(a.quad, first.cls, first.prof, 0, 0);
+    // the union of the members' outlines can graze a neighbour (back rows that are not quite flush) or a kerb by a few centimetres:
+    // retry with the outline pulled in slightly before giving the site up
+    let L: Lot | null = null;
+    for (const inset of [0, 0.03, 0.08, 0.14]) {
+      const q = inset ? insetQuad(a.quad, inset) : a.quad;
+      L = lots.tryAddQuad(q, first.cls, first.prof, 0, 0);
+      if (L) { if (inset) { a.quad = q; this.stats.insetMerges++; } break; }
+    }
     if (!L) {
       // restore the members as vacant plots rather than lose the land
       for (const l of keep) { l.alive = true; lots.restore(l); l.asm = 0; l.astate = 0; }

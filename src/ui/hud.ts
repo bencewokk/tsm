@@ -51,6 +51,9 @@ export class Hud {
         <div class="row"><span>Road congestion</span><b data-k="cong">-</b></div>
         <div class="row"><span>Avg drive speed</span><b data-k="spd">-</b></div>
         <div class="row"><span>Transit trips / day</span><b data-k="trips">-</b></div>
+        <div class="h lmh">Projects <span class="muted small" data-k="projbudget"></span></div>
+        <div class="lmlist" data-k="projlist"></div>
+        <div class="news" data-k="news"></div>
         <div class="h lmh">Landmarks</div>
         <div class="lmlist" data-k="lmlist"></div>
       </div>
@@ -128,13 +131,36 @@ export class Hud {
     this.lmSig = sig;
     const el = this.el.lmlist;
     const PH = ['buying plots', 'hoardings up', 'demolition', 'site cleared', 'foundations', 'structure', 'facade'];
-    const dev = s.assemblies.map((a) => `<button class="lm" data-lx="${a.x}" data-ly="${a.y}"><span>${a.label}</span><i class="b">${PH[a.phase] ?? ''}${a.phase === 0 ? ` ${a.acquired}/${a.total}` : ''}</i></button>`).join('');
+    const dev = s.assemblies.filter((a) => a.kind !== 'project').map((a) => `<button class="lm" data-lx="${a.x}" data-ly="${a.y}"><span>${a.label}</span><i class="b">${PH[a.phase] ?? ''}${a.phase === 0 ? ` ${a.acquired}/${a.total}` : ''}</i></button>`).join('');
     if (!s.landmarks.length && !s.assemblies.length) { el.innerHTML = '<div class="muted small">None yet.</div>'; return; }
     el.innerHTML = dev + s.landmarks.slice().sort((a, b) => (a.state === b.state ? a.name.localeCompare(b.name) : a.state === 'building' ? -1 : 1)).map((l) => {
       const badge = l.state === 'building' ? `<i class="b">building ${Math.round(l.pct * 100)}%</i>` : l.eventDay ? '<i class="ev">event day</i>' : l.carPark ? '<i class="cp">car park</i>' : l.served ? '<i class="sv">served</i>' : '<i class="ns">no station</i>';
       return `<button class="lm" data-lx="${l.x}" data-ly="${l.y}"><span>${l.name}</span>${badge}</button>`;
     }).join('');
     el.querySelectorAll<HTMLButtonElement>('button.lm').forEach((b) => b.addEventListener('click', () => this.onFocusLandmark?.(Number(b.dataset.lx), Number(b.dataset.ly))));
+  }
+
+  private projSig = '';
+  /** Active development projects (projects.ts): type colour, place, phase, the service promise; then the latest notifications. */
+  private renderProjects(s: StateMsg) {
+    const sig = JSON.stringify([s.projects.map((p) => [p.id, p.status, p.phase, Math.round(p.pct * 10), p.promise, p.carLock]), s.notices.map((n) => n.text), s.stats.month]);
+    if (sig === this.projSig) return;
+    this.projSig = sig;
+    const live = s.projects.filter((p) => p.status === 'proposed' || p.status === 'assembling' || p.status === 'building');
+    this.el.projbudget.textContent = live.length ? `${live.length} running` : '';
+    const badge = (p: StateMsg['projects'][number]) => {
+      if (p.status === 'proposed') return '<i class="ev">decision</i>';
+      if (p.status === 'assembling' || p.status === 'building') {
+        const left = p.deadline - s.stats.month;
+        const prom = p.promise === 'open' ? ` <i class="${left <= 4 ? 'ns' : 'b'}">station in ${left} mo</i>` : p.promise === 'kept' ? ' <i class="sv">served</i>' : p.carLock ? ' <i class="cp">car-first</i>' : '';
+        return `<i class="b">${p.phase}${p.pct ? ` ${Math.round(p.pct * 100)}%` : ''}</i>${prom}`;
+      }
+      return `<i class="${p.status === 'done' ? (p.carLock ? 'cp' : 'sv') : 'ns'}">${p.outcome}</i>`;
+    };
+    const rows = s.projects.map((p) => `<button class="lm proj" data-lx="${p.x}" data-ly="${p.y}" title="${p.title}"><span class="t"><span><b class="dot" style="background:${p.color}"></b>${p.name}</span><span class="bd">${badge(p)}</span></span><span class="pl muted">${p.place}</span></button>`).join('');
+    this.el.projlist.innerHTML = rows || '<div class="muted small">None yet. Developers come where land is valuable, plots stand empty or a new station opens.</div>';
+    this.el.news.innerHTML = s.notices.slice(-3).reverse().map((n) => `<div class="small"><b class="dot" style="background:${n.color}"></b>${dateStr(n.month)} · ${n.text}</div>`).join('');
+    this.el.projlist.querySelectorAll<HTMLButtonElement>('button.lm').forEach((b) => b.addEventListener('click', () => this.onFocusLandmark?.(Number(b.dataset.lx), Number(b.dataset.ly))));
   }
 
   private renderEvent(s: StateMsg) {
@@ -234,6 +260,7 @@ export class Hud {
     this.renderEvent(s);
     this.renderDocks(s);
     this.renderLandmarks(s);
+    this.renderProjects(s);
     const st = s.stats, e = this.el;
     e.date.textContent = dateStr(st.month);
     e.pop.textContent = num(st.population);

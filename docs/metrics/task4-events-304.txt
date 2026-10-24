@@ -1,0 +1,132 @@
+m8	#1	vacant_infill	in outer west Kestrel Hill (41,70)	proposed
+m8	#1	vacant_infill	in outer west Kestrel Hill (41,70)	deal 0: Go ahead
+m22	#1	vacant_infill	in outer west Kestrel Hill (41,70)	opened
+m27	#2	estate_renewal	near Harbour station (88,51)	proposed
+m27	#2	estate_renewal	near Harbour station (88,51)	declined
+m31	#3	station_quarter	near Northgate station (53,81)	proposed
+m31	#3	station_quarter	near Northgate station (53,81)	deal 0: Yes, with a square at the entrance
+m34	#4	works_rezoning	in east Millford (31,68)	proposed
+m34	#4	works_rezoning	in east Millford (31,68)	deal 1: Rezone dense, +$15M
+m41	#5	station_quarter	near Mill Lane station (36,76)	proposed
+m41	#5	station_quarter	near Mill Lane station (36,76)	declined
+m49	#3	station_quarter	near Northgate station (53,81)	opened
+m52	#6	works_rezoning	in outer west Kestrel Hill (39,60)	proposed
+m52	#6	works_rezoning	in outer west Kestrel Hill (39,60)	deal 0: Rezone with a park, -$10M
+m55	#4	works_rezoning	in east Millford (31,68)	opened
+m56	#7	institution_expansion	in south-west Saltmarsh (77,62)	proposed
+m56	#7	institution_expansion	in south-west Saltmarsh (77,62)	deal 1: Let them buy the plots, +$5M
+m59	#8	estate_renewal	in north Millford (23,65)	proposed
+m59	#8	estate_renewal	in north Millford (23,65)	declined
+m61	#9	station_quarter	near Riverside station (41,71)	proposed
+m61	#9	station_quarter	near Riverside station (41,71)	deal 0: Yes, with a square at the entrance
+m68	#10	vacant_infill	in south-east Brindle (91,100)	proposed
+m68	#10	vacant_infill	in south-east Brindle (91,100)	deal 0: Go ahead
+m72	#6	works_rezoning	in outer west Kestrel Hill (39,60)	opened
+m72	#11	land_buyup	in west Kestrel Hill (46,70)	proposed
+m72	#11	land_buyup	in west Kestrel Hill (46,70)	deal 2: Northgate Homes: houses with garages, +$7M
+m74	#7	institution_expansion	in south-west Saltmarsh (77,62)	opened
+m79	#9	station_quarter	near Riverside station (41,71)	opened
+m81	#10	vacant_infill	in south-east Brindle (91,100)	opened
+m82	#12	land_buyup	near Mill Lane station (36,76)	proposed
+m83	#12	land_buyup	near Mill Lane station (36,76)	site no longer available
+m84	#13	vacant_infill	in north Brindle (84,90)	proposed
+m84	#13	vacant_infill	in north Brindle (84,90)	deal 0: Go ahead
+m88	#14	vacant_infill	in north-west Brindle (76,92)	proposed
+m88	#14	vacant_infill	in north-west Brindle (76,92)	deal 0: Go ahead
+m92	#15	land_buyup	in outer south-west Kestrel Hill (45,83)	proposed
+m92	#15	land_buyup	in outer south-west Kestrel Hill (45,83)	deal 0: Railside Housing Trust: towers, fast, +$25M
+m93	#11	land_buyup	in west Kestrel Hill (46,70)	opened car-first
+m95	#16	estate_renewal	in south Saltmarsh (85,56)	proposed
+m95	#16	estate_renewal	in south Saltmarsh (85,56)	refurbished
+m99	#13	vacant_infill	in north Brindle (84,90)	opened
+m102	#17	land_buyup	in south Kestrel Hill (58,79)	proposed
+m102	#17	land_buyup	in south Kestrel Hill (58,79)	deal 2: Beacon Living: houses with garages, +$7M
+m103	#14	vacant_infill	in north-west Brindle (76,92)	opened
+m104	#18	works_rezoning	in north Kestrel Hill (55,59)	proposed
+m104	#18	works_rezoning	in north Kestrel Hill (55,59)	deal 0: Rezone with a park, -$8M
+m110	#19	institution_expansion	in north-east Kestrel Hill (62,61)	proposed
+m111	#15	land_buyup	in outer south-west Kestrel Hill (45,83)	opened
+m111	#19	institution_expansion	in north-east Kestrel Hill (62,61)	deal 1: Let them buy the plots, +$6M
+m120	#17	land_buyup	in south Kestrel Hill (58,79)	opened car-first
+m120	#20	land_buyup	near Mill Lane station (33,77)	proposed
+m120	#20	land_buyup	near Mill Lane station (33,77)	deal 2: Meridian Partners: houses with garages, +$6M
+m124	#18	works_rezoning	in north Kestrel Hill (55,59)	opened
+m124	#21	works_rezoning	near Riverside station (40,65)	proposed
+m124	#21	works_rezoning	near Riverside station (40,65)	deal 0: Rezone with a park, -$8M
+m128	#22	institution_expansion	in outer east Kestrel Hill (74,67)	proposed
+m128	#22	institution_expansion	in outer east Kestrel Hill (74,67)	deal 1: Let them buy the plots, +$6M
+m132	#19	institution_expansion	in north-east Kestrel Hill (62,61)	opened
+m133	#23	station_quarter	near Lantern station (44,105)	proposed
+m133	#23	station_quarter	near Lantern station (44,105)	declined
+m141	#20	land_buyup	near Mill Lane station (33,77)	opened car-first
+m141	#24	station_quarter	near Ropewalk station (28,74)	proposed
+m141	#24	station_quarter	near Ropewalk station (28,74)	deal 0: Yes, with a square at the entrance
+m146	#21	works_rezoning	near Riverside station (40,65)	opened
+m148	#22	institution_expansion	in outer east Kestrel Hill (74,67)	opened
+m151	#25	waterfront_regen	in south-west Oldbridge (32,112)	proposed
+m152	#25	waterfront_regen	in south-west Oldbridge (32,112)	deal 1: Mid-rise and a promenade, station due m192, -$6M
+m154	#26	vacant_infill	in outer north Saltmarsh (73,18)	proposed
+m154	#26	vacant_infill	in outer north Saltmarsh (73,18)	deal 0: Go ahead
+m160	#24	station_quarter	near Ropewalk station (28,74)	opened
+m162	#27	works_rezoning	near Quay station (69,87)	proposed
+m163	#27	works_rezoning	near Quay station (69,87)	deal 0: Rezone with a park, -$10M
+m168	#26	vacant_infill	in outer north Saltmarsh (73,18)	opened
+m169	#25	waterfront_regen	in south-west Oldbridge (32,112)	opened
+m173	#28	waterfront_regen	in outer north-east Oldbridge (53,94)	proposed
+m174	#28	waterfront_regen	in outer north-east Oldbridge (53,94)	deal 1: Mid-rise and a promenade, station due m215, -$6M
+m178	#29	works_rezoning	in outer north-east Millford (32,59)	proposed
+m179	#28	waterfront_regen	in outer north-east Oldbridge (53,94)	promise kept
+m179	#29	works_rezoning	in outer north-east Millford (32,59)	declined
+m180	#30	vacant_infill	in outer north Saltmarsh (76,8)	proposed
+m180	#30	vacant_infill	in outer north Saltmarsh (76,8)	deal 0: Go ahead
+m183	#27	works_rezoning	near Quay station (69,87)	opened
+m184	#31	vacant_infill	in outer north-west Saltmarsh (73,31)	proposed
+m184	#31	vacant_infill	in outer north-west Saltmarsh (73,31)	deal 0: Go ahead
+m186	#32	institution_expansion	in north-east Kestrel Hill (66,62)	proposed
+m186	#32	institution_expansion	in north-east Kestrel Hill (66,62)	declined
+m192	#25	waterfront_regen	in south-west Oldbridge (32,112)	promise broken, site goes car-first
+m194	#30	vacant_infill	in outer north Saltmarsh (76,8)	opened
+m195	#28	waterfront_regen	in outer north-east Oldbridge (53,94)	opened (promise kept)
+m196	#33	works_rezoning	near Riverside station (37,70)	proposed
+m197	#33	works_rezoning	near Riverside station (37,70)	deal 0: Rezone with a park, -$10M
+m198	#31	vacant_infill	in outer north-west Saltmarsh (73,31)	opened
+m198	#34	vacant_infill	in outer north Saltmarsh (83,4)	proposed
+m198	#34	vacant_infill	in outer north Saltmarsh (83,4)	deal 0: Go ahead
+m206	#35	vacant_infill	in outer north Saltmarsh (73,16)	proposed
+m206	#35	vacant_infill	in outer north Saltmarsh (73,16)	deal 0: Go ahead
+m212	#34	vacant_infill	in outer north Saltmarsh (83,4)	opened
+m212	#36	vacant_infill	in north-west Saltmarsh (77,43)	proposed
+m212	#36	vacant_infill	in north-west Saltmarsh (77,43)	deal 0: Go ahead
+m218	#33	works_rezoning	near Riverside station (37,70)	opened
+m218	#37	institution_expansion	in south Saltmarsh (79,62)	proposed
+m218	#37	institution_expansion	in south Saltmarsh (79,62)	deal 1: Let them buy the plots, +$6M
+m220	#38	vacant_infill	in outer north Saltmarsh (76,11)	proposed
+m220	#38	vacant_infill	in outer north Saltmarsh (76,11)	deal 0: Go ahead
+m221	#35	vacant_infill	in outer north Saltmarsh (73,16)	opened
+m223	#39	station_quarter	near Weir station (53,93)	proposed
+m223	#39	station_quarter	near Weir station (53,93)	deal 0: Yes, with a square at the entrance
+m228	#36	vacant_infill	in north-west Saltmarsh (77,43)	opened
+m228	#40	vacant_infill	in outer north Saltmarsh (84,2)	proposed
+m228	#40	vacant_infill	in outer north Saltmarsh (84,2)	deal 0: Go ahead
+m232	#41	works_rezoning	in outer west Kestrel Hill (42,62)	proposed
+m232	#41	works_rezoning	in outer west Kestrel Hill (42,62)	declined
+m234	#38	vacant_infill	in outer north Saltmarsh (76,11)	opened
+m238	#37	institution_expansion	in south Saltmarsh (79,62)	opened
+
+seed 304, 240 months (20 years), population 247181, lines 3, 29002 ms
+per type: instances / distinct sites / quarters / outcomes
+  land_buyup               5 at 4 sites in 2 quarters | done car-first 3, aborted 1, done 1 | mean gap 12.0 months
+  station_quarter          6 at 6 sites in 3 quarters | done 3, declined 2, building 1 | mean gap 38.4 months
+  vacant_infill           12 at 9 sites in 3 quarters | done 11, building 1 | mean gap 20.0 months
+  estate_renewal           3 at 3 sites in 2 quarters | declined 2, refurbished 1 | mean gap 34.0 months
+  works_rezoning           8 at 8 sites in 3 quarters | done 6, declined 2 | mean gap 28.3 months
+  waterfront_regen         2 at 2 sites in 1 quarters | done car-first 1, done 1 | mean gap 22.0 months | promises: kept 1, broken 1, open 0
+  institution_expansion    5 at 4 sites in 2 quarters | done 4, declined 1 | mean gap 40.5 months
+  m178 spur for #28 waterfront_regen: built
+money: m0 150M, m24 -5M, m48 62M, m72 10M, m96 -2M, m120 68M, m144 123M, m168 185M, m192 329M, m216 464M
+total instances 41; most running at once 4 (assemblies at once 4):
+   #6 works_rezoning in outer west Kestrel Hill (building)
+   #7 institution_expansion in south-west Saltmarsh (building)
+   #9 station_quarter near Riverside station (assembling)
+   #10 vacant_infill in south-east Brindle (assembling)
+area trust / interest at the end: Kestrel Hill 1.25/1.67, Brindle 1.05/1.74, Oldbridge 1.00/1.65, Millford 1.10/1.69, Saltmarsh 1.10/1.61

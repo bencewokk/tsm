@@ -129,6 +129,10 @@ export interface StateMsg {
   docks: DocksInfo;
   landmarks: import('./landmarkSys').LandmarkInfo[];
   assemblies: import('./assembly').AssemblyInfo[];
+  /** development projects (projects.ts): live instances and the last few finished ones */
+  projects: import('./projects').ProjectInfo[];
+  /** latest project notifications (newest last) */
+  notices: { month: number; text: string; x: number; y: number; color: string }[];
   desire: DesireLine[];
   log: string[];
   speed: number;

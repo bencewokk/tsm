@@ -6,6 +6,7 @@ import { CityView, ROADFX } from './render/city';
 import { MetroView } from './render/metro';
 import { DesireView } from './render/desire';
 import { Labels } from './render/labels';
+import { ProjectMarkers } from './render/markers';
 import { Life } from './render/life';
 import { lookUniforms } from './render/look';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
@@ -24,6 +25,7 @@ const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: '
 const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean }) => worker.postMessage(c);
 
 let init: InitMsg | null = null;
+let markers: ProjectMarkers | null = null;
 /** dev: latest road graph validation from the worker (`tsm.graph`) */
 let graphReport: StateMsg['graph'] | null = null;
 let terrain: TerrainView | null = null;
@@ -51,6 +53,8 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     env.scene.add(life.group);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
     env.scene.add(metro.group);
+    markers = new ProjectMarkers((x, z) => terrain!.sample(x, z));
+    env.scene.add(markers.group);
     planner = new Planner(send, { height: m.height, water: m.water });
     const vx = m.villages.reduce((a, v) => a + v.x, 0) / m.villages.length;
     const vy = m.villages.reduce((a, v) => a + v.y, 0) / m.villages.length;
@@ -71,6 +75,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     if (newMonth) life?.setCity(m.stats.homes, m.stations);
     if (newMonth) lastStateAt = performance.now();
     city?.update(m);
+    markers?.update(m.projects);
     if (linesChanged) metro?.update(m);
     planner?.onState(m);
     if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
@@ -426,6 +431,25 @@ async function shot(name: string) {
   await fetch(`/__shot?name=${encodeURIComponent(name)}`, { method: 'POST', body: url });
   return name;
 }
+/** Dev helper: like shot, but with the HUD (panels, dialog) drawn over the canvas (the DOM is rendered through an SVG foreignObject). */
+async function shotUI(name: string) {
+  paperAndLabels();
+  env.render();
+  const gl = env.renderer.domElement, W = gl.width, H = gl.height, k = W / Math.max(1, gl.clientWidth);
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d')!;
+  g.drawImage(gl, 0, 0);
+  const css = [...document.styleSheets].map((sh) => { try { return [...sh.cssRules].map((r) => r.cssText).join(' '); } catch { return ''; } }).join(' ');
+  const clone = document.body.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('canvas, script').forEach((e) => e.remove());
+  const html = new XMLSerializer().serializeToString(clone).replace(/^<body[^>]*>/, '').replace(/<\/body>$/, '');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')}</style>${html}</div></foreignObject></svg>`;
+  const img = new Image();
+  await new Promise((r, j) => { img.onload = r; img.onerror = j; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
+  g.drawImage(img, 0, 0);
+  await fetch(`/__shot?name=${encodeURIComponent(name)}`, { method: 'POST', body: c.toDataURL('image/png') });
+  return name;
+}
 /** Dev helper: point the camera at a cell position from an azimuth / polar angle. */
 function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
   const tx = x * CELL, tz = y * CELL;
@@ -435,4 +459,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, uiLine, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; } };
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; } };
