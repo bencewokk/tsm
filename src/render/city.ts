@@ -282,6 +282,10 @@ export class CityView {
   }
 
   flush() { this.pump(Infinity); }
+  /** set when the city's casters changed (the sun's shadow map is redrawn); the caller clears it */
+  shadowDirty = true;
+  /** casters that move on their own: crane jibs turning, buildings rising or being demolished */
+  get moving() { return this.cranes.length > 0 || this.grows.size > 0; }
   get pending() { return this.queue.length - this.qi; }
 
   // ---------------------------------------------------------------- roads: asphalt on a pale kerb strip, cobbles in the old cores
@@ -475,6 +479,7 @@ export class CityView {
     this.step('commit', () => {
       // swap everything prepared above into the scene in this one step
       this.lots = L;
+      this.shadowDirty = true;
       for (const f of this.staged) f();
       this.staged = [];
       if (this.treesDirty) { this.treesDirty = false; this.rebuildTrees(s); }

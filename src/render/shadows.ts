@@ -19,6 +19,13 @@ export const SHADOW = {
   depthBias: 6.4,
   normalBiasTexels: 0.64,
   margin: 0.12,
+  /** redraw policy: the shadow map is redrawn only when something it shows changed (see SunShadow.frame) */
+  policy: true,
+  /** reference caster height (m) for the sun criterion: redraw when its shadow tip would move more than tipTexels texels */
+  tipHeight: 60,
+  tipTexels: 0.5,
+  /** with moving casters (crane jibs, rising buildings) the map is never older than this (ms) */
+  moverMs: 250,
 };
 
 export class SunShadow {
@@ -33,9 +40,85 @@ export class SunShadow {
   texel = 2.34;
   /** times the frustum was refitted */
   refits = 0;
+  /** set by the caller when static casters changed (city chunks, sites, construction, metro) */
+  dirty = true;
+  /** set by the caller while casters move on their own (crane jibs turning, buildings rising) */
+  movers = false;
+  /** frames seen and shadow redraws, by reason */
+  frames = 0;
+  redraws = 0;
+  why: Record<string, number> = { first: 0, geometry: 0, sun: 0, movers: 0, camera: 0, always: 0 };
+  private drawn = false;
+  private lastDraw = -1e9;
+  private drawDir = new THREE.Vector3();
+  private d = new THREE.Vector3();
 
-  constructor(private sun: THREE.DirectionalLight, private groundTop: number, private casterTop: number) {
+  constructor(private sun: THREE.DirectionalLight, private renderer: THREE.WebGLRenderer, private groundTop: number, private casterTop: number) {
     sun.shadow.mapSize.set(SHADOW.size, SHADOW.size);
+    renderer.shadowMap.autoUpdate = false;
+  }
+
+  /**
+   * Once per frame, after the sun was placed for this frame: decide whether the shadow map is redrawn. It is when the static casters
+   * changed, when the sun moved enough that a 60 m building's shadow tip would shift by half a texel (so the step stays below what the
+   * map resolves; at dusk the long shadows make that every frame or two, at noon about every 0.3 s; the threshold widens as the sun
+   * dims), at least every 250 ms while crane jibs turn or buildings rise, and when the camera's footprint leaves the fitted frustum.
+   * Between redraws the light still moves for shading; the shadow lookup keeps the matrix of the last redraw, so they stay consistent.
+   */
+  frame(camera: THREE.PerspectiveCamera, now: number): boolean {
+    this.frames++;
+    const d = this.dir(this.d);
+    let why = '';
+    if (!SHADOW.policy) why = 'always';
+    else if (!this.drawn) why = 'first';
+    else if (this.dirty) why = 'geometry';
+    else if (this.sunMoved(d)) why = 'sun';
+    else if (this.movers && now - this.lastDraw > SHADOW.moverMs) why = 'movers';
+    else if (!this.covers(camera)) why = 'camera';
+    if (!why) { this.place(d); return false; }
+    this.redraw(camera, now);
+    this.why[why]++;
+    return true;
+  }
+
+  /** Redraw now (refit for the current sun and camera). */
+  redraw(camera: THREE.PerspectiveCamera, now = performance.now()) {
+    this.update(camera, true);
+    this.renderer.shadowMap.needsUpdate = true;
+    this.drawDir.copy(this.dir(this.d));
+    this.lastDraw = now; this.dirty = false; this.drawn = true;
+    this.redraws++;
+  }
+
+  /** How far (m) the shadow tip of a tipHeight building moved since the last redraw, against half a texel scaled by shadow contrast. */
+  private sunMoved(d: THREE.Vector3): boolean {
+    const a = this.drawDir, H = SHADOW.tipHeight;
+    const ay = Math.max(0.02, a.y), dy = Math.max(0.02, d.y);
+    const dx = (d.x / dy - a.x / ay) * H, dz = (d.z / dy - a.z / ay) * H;
+    const contrast = Math.min(1, Math.max(0.06, (this.sun.intensity - 0.15) / 2.4));
+    return Math.hypot(dx, dz) > SHADOW.tipTexels * this.texel / contrast;
+  }
+
+  /** Does the fitted frustum (in the light space of the last redraw) still cover the camera's footprint, without being far too large? */
+  private covers(camera: THREE.PerspectiveCamera): boolean {
+    const f = this.fit;
+    if (!f) return false;
+    const fp = this.footprint(camera, this.fitDir);
+    const inside = fp.l >= f.l && fp.r <= f.r && fp.b >= f.b && fp.t <= f.t;
+    return inside && (f.r - f.l) * (f.t - f.b) < this.need(fp) * 2.6;
+  }
+
+  /** Area the frustum needs for a footprint (with the margin, and at least minTexel per texel on each axis). */
+  private need(fp: { l: number; r: number; b: number; t: number }) {
+    const m = SHADOW.margin, minW = SHADOW.minTexel * SHADOW.size;
+    return Math.max(minW, (fp.r - fp.l) * (1 + 2 * m)) * Math.max(minW, (fp.t - fp.b) * (1 + 2 * m));
+  }
+
+  /** The light sits 12 km from the board centre along its direction (the fitted depth range assumes it). */
+  private place(d: THREE.Vector3) {
+    this.sun.target.position.set(MAP / 2, 0, MAP / 2);
+    this.sun.target.updateMatrixWorld();
+    this.sun.position.set(MAP / 2, 0, MAP / 2).addScaledVector(d, 12000);
   }
 
   /** Light direction (unit, towards the sun) from the light's current placement. */
@@ -77,16 +160,12 @@ export class SunShadow {
    */
   update(camera: THREE.PerspectiveCamera, force = false): boolean {
     const d = this.dir(new THREE.Vector3());
-    // the light always sits 12 km from the board centre along its direction, so the depth range fitted below holds
-    this.sun.target.position.set(MAP / 2, 0, MAP / 2);
-    this.sun.target.updateMatrixWorld();
-    this.sun.position.set(MAP / 2, 0, MAP / 2).addScaledVector(d, 12000);
+    this.place(d);
     const fp = this.footprint(camera, d);
     const f = this.fit;
     if (!force && f && d.distanceTo(this.fitDir) < 1e-6) {
       const inside = fp.l >= f.l && fp.r <= f.r && fp.b >= f.b && fp.t <= f.t;
-      const area = (f.r - f.l) * (f.t - f.b), need = Math.max(1, (fp.r - fp.l) * (fp.t - fp.b));
-      if (inside && area < need * 2.6) return false;
+      if (inside && (f.r - f.l) * (f.t - f.b) < this.need(fp) * 2.6) return false;
     }
     // frustum: the footprint plus a margin, square-ish texels, at least minTexel per texel, sizes on a 15% ladder, snapped to texels
     const S = SHADOW.size, m = SHADOW.margin;
@@ -124,5 +203,54 @@ export class SunShadow {
     sh.bias = -SHADOW.depthBias / range;
     sh.normalBias = SHADOW.normalBiasTexels * this.texel;
     sh.radius = Math.max(1, Math.min(6, SHADOW.blur / this.texel));
+  }
+}
+
+/**
+ * Cars no longer cast into the sun's shadow map (it is not redrawn every frame, so their shadows would trail behind them). Instead each car
+ * gets a soft contact shadow on the road under it, offset away from the sun by its height and faded with the daylight: one instanced
+ * quad per car, drawn in one call. Trains never cast shadows; crane jibs stay in the shadow map (refreshed at least every 250 ms).
+ */
+export class CarBlobs {
+  mesh: THREE.InstancedMesh;
+  private mat: THREE.MeshBasicMaterial;
+  private m = new THREE.Matrix4();
+
+  constructor(private cars: THREE.InstancedMesh, private visible: () => boolean) {
+    cars.castShadow = false;
+    const cv = document.createElement('canvas');
+    cv.width = 32; cv.height = 64;
+    const g = cv.getContext('2d')!;
+    const grad = g.createRadialGradient(16, 32, 4, 16, 32, 30);
+    grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(0.55, 'rgba(255,255,255,0.85)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, 32, 64);
+    const tex = new THREE.CanvasTexture(cv);
+    this.mat = new THREE.MeshBasicMaterial({ color: 0x1d2230, alphaMap: tex, transparent: true, opacity: 0.3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    const geo = new THREE.PlaneGeometry(1, 1);
+    geo.rotateX(-Math.PI / 2);
+    this.mesh = new THREE.InstancedMesh(geo, this.mat, cars.instanceMatrix.count);
+    this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.renderOrder = 2;
+  }
+
+  /** Follow the cars (after they moved this frame). `toSun` is the unit direction to the sun, `day` 0..1. */
+  update(toSun: THREE.Vector3, day: number) {
+    const on = this.visible() && day > 0.02;
+    this.mesh.visible = on;
+    if (!on) return;
+    const src = this.cars.instanceMatrix.array as Float32Array, dst = this.mesh.instanceMatrix.array as Float32Array, n = this.cars.count;
+    const k = 1.4 / Math.max(0.12, toSun.y), ox = Math.max(-8, Math.min(8, -toSun.x * k)), oz = Math.max(-8, Math.min(8, -toSun.z * k));
+    for (let i = 0; i < n; i++) {
+      const o = i * 16;
+      // car matrix columns: x (width 4.6), y (height 3.2), z (length 10.5), translation (car centre, 1.9 above the ground)
+      dst[o] = src[o] * 1.25; dst[o + 1] = src[o + 1] * 1.25; dst[o + 2] = src[o + 2] * 1.25; dst[o + 3] = 0;
+      dst[o + 4] = 0; dst[o + 5] = 1; dst[o + 6] = 0; dst[o + 7] = 0;
+      dst[o + 8] = src[o + 8] * 1.12; dst[o + 9] = src[o + 9] * 1.12; dst[o + 10] = src[o + 10] * 1.12; dst[o + 11] = 0;
+      const y = src[o + 13], wet = Math.abs(y - 6.6) < 0.01;   // on a bridge deck the car sits at 6.6
+      dst[o + 12] = src[o + 12] + ox; dst[o + 13] = wet ? y - 0.3 : y - 0.95; dst[o + 14] = src[o + 14] + oz; dst[o + 15] = 1;
+    }
+    this.mesh.count = n;
+    this.mesh.instanceMatrix.clearUpdateRanges(); this.mesh.instanceMatrix.addUpdateRange(0, Math.max(1, n) * 16);
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.mat.opacity = 0.3 * day;
   }
 }

@@ -13,7 +13,7 @@ import { Hud } from './ui/hud';
 import { Planner } from './ui/planner';
 import { CELL, N } from './sim/constants';
 import { perf } from './perf';
-import { SunShadow } from './render/shadows';
+import { SunShadow, CarBlobs, SHADOW } from './render/shadows';
 import { VS } from './render/common';
 
 const params = new URLSearchParams(location.search);
@@ -34,6 +34,7 @@ let labels: Labels | null = null;
 let life: Life | null = null;
 let planner: Planner | null = null;
 let sunShadow: SunShadow | null = null;
+let carBlobs: CarBlobs | null = null;
 let state: StateMsg | null = null;
 const desire = new DesireView();
 env.scene.add(desire.group);
@@ -46,12 +47,14 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   if (m.type === 'init') {
     init = m;
     terrain = buildTerrain(m.height, m.water, m.flags);
-    { let top = 0; for (let i = 0; i < m.height.length; i++) if (m.height[i] > top) top = m.height[i]; sunShadow = new SunShadow(env.sun, top * VS + 10, top * VS + 320); }
+    { let top = 0; for (let i = 0; i < m.height.length; i++) if (m.height[i] > top) top = m.height[i]; sunShadow = new SunShadow(env.sun, env.renderer, top * VS + 10, top * VS + 320); }
     env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours, terrain.zones, terrain.paper, terrain.skirt);
     city = new CityView(m.water, m.flags, m.villages, (x, z) => terrain!.sample(x, z), m);
     env.scene.add(city.group);
     life = new Life((x, z) => terrain!.sample(x, z), m.water);
     env.scene.add(life.group);
+    carBlobs = new CarBlobs((life as unknown as { cars: THREE.InstancedMesh }).cars, () => !!life?.group.visible);
+    env.scene.add(carBlobs.mesh);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
     env.scene.add(metro.group);
     planner = new Planner(send, { height: m.height, water: m.water });
@@ -74,7 +77,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     perf.step('life', () => { life?.setRoads(m.roads); if (newMonth) life?.setCity(m.stats.homes, m.stations); });
     if (newMonth) lastStateAt = performance.now();
     perf.step('city', () => city?.update(m, CITY_BUDGET));
-    if (linesChanged) perf.step('metro', () => metro?.update(m));
+    if (linesChanged) { perf.step('metro', () => metro?.update(m)); if (sunShadow) sunShadow.dirty = true; }
     planner?.onState(m);
     perf.step('overlays', () => {
       if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
@@ -295,6 +298,7 @@ function applyXray(v: number) {
   if (board) for (const m of board.material as THREE.Material[]) fade(m, 0.05);
 }
 let t0 = performance.now();
+const blobDir = new THREE.Vector3();
 function frame(now: number) {
   drawFrame(now);
   requestAnimationFrame(frame);
@@ -331,7 +335,12 @@ function drawFrame(now: number) {
   }
   env.timeOfDay = phaseToTime(dayPhase);
   env.applyTime();
-  sunShadow?.update(env.camera);
+  if (sunShadow && city) {
+    if (city.shadowDirty) { sunShadow.dirty = true; city.shadowDirty = false; }
+    sunShadow.movers = city.moving;
+  }
+  sunShadow?.frame(env.camera, now);
+  if (carBlobs && sunShadow) carBlobs.update(sunShadow.dir(blobDir), 1 - env.night);
   night = env.night;
   lookUniforms.uNight.value = night;
   if (city) city.roadMat.emissiveIntensity = night * 0.05;
@@ -397,7 +406,8 @@ async function shot(name: string) {
   xray = xrayTarget; applyXray(xray); metro?.setXray(xray);
   env.timeOfDay = phaseToTime(dayPhase);
   env.applyTime();
-  sunShadow?.update(env.camera, true);
+  sunShadow?.redraw(env.camera);
+  if (carBlobs && sunShadow) carBlobs.update(sunShadow.dir(blobDir), 1 - env.night);
   lookUniforms.uNight.value = env.night;
   if (city) city.roadMat.emissiveIntensity = env.night * 0.05;
   paperAndLabels();
@@ -416,4 +426,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get sunShadow() { return sunShadow; }, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get sunShadow() { return sunShadow; }, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };
