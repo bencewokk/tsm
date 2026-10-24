@@ -6,6 +6,7 @@
  *   deco 3  campus lawn       a paved quad on a lawn, reserved for an institution
  *   deco 4  industrial yard   fenced, paved, with stacked containers (set on industrial plots in the industrial territory)
  *   deco 5  public square     a square that formed where pedestrian pressure was high (squares.ts)
+ *   deco 6  station site      the safeguarded metro station site at the heart of a garden (commuter) suburb (Sim.safeguardStationSites)
  * The reserves are fixed when the city is laid out, from the city profile: richer, planned cities reserve more. Vacant plots inside a
  * reserve become the park at once; plots cut later (street growth) become it as they appear. Streets may still cross a reserve.
  */

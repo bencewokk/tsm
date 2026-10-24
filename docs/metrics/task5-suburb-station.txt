@@ -1,0 +1,12 @@
+23 Millford no line                  homes within 9 cells at m96 372 
+23 Millford stub                     homes within 9 cells at m96 4293 lines 1, spent 43.8M, 24|Line 1 opened: 2 stations, 1.8 km (1.1 km viaduct, 0.2 km under water)
+23 Millford stub, no satellite rules homes within 9 cells at m96 1520 lines 1, spent 43.8M, 24|Line 1 opened: 2 stations, 1.8 km (1.1 km viaduct, 0.2 km under water)
+7 Fernway no line                  homes within 9 cells at m96 249 
+7 Fernway stub                     homes within 9 cells at m96 1048 lines 1, spent 52.5M, 24|Line 1 opened: 2 stations, 1.3 km (0.9 km bored tunnel)
+7 Fernway stub, no satellite rules homes within 9 cells at m96 328 lines 1, spent 52.5M, 24|Line 1 opened: 2 stations, 1.3 km (0.9 km bored tunnel)
+187 Oldbridge no line                  homes within 9 cells at m96 500 
+187 Oldbridge stub                     homes within 9 cells at m96 1883 lines 1, spent 53.2M, 24|Line 1 opened: 2 stations, 1.3 km (1.0 km bored tunnel)
+187 Oldbridge stub, no satellite rules homes within 9 cells at m96 1139 lines 1, spent 53.2M, 24|Line 1 opened: 2 stations, 1.3 km (1.0 km bored tunnel)
+57 Holloway no line                  homes within 9 cells at m96 441 
+57 Holloway stub                     homes within 9 cells at m96 2123 lines 1, spent 25.1M, 24|Line 1 opened: 2 stations, 1.2 km
+57 Holloway stub, no satellite rules homes within 9 cells at m96 1067 lines 1, spent 25.1M, 24|Line 1 opened: 2 stations, 1.2 km

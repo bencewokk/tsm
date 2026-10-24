@@ -389,6 +389,7 @@ function designPark(c: Ctx) {
   if (c.deco === 1) return designBigPark(c);
   if (c.deco === 2) return designWedge(c);
   if (c.deco === 3) return designCampus(c);
+  if (c.deco === 6) return designStationSite(c);
   const { Q, r, mb, g } = c;
   pad(c, GROUND.park, 0.3, 0.3);
   // a curving path across the plot
@@ -632,6 +633,19 @@ function designYard(c: Ctx) {
     // a few tufts of scrub
     for (let i = 0; i < 3; i++) { const p = Q.at(0.2 + r(50 + i) * 0.6, 0.35 + r(60 + i) * 0.5); mb.prism('plain', circle(p[0], p[1], 1.6 + r(70 + i), 6), g + 0.2, g + 1.0, 0x9aa86a, 0x9aa86a); }
   }
+}
+
+/** The safeguarded metro station site of a garden suburb (deco 6): a paved forecourt, bollards and a station roundel on a post. */
+function designStationSite(c: Ctx) {
+  const { Q, mb, g } = c;
+  pad(c, 0xd8d2c4, 0.05, 0.35);
+  edging(c, 0xc9c2b2, 0, 0.5);
+  for (let k = 0; k < 5; k++) { const p = Q.at(0.15 + k * 0.175, 0.12); mb.prism('plain', circle(p[0], p[1], 0.35, 6), g + 0.3, g + 1.2, 0x5a5d62, 0x5a5d62); }
+  const p = Q.at(0.5, 0.45);
+  mb.prism('plain', circle(p[0], p[1], 0.35, 6), g + 0.3, g + 6, 0x4a4d52, 0x4a4d52);
+  mb.prism('plain', circle(p[0], p[1], 2.2, 16), g + 6, g + 6.8, 0xc8382f, 0xc8382f);
+  mb.prism('plain', circle(p[0], p[1], 1.4, 16), g + 6.05, g + 6.9, 0xf4f1ea, 0xf4f1ea);
+  tree(c, Q.at(0.12, 0.8), 5, 21); tree(c, Q.at(0.88, 0.8), 5, 22);
 }
 
 /** A square that formed under pedestrian pressure: pale paving in bands, a fountain, benches, lamps and trees on the edges. */

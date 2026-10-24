@@ -1,7 +1,7 @@
 import { N, CELL, ZONE, NZ, ZONES, BT, Flag, Water, isAmenity, HOMES, COM_JOBS, IND_JOBS, BUILD_MONTHS, PERSONS_PER_HOME, WORKERS_PER_HOME } from './constants';
 import { STATION_COST, TRAIN_COST, START_MONEY, TRIPS_PER_HOME, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
-import { generateTerrain, idx, inb, DIR4, type Grid } from './terrain';
+import { generateTerrain, idx, inb, DIR4, SAT, type Grid } from './terrain';
 import type { Command, InitMsg, StateMsg, Stats, DocksInfo, EventInfo, RoadsMsg, LotsMsg } from './protocol';
 import { Metro } from './metro';
 import { EVENTS, SITE_TEXT, fill, type EventDef, type Variant, type Effect, type DocksDeal } from './events';
@@ -179,6 +179,7 @@ export class Sim {
     updateTerritories(this);
     this.reserve = planReserves(this);
     for (const l of this.lots.lots) if (l.alive) applyReserve(this, l);
+    this.safeguardStationSites();
     this.aggregate();
   }
 
@@ -198,11 +199,14 @@ export class Sim {
     const m = this.metro, w = this.g.water;
     switch (cmd.type) {
       case 'placeStation': {
-        if (this.money < STATION_COST) { this.say('Not enough money for a station'); return; }
+        // the safeguarded site of a garden suburb: the land is already held, so the station costs half
+        const site = this.stationSites.find((q) => Math.hypot(q.x - cmd.x - 0.5, q.y - cmd.y - 0.5) < 1.6);
+        const cost = site ? STATION_COST * 0.5 : STATION_COST;
+        if (this.money < cost) { this.say('Not enough money for a station'); return; }
         const st = m.addStation(cmd.x, cmd.y, w);
         if (!st) return;
-        this.money -= STATION_COST; this.buildSpend += STATION_COST;
-        this.say(`${st.name} station dug`);
+        this.money -= cost; this.buildSpend += cost;
+        this.say(site ? `${st.name} station dug on the ${site.name} station site (half price: the land was safeguarded)` : `${st.name} station dug`);
         break;
       }
       case 'removeStation': if (m.removeStation(cmd.id)) this.money += STATION_COST * 0.5; break;
@@ -873,6 +877,7 @@ export class Sim {
 
     type Cand = { l: Lot; s: number; kind: number; to: number; h: number };
     const res: Cand[] = [], com: Cand[] = [], ind: Cand[] = [];
+    const sat = this.satelliteBonus();
     const F = this.field;
     const built3 = (cell: number) => {
       const cx = cell % N, cy = (cell / N) | 0;
@@ -898,13 +903,15 @@ export class Sim {
         // territories: the port, yards and heavy industry take industry only; homes and shops stay out of them
         const tt = TERR.on ? this.town.terr[l.cell] : 0;
         const heavy = tt === T.Port || tt === T.Industry;
-        if (v >= spawnR && !heavy) res.push({ l, s: (v + jit + fill) * fr, kind: BT.Res, to: 1, h: 0 });
+        // satellites grow by their own rule (homes by the works, round the station of a rail town or a served garden suburb): a local pull on top of land value
+        const sb = sat[l.cell];
+        if (v + sb >= spawnR && !heavy) res.push({ l, s: (v + sb + jit + fill) * fr, kind: BT.Res, to: 1, h: 0 });
         if (v >= spawnC && !heavy) com.push({ l, s: (v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12 + fill + 0.3 * Math.min(1, this.cSquare[l.cell])) * fc, kind: BT.Com, to: 1, h: 0 });
         if (!TERR.on || heavy) ind.push({ l, s: (0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit) * fi, kind: BT.Ind, to: 1, h: 0 });
       } else if (t === BT.Res && lv < 3) {
         const cap = l.flags & Flag.CarLocked ? 2 : 3;
         if (lv + 1 > cap || lv + 1 > maxL) continue;
-        if (v > TUNE.upLV[lv] - 0.1 * pR && l.age >= (lv === 1 ? 10 : 8)) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: lv + 1, h: this.pickHeight(l, lv + 1, true) });
+        if (v + sat[l.cell] * 0.5 > TUNE.upLV[lv] - 0.1 * pR && l.age >= (lv === 1 ? 10 : 8)) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: lv + 1, h: this.pickHeight(l, lv + 1, true) });
         // where the field allows a tower and the value is high, a low building is replaced by a tower directly (no stop at mid-rise)
         if (lv === 1 && cap === 3 && maxL === 3 && F.hmaxAt(l.x, l.y) >= 40 && v > TUNE.upLV[2] && l.age >= 12) res.push({ l, s: v + 0.05 + jit, kind: BT.Res, to: 3, h: this.pickHeight(l, 3, true) });
       } else if (t === BT.Com && lv < 3) {
@@ -975,6 +982,7 @@ export class Sim {
     if (this.comDemand > this.resDemand) { place(com, 'comPool', 120); place(res, 'resPool', 300); }
     else { place(res, 'resPool', 300); place(com, 'comPool', 120); }
     place(ind, 'indPool', 30);
+    this.satelliteStarts(sat, taken);
 
     // decline: buildings whose value falls empty out
     for (const l of lots) {
@@ -1128,6 +1136,80 @@ export class Sim {
     if (this.roads.version !== v0) {
       this.roads.rasterize(this.g.road);
       for (const l of this.lots.frontageAll(this.roads.drainFresh())) this.reserveRiverPark(l);
+    }
+  }
+
+  /**
+   * Satellite growth rules (per cell, 0..~0.3, falling to 0 at 9 cells from the settlement's centre), recomputed monthly:
+   *   factory town   0.14 + 0.2 x (industrial jobs within 9 cells / 400): workers live by the works, whatever the land value
+   *   rail town      0.06, + 0.16 with a metro station within 6 cells (its station square), + 0.06 for the rail spur itself
+   *   garden suburb  0.03, + 0.25 once a metro station is within 7 cells of its centre (the commuter suburb waits for its line)
+   *   historic village 0.04 (a small market of its own)
+   */
+  satelliteBonus(): Float32Array {
+    const out = new Float32Array(N * N);
+    if (!SAT.on) return out;
+    const used = new Set(this.metro.lines.flatMap((l) => l.stations));
+    for (const v of this.g.villages) {
+      if (!v.cause) continue;
+      const stNear = (r: number) => this.metro.stations.some((st) => used.has(st.id) && Math.hypot(st.x - v.x, st.y - v.y) < r);
+      let b = 0;
+      if (v.cause === 'factory') {
+        let jobs = 0;
+        for (const l of this.lots.near(v.x, v.y, 9)) if (l.alive && l.type === BT.Ind && l.level) jobs += this.lotJobs(l);
+        b = 0.14 + 0.2 * Math.min(1, jobs / 400);
+      } else if (v.cause === 'rail') b = 0.12 + (stNear(6) ? 0.16 : 0);
+      else if (v.cause === 'commuter') b = 0.03 + (stNear(7) ? 0.25 : 0);
+      else b = 0.04;
+      for (let dy = -9; dy <= 9; dy++) for (let dx = -9; dx <= 9; dx++) {
+        const x = v.x + dx, y = v.y + dy;
+        if (x < 0 || y < 0 || x >= N || y >= N) continue;
+        const f = 1 - Math.hypot(dx, dy) / 9;
+        if (f > 0) out[y * N + x] = Math.max(out[y * N + x], b * f);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Satellites' own demand: the city-wide pool always goes to the high-value centre first, so a factory town by its works or a
+   * served rail town / garden suburb starved. Each month such a settlement may start up to 3 houses on its best vacant plots
+   * (land value plus the satellite bonus above the spawn line) while it is below its own target: factory town 0.45 homes per works job
+   * within 9 cells; rail town or served garden suburb +30% over the homes it has (capped at 1500). They still count against the pool.
+   */
+  private satelliteStarts(sat: Float32Array, taken: Set<number>) {
+    if (!SAT.on) return;
+    const used = new Set(this.metro.lines.flatMap((l) => l.stations));
+    for (const v of this.g.villages) {
+      if (!v.cause || v.cause === 'hist') continue;
+      const near = this.lots.near(v.x, v.y, 9).filter((l) => l.alive);
+      let homes = 0, jobs = 0;
+      for (const l of near) { homes += this.lotHomes(l); if (l.type === BT.Ind && l.level) jobs += this.lotJobs(l); }
+      const served = this.metro.stations.some((st) => used.has(st.id) && Math.hypot(st.x - v.x, st.y - v.y) < 7);
+      const target = v.cause === 'factory' ? jobs * 0.45 : (v.cause === 'rail' || served) ? Math.min(1500, homes * 1.3 + 30) : 0;
+      if (homes >= target) continue;
+      const cand = near.filter((l) => l.type === BT.None && !l.deco && !l.asm && !l.constr && !l.demo && !(l.flags & (Flag.Planned | Flag.Docks)) && !taken.has(l.id)
+        && (!TERR.on || (this.town.terr[l.cell] !== T.Port && this.town.terr[l.cell] !== T.Industry)) && this.fieldAt(this.lvS, l.x, l.y) + sat[l.cell] >= TUNE.spawnLV)
+        .sort((a, b) => (this.fieldAt(this.lvS, b.x, b.y) + sat[b.cell]) - (this.fieldAt(this.lvS, a.x, a.y) + sat[a.cell]) || a.id - b.id);
+      for (const l of cand.slice(0, 3)) {
+        taken.add(l.id);
+        this.resPool -= this.capacity(l, BT.Res, 1, 0);
+        this.startBuild(l, BT.Res, 1);
+      }
+    }
+  }
+
+  /** Garden (commuter) suburbs keep a metro station site at their heart (deco 6): a paved forecourt held free for a future station. */
+  stationSites: { x: number; y: number; lot: number; name: string }[] = [];
+  private safeguardStationSites() {
+    if (!SAT.on) return;
+    for (const v of this.g.villages) {
+      if (v.cause !== 'commuter') continue;
+      const c = this.lots.near(v.x + 0.5, v.y + 0.5, 3).filter((l) => l.alive && !l.type && !l.flags && !l.asm && !l.back)
+        .sort((a, b) => Math.hypot(a.x - v.x - 0.5, a.y - v.y - 0.5) - Math.hypot(b.x - v.x - 0.5, b.y - v.y - 0.5) || a.id - b.id)[0];
+      if (!c) continue;
+      c.type = BT.Park; c.level = 1; c.deco = 6;
+      this.stationSites.push({ x: c.x, y: c.y, lot: c.id, name: v.name });
     }
   }
 
