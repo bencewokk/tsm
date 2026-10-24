@@ -79,6 +79,20 @@ Half resolution (scene and post): 32.2 -> 17.8 ms with tilt-shift, 28.4 -> 18.0 
    shadow passes at month 240; `MetroView.update` 7-16 ms when a line changes.
 5. Protocol: about 310-390 KB per message, structured clone 0.5-1 ms each side; small next to the above.
 
+## Summary: baseline vs final (browser, seed 4821, test line, month 240, 1920x1080, Iris Xe)
+
+Two tabs side by side, the baseline (commit d2c9c0f, tilt-shift on as it was) and the final branch, measured alternately at the same camera:
+
+| | baseline | final |
+|---|---|---|
+| overview, day: wall p50 / p95 (CPU + GPU, synced) | 49.7 / 70.6 and 48.8 / 77.7 ms | 35.3 / 53.9 and 33.5 / 59.6 ms |
+| overview, day: GPU p50 / p95 | 30.5 / 34.0 and 33.9 / 36.5 ms | 25.3 / 27.7 and 24.9 / 27.3 ms |
+| street, day: wall p50 / GPU p50 | 40.7 / 30.1 ms | 29.6 / 22.4 ms |
+| draw calls overview / street | 755 / 413 | 382 / 235 |
+| main-thread apply per month, p50 (months 60-240) | 75-360 ms | 11-18 ms in the handler, then 7-8 ms slices |
+| worker tick (headless, quiet machine, month 240 with line) | 36.6 ms | 13.5-17 ms |
+| simulation result (population at month 240) | 117949 | 117949 |
+
 ## Fix 1: blur post-processing removed (user decision: "we don't need blurs")
 
 - Removed the tilt-shift (two separable blur passes), its shaders and uniforms, `env.tilt`, the `?notilt=1` flag, the T key and the
