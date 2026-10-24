@@ -50,4 +50,19 @@ Wall = CPU + GPU with no pipelining (an upper bound), so it is about twice the G
 
 ## 3. Work log
 
-(filled in per change below)
+Interleaved A/B (all flags on vs `vfx.setAll(false)` = classic look, High, one page, 40 frames x 3 rounds, GPU p50 ms), measured after the roads / far-view /
+water / camera work of session 1 was picked up:
+
+| view | classic | visual pass | delta |
+|---|---|---|---|
+| overview day | 12.05 | 12.78 | +6% |
+| mid day | 10.95 | 11.81 | +8% |
+| street day | 11.12 | 12.19 | +10% |
+
+Per flag (same method): ground +3-4%, buildings 1-8% (noisy), night about 1%, road markings 0%, tree thinning 0% (it hides vertices but the triangle count does
+not drop), sky and grade about 0. The budget is therefore used up: anything added below has to be about free or pay for itself.
+
+### Pick-up (session 2)
+- The WIP tip already passed `tsc --noEmit` and `npm run build`: the "half-written" night-lights module was in fact complete (`NightLights`, `shoreGlow`, the water
+  emissive hook). Checked in the browser: lane dashes, edge lines and zebra crossings at junction plates (`visual-roads-c`), tree thinning at overview, ship wakes,
+  water glow at night, lens easing (`visual-wip-*`).
