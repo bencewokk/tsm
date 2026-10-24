@@ -6,6 +6,7 @@ import type { Command, InitMsg, StateMsg, Stats, DocksInfo, EventInfo, RoadsMsg,
 import { Metro } from './metro';
 import { EVENTS, SITE_TEXT, fill, type EventDef, type Variant, type Effect, type DocksDeal } from './events';
 import { RoadGraph, RC, ROAD_HALF } from './roads';
+import { pointSeg } from './geom';
 import { LotStore, LOT_W, type Lot } from './lots';
 import { PROFILE_INDEX, ZONING, deriveProfiles, densClass, hash01, type DistrictProfile } from './profiles';
 import { DensityField, FIELD } from './field';
@@ -15,7 +16,8 @@ import { LANDMARKS, landmarkAt } from './landmarks';
 import { makeCityProfile, type CityProfile } from './cityprofile';
 import { layoutTown, explore, densify, type TownCtx, type GrowthField } from './town';
 import { MinHeap } from './heap';
-import { pruneRoads, promoteJunctions } from './hierarchy';
+import { pruneRoads, promoteJunctions, inCoreXY } from './hierarchy';
+import { GRAPHCHECK, validateGraph, graphDefects, formatReport, type GraphReport } from './graphcheck';
 import { T, T_CAP, TERR, updateTerritories } from './territory';
 import { planReserves, applyReserve } from './reserves';
 import { evaluateSquares, SQ } from './squares';
@@ -65,6 +67,9 @@ export const TUNE = {
 };
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+
+/** dev switch: seed the walk field from the side of a street passing the station entrance (off = only from nodes within 2.5 cells) */
+export const WALK = { edgeAccess: true };
 
 export class Sim {
   rng: Rng;
@@ -162,6 +167,8 @@ export class Sim {
       clear: (ax, ay, bx, by) => { for (const l of this.lots.inCorridor(ax, ay, bx, by, ROAD_HALF[RC.Local] + 0.05)) this.lots.remove(l); },
     };
     if (pruneRoads(this, 60) > 0) this.roads.rasterize(this.g.road);
+    this.repairRoads();
+    this.checkGraph('generation');
     this.aggregate();
     this.computeLandValue();
     this.lvS.set(this.lv);
@@ -459,6 +466,8 @@ export class Sim {
     this.extendRoads();
     this.upgradeRoads();
     if (this.month % 6 === 0) { const pr = pruneRoads(this, 10), pj = promoteJunctions(this.town); if (pr + pj > 0) this.roads.rasterize(this.g.road); }
+    this.repairRoads();
+    this.checkGraph(`month ${this.month}`);
     this.finance();
     this.checkEvents();
   }
@@ -638,6 +647,20 @@ export class Sim {
         if (!R.adj[n].length) continue;
         const d = Math.hypot(R.nx[n] - st.x, R.ny[n] - st.y);
         if (d < 2.5) { const v = (d * 1.2) / sp + (st.depth ?? 0) * RELIEF.escalatorMin; if (v < t[n]) { t[n] = v; heap.push(n, v); } }
+      }
+      // ...and onto the side of a street that passes the entrance: a station in the middle of a long block is reached from both ends of that street
+      // (a station out on open land with no street within 2.5 cells walks to the nearest street up to 6 cells away)
+      const reach = heap.size ? 2.5 : 6;
+      for (const e of WALK.edgeAccess ? R.edgesNear(st.x, st.y, reach) : []) {
+        if (!R.alive[e]) continue;
+        const a = R.ea[e], b = R.eb[e];
+        const p = pointSeg(st.x, st.y, R.nx[a], R.ny[a], R.nx[b], R.ny[b]);
+        if (p.d >= reach) continue;
+        const L = R.edgeLen(e), base = (p.d * 1.2) / sp + (st.depth ?? 0) * RELIEF.escalatorMin;
+        for (const [n, along] of [[a, p.t * L], [b, (1 - p.t) * L]] as [number, number][]) {
+          const v = base + along / sp;
+          if (v < t[n]) { t[n] = v; heap.push(n, v); }
+        }
       }
       while (heap.size) {
         const n = heap.pop();
@@ -1093,6 +1116,34 @@ export class Sim {
     }
   }
 
+  /** Keep the road graph a clean planar network after growth (merge, split, join, de-duplicate); the validator in graphcheck.ts counts what is left. */
+  repairRoads() {
+    const R = this.roads, v0 = R.version;
+    const free = (e: number) => (this.lots.byEdge.get(e) ?? []).every((l) => !l.alive || !(l.type || l.constr || l.demo || l.asm || l.lm || (l.flags & (Flag.Docks | Flag.Planned | Flag.Core))));
+    this.repairStats = R.repair(2030 + Math.floor(this.month / 12), {
+      canKill: free,
+      onKill: (e) => { for (const l of this.lots.byEdge.get(e) ?? []) if (l.alive) this.lots.remove(l); this.lots.forgetEdge(e); },
+    });
+    promoteJunctions(this.town);   // a local street that new growth joined to an arterial becomes a collector straight away (not only at the 6-monthly prune)
+    if (R.version !== v0) {
+      R.rasterize(this.g.road);
+      for (const l of this.lots.frontageAll(R.drainFresh())) this.reserveRiverPark(l);
+    }
+  }
+  repairStats: import('./roads').RepairStats | null = null;
+
+  /** Dev builds: validate the road graph (after generation and after each growth tick) and keep the counts; a change in the defect count is logged. */
+  checkGraph(stage: string) {
+    if (!GRAPHCHECK.on) return;
+    const r = validateGraph(this.roads, (x, y) => inCoreXY(this.town, x, y));
+    const d = graphDefects(r);
+    if (!this.graphReport || d !== graphDefects(this.graphReport)) this.graphLog.push(`[graph] ${stage}: defects ${d} | ${formatReport(r)}`);
+    if (this.graphLog.length > 40) this.graphLog.shift();
+    this.graphReport = r;
+  }
+  graphReport: GraphReport | null = null;
+  graphLog: string[] = [];
+
   /** Plots on the river bank are kept as a green ribbon of parks (most of them). */
   private reserveRiverPark(l: Lot) {
     const cx = Math.floor(l.x), cy = Math.floor(l.y), g = this.g;
@@ -1294,6 +1345,7 @@ export class Sim {
       lines: this.metro.lines.map((l) => ({ id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders,
         capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice(), by: l.by.slice(), elev: l.elev.slice() })),
       event: this.eventInfo(),
+      graph: this.graphReport ? { defects: graphDefects(this.graphReport), report: this.graphReport, log: this.graphLog.splice(0) } : undefined,
       docks: this.docksInfo(),
       landmarks: this.lm.info(),
       assemblies: this.asm.infos(),

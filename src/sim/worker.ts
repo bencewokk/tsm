@@ -4,8 +4,9 @@ import { TERR } from './territory';
 import { RES } from './reserves';
 import { SAT } from './terrain';
 import { SQ } from './squares';
-import { ART } from './roads';
+import { ART, REPAIR } from './roads';
 import { Sim } from './sim';
+import { GRAPHCHECK } from './graphcheck';
 import type { Command, WorkerOut } from './protocol';
 
 let sim: Sim | null = null;
@@ -35,11 +36,13 @@ function step() {
 }
 
 self.onmessage = (ev: MessageEvent) => {
-  const m = ev.data as Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean } | { type: 'quote'; id: number; stations: number[] };
+  const m = ev.data as Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean } | { type: 'quote'; id: number; stations: number[] };
   try {
     if (m.type === 'start') {
       if (m.nohier) { HIER.on = false; ART.valley = 0; ART.climb = 0; ART.steep = 6; }   // dev: the unstructured road growth, for before / after captures
       if (m.noterr) TERR.on = false;
+      if (m.norepair) REPAIR.on = false;
+      if (import.meta.env.DEV) GRAPHCHECK.on = true;   // road graph validation after generation and every growth tick (dev builds only)
       if (m.nosat) SAT.on = false;
       if (m.nores) { RES.on = false; SQ.on = false; }
       sim = new Sim(m.seed, { terrain: m.terrain as never, origin: m.origin as never });

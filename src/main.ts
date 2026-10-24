@@ -2,7 +2,7 @@ import './style.css';
 import * as THREE from 'three';
 import { Env } from './render/env';
 import { buildTerrain, type TerrainView } from './render/terrain';
-import { CityView } from './render/city';
+import { CityView, ROADFX } from './render/city';
 import { MetroView } from './render/metro';
 import { DesireView } from './render/desire';
 import { Labels } from './render/labels';
@@ -15,14 +15,17 @@ import { CELL, N, STATION_COST, TRAIN_COST, METRO_SPEED } from './sim/constants'
 import { quoteLine } from './sim/relief';
 
 const params = new URLSearchParams(location.search);
+if (params.get('norepair') === '1') ROADFX.on = false;
 const seed = Number(params.get('seed') ?? 4821) | 0 || 4821;
 
 const app = document.getElementById('app')!;
 const env = new Env(app);
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
-const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean }) => worker.postMessage(c);
+const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean }) => worker.postMessage(c);
 
 let init: InitMsg | null = null;
+/** dev: latest road graph validation from the worker (`tsm.graph`) */
+let graphReport: StateMsg['graph'] | null = null;
 let terrain: TerrainView | null = null;
 let city: CityView | null = null;
 let metro: MetroView | null = null;
@@ -55,6 +58,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     send({ type: 'speed', speed: 0 });
     hud.showIntro(m.city, seed, () => send({ type: 'speed', speed: 1 }));
   } else if (m.type === 'state') {
+    if (m.graph) { graphReport = m.graph; for (const l of m.graph.log) (m.graph.defects ? console.warn : console.info)(l); }
     const newMonth = !state || state.stats.month !== m.stats.month;
     const sig = (s: StateMsg) => JSON.stringify([s.lines.map((l) => [l.id, l.stations, l.trains]), s.stations.map((st) => (st.riders < 1200 ? 0 : st.riders < 5000 ? 1 : 2))]);
     const linesChanged = !state || sig(state) !== sig(m);
@@ -79,7 +83,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     console.error('[sim]', m.message);
   }
 };
-send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1', nores: params.get('nores') === '1', nosat: params.get('nosat') === '1' });
+send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1', nores: params.get('nores') === '1', nosat: params.get('nosat') === '1', norepair: params.get('norepair') === '1' });
 
 // ------------------------------------------------------------------ tools
 let savedView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
@@ -431,4 +435,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, uiLine, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, uiLine, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; } };

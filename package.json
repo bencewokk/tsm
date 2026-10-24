@@ -16,7 +16,9 @@
     "towers": "tsx scripts/towers.ts",
     "zones": "tsx scripts/zones.ts",
     "structure": "tsx scripts/structure.ts",
-    "satellites": "tsx scripts/satellites.ts"
+    "satellites": "tsx scripts/satellites.ts",
+    "graph": "tsx scripts/graph.ts",
+    "catch": "tsx scripts/catch.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

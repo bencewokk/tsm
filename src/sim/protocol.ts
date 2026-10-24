@@ -124,6 +124,8 @@ export interface StateMsg {
   stations: StationInfo[];
   lines: LineInfo[];
   event: EventInfo | null;
+  /** dev builds only: road graph validation (graphcheck.ts) after the latest tick, and the log of changes in the defect count */
+  graph?: { defects: number; report: import('./graphcheck').GraphReport; log: string[] };
   docks: DocksInfo;
   landmarks: import('./landmarkSys').LandmarkInfo[];
   assemblies: import('./assembly').AssemblyInfo[];

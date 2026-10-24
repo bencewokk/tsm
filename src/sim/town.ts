@@ -339,6 +339,7 @@ export function layoutTown(c: TownCtx) {
   roads.rasterize(g.road);
   shapeHierarchy(c);
   promoteJunctions(c);
+  roads.repair(2030);   // merge overlapping nodes, split T-junctions and crossings, join dead ends that nearly touch (see graphcheck.ts)
   roads.rasterize(g.road);
   lots.frontageAll(roads.drainFresh());
 

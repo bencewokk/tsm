@@ -25,6 +25,9 @@ const COBBLE_MAIN = new THREE.Color(0xcdbea5);
 const MEDIAN = new THREE.Color(0x93b076);
 const KERB = new THREE.Color(0xd9d5cb);
 
+/** dev switch for before / after captures (`?norepair=1`): the old flat road layering and abrupt width steps */
+export const ROADFX = { on: true };
+
 const CHUNK = 16; // cells per chunk side (800 m)
 const MATS: Mat[] = ['wall', 'glass', 'plain', 'ghost', 'lamp'];
 
@@ -227,15 +230,41 @@ export class CityView {
       for (let n = 0; n < nNodes; n++) { const d = Math.hypot(r.nodes[n * 2] - rx, r.nodes[n * 2 + 1] - ry); if (d < bd) { bd = d; bn = n; } }
       if (bn >= 0) { rondNodes.push(bn); maxW[bn] = Math.max(maxW[bn], 34); if (!nodeCol[bn]) nodeCol[bn] = ASPHALT[0]; }
     }
-    const strip = (k: number, w: number, c: THREE.Color, lift: number) => {
+    const rondSet = new Set(rondNodes);
+    // a street running on through a node keeps one width there: where two classes meet at a plain bend the carriageway tapers from one to the other instead of stepping
+    const degAll = new Uint8Array(nNodes);
+    for (let k = 0; k < r.ea.length; k++) { degAll[r.ea[k]]++; degAll[r.eb[k]]++; }
+    const sumW = new Float32Array(nNodes);
+    for (let k = 0; k < r.ea.length; k++) { sumW[r.ea[k]] += widths[k]; sumW[r.eb[k]] += widths[k]; }
+    const nodeW = (n: number) => (ROADFX.on && degAll[n] === 2 ? sumW[n] / 2 : maxW[n]);
+    const endW = (k: number, n: number, w: number, extra: number) => (ROADFX.on && degAll[n] === 2 ? nodeW(n) + extra : w);
+    // junction plates (nodes where three or more streets meet): every street stops at a set-back from the node and one plate, the convex hull
+    // of all the street ends, fills the junction in the main road's surface, so the side street meets it on a clean straight edge (no disc bulge,
+    // no butt end poking out of the main road, no gap)
+    const plate = (n: number) => ROADFX.on && degAll[n] >= 3 && !rondSet.has(n);
+    const halfAt: number[][] = Array.from({ length: nNodes }, () => []);
+    for (let k = 0; k < r.ea.length; k++) { halfAt[r.ea[k]].push(widths[k] / 2); halfAt[r.eb[k]].push(widths[k] / 2); }
+    const setback = (k: number, n: number) => {
+      if (!plate(n)) return 0;
+      const own = widths[k] / 2, hs = halfAt[n];
+      let other = 0, skipped = false;
+      for (const h of hs) { if (!skipped && h === own) { skipped = true; continue; } other = Math.max(other, h); }
+      const a = r.ea[k], b = r.eb[k], L = Math.hypot(r.nodes[b * 2] - r.nodes[a * 2], r.nodes[b * 2 + 1] - r.nodes[a * 2 + 1]) * CELL;
+      return Math.min(other + 0.5, L * 0.45);
+    };
+    const strip = (k: number, w: number, c: THREE.Color, lift: number, taper = true) => {
       const a = r.ea[k], b = r.eb[k];
       const ax = r.nodes[a * 2] * CELL, az = r.nodes[a * 2 + 1] * CELL, bx = r.nodes[b * 2] * CELL, bz = r.nodes[b * 2 + 1] * CELL;
       const L = Math.hypot(bx - ax, bz - az);
       if (L < 1) return;
-      const nx = (-(bz - az) / L) * w / 2, nz = ((bx - ax) / L) * w / 2;
-      const steps = Math.max(1, Math.ceil(L / 25));
+      const wa = taper ? endW(k, a, w, w - widths[k]) : w, wb = taper ? endW(k, b, w, w - widths[k]) : w;
+      const ux = (bx - ax) / L, uz = (bz - az) / L;
+      // the strip runs 0.8 m on under its junction plate, so the plate's slightly higher edge never shows a crack
+      const t0 = taper && plate(a) ? Math.max(0, setback(k, a) - 0.8) / L : 0, t1 = taper && plate(b) ? 1 - Math.max(0, setback(k, b) - 0.8) / L : 1;
+      const steps = Math.max(1, Math.ceil((L * (t1 - t0)) / 25));
       for (let j = 0; j <= steps; j++) {
-        const t = j / steps, x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+        const t = t0 + (t1 - t0) * (j / steps), x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+        const wj = wa + (wb - wa) * t, nx = -uz * wj / 2, nz = ux * wj / 2;   // (t runs over the whole edge, so a taper is unaffected by set-backs)
         const y = yAt(x, z) + lift;
         pos.push(x + nx, y, z + nz, x - nx, y, z - nz);
         col.push(c.r, c.g, c.b, c.r, c.g, c.b);
@@ -254,6 +283,33 @@ export class CityView {
         idx.push(base, base + 1 + ((k + 1) % SEG), base + 1 + k);
       }
       base += SEG + 1;
+    };
+    /** the junction plate of node n: convex hull of every incident street's end corners at its set-back (widened by `extra`), as one flat fan */
+    const plateAt = (n: number, extra: number, c: THREE.Color, lift: number) => {
+      const x0 = r.nodes[n * 2] * CELL, z0 = r.nodes[n * 2 + 1] * CELL;
+      const pts: [number, number][] = [];
+      for (let k = 0; k < r.ea.length; k++) {
+        if (r.ea[k] !== n && r.eb[k] !== n) continue;
+        const o = r.ea[k] === n ? r.eb[k] : r.ea[k];
+        const dx = r.nodes[o * 2] * CELL - x0, dz = r.nodes[o * 2 + 1] * CELL - z0, L = Math.hypot(dx, dz);
+        if (L < 1) continue;
+        const ux = dx / L, uz = dz / L, sb = setback(k, n), h = widths[k] / 2 + extra;
+        pts.push([x0 + ux * sb - uz * h, z0 + uz * sb + ux * h], [x0 + ux * sb + uz * h, z0 + uz * sb - ux * h]);
+      }
+      if (pts.length < 3) return;
+      pts.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+      const cross = (o: number[], a: number[], b: number[]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      const lo: [number, number][] = [], hi: [number, number][] = [];
+      for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+      for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+      const hull = lo.slice(0, -1).concat(hi.slice(0, -1));
+      if (hull.length < 3) return;
+      const y = yAt(x0, z0) + lift;
+      if (extra > 0) stampOcc(x0, z0, maxW[n] / 2 + extra + 2);
+      pos.push(x0, y, z0); col.push(c.r, c.g, c.b);
+      for (const [x, z] of hull) { pos.push(x, Math.max(y, yAt(x, z) + lift), z); col.push(c.r, c.g, c.b); }
+      for (let i = 0; i < hull.length; i++) idx.push(base, base + 1 + ((i + 1) % hull.length), base + 1 + i);
+      base += hull.length + 1;
     };
     // street trees: one row on each side of every ordinary street (plus a median row on arterials), none in the cobbled cores or on the docks
     this.streetTrees = [];
@@ -285,15 +341,35 @@ export class CityView {
       }
     }
     // kerb / pavement strip first, then the carriageway on top
+    // carriageways are layered by class (the bigger street on top), so a side street ends under the main road's edge instead of poking into it
+    const liftOf = (cls: number) => (ROADFX.on ? 0.25 + (2 - cls) * 0.1 : 0.25);   // steps of 10 cm: far enough apart for the depth buffer at any zoom
+    const minCls = new Uint8Array(nNodes).fill(2);
+    for (let k = 0; k < r.ea.length; k++) { minCls[r.ea[k]] = Math.min(minCls[r.ea[k]], r.cls[k]); minCls[r.eb[k]] = Math.min(minCls[r.eb[k]], r.cls[k]); }
     for (let k = 0; k < r.ea.length; k++) strip(k, widths[k] + 5, KERB, 0);
-    for (let n = 0; n < nNodes; n++) if (maxW[n]) disc(n, maxW[n] / 2 + 2.5, KERB, 0.02);
-    for (let k = 0; k < r.ea.length; k++) strip(k, widths[k], colors[k], 0.25);
+    for (let n = 0; n < nNodes; n++) if (maxW[n]) { if (plate(n)) plateAt(n, 2.5, KERB, 0.02); else disc(n, nodeW(n) / 2 + 2.5, KERB, 0.02); }
+    for (let k = 0; k < r.ea.length; k++) strip(k, widths[k], colors[k], liftOf(r.cls[k]));
     // arterials: a planted median on the open stretches (both ends plain bends or straights, not junctions)
     const deg = new Uint8Array(nNodes);
     for (let k = 0; k < r.ea.length; k++) { deg[r.ea[k]]++; deg[r.eb[k]]++; }
-    for (let k = 0; k < r.ea.length; k++) if (r.cls[k] === 0 && !this.coreEdge.has(r.ids[k]) && deg[r.ea[k]] <= 2 && deg[r.eb[k]] <= 2) strip(k, 2.6, MEDIAN, 0.33);
-    for (let n = 0; n < nNodes; n++) if (maxW[n]) disc(n, maxW[n] / 2, nodeCol[n], 0.27);
-    for (const n of rondNodes) { disc(n, 8.5, KERB, 0.3); disc(n, 6.8, new THREE.Color(0x9fbf86), 0.34); }
+    for (let k = 0; k < r.ea.length; k++) if (r.cls[k] === 0 && !this.coreEdge.has(r.ids[k]) && deg[r.ea[k]] <= 2 && deg[r.eb[k]] <= 2) strip(k, 2.6, MEDIAN, ROADFX.on ? 0.62 : 0.33, false);
+    // the plate takes the surface of the street that runs straight through the junction (two ends of the same surface about opposite each other)
+    const plateCol = (n: number) => {
+      const es: number[] = [];
+      for (let k = 0; k < r.ea.length; k++) if (r.ea[k] === n || r.eb[k] === n) es.push(k);
+      const ang = (k: number) => { const o = r.ea[k] === n ? r.eb[k] : r.ea[k]; return Math.atan2(r.nodes[o * 2 + 1] - r.nodes[n * 2 + 1], r.nodes[o * 2] - r.nodes[n * 2]); };
+      let best: THREE.Color | null = null, bw = -1;
+      for (let i = 0; i < es.length; i++) for (let j = i + 1; j < es.length; j++) {
+        const a = es[i], b = es[j];
+        if (colors[a] !== colors[b] || r.cls[a] !== r.cls[b]) continue;
+        let d = Math.abs(ang(a) - ang(b)) % (Math.PI * 2); if (d > Math.PI) d = Math.PI * 2 - d;
+        if (d < 2.6) continue;
+        const w = (2 - r.cls[a]) * 100 + widths[a];
+        if (w > bw) { bw = w; best = colors[a]; }
+      }
+      return best ?? nodeCol[n];
+    };
+    for (let n = 0; n < nNodes; n++) if (maxW[n]) { if (plate(n)) plateAt(n, 0, plateCol(n), liftOf(minCls[n]) + 0.03); else disc(n, nodeW(n) / 2, nodeCol[n], ROADFX.on ? liftOf(minCls[n]) + 0.01 : 0.27); }
+    for (const n of rondNodes) { disc(n, 8.5, KERB, ROADFX.on ? 0.66 : 0.3); disc(n, 6.8, new THREE.Color(0x9fbf86), ROADFX.on ? 0.7 : 0.34); }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));

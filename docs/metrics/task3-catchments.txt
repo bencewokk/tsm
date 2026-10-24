@@ -1,0 +1,16 @@
+seed 4821 month 48: 7 stations
+  defects 1 -> 0  (nodes 228->228, edges 277->280, components 1->1)
+  8-min walk cells, any station: unrepaired graph 804 -> repaired 808; repaired but node-only entrance 803
+  per station: 323/181/145/205 -> 323/185/145/205 (node-only entrance 321/183/143/202); stations with a catchment under 40 cells: 0 -> 0
+seed 187 month 48: 16 stations
+  defects 4 -> 1  (nodes 382->384, edges 471->476, components 1->1)
+  8-min walk cells, any station: unrepaired graph 509 -> repaired 509; repaired but node-only entrance 418
+  per station: 234/185/102 -> 234/185/102 (node-only entrance 231/162/25); stations with a catchment under 40 cells: 0 -> 0
+seed 304 month 48: 11 stations
+  defects 1 -> 0  (nodes 268->269, edges 323->325, components 1->1)
+  8-min walk cells, any station: unrepaired graph 1535 -> repaired 1529; repaired but node-only entrance 1439
+  per station: 212/13/317/252/283/122/89/93/280 -> 212/13/308/266/283/122/89/93/280 (node-only entrance 212/13/308/243/265/122/25/93/277); stations with a catchment under 40 cells: 1 -> 1
+seed 57 month 48: 5 stations
+  defects 6 -> 0  (nodes 201->198, edges 231->225, components 1->1)
+  8-min walk cells, any station: unrepaired graph 1005 -> repaired 1005; repaired but node-only entrance 991
+  per station: 215/225/260/118/189 -> 215/225/260/118/189 (node-only entrance 214/215/257/118/189); stations with a catchment under 40 cells: 0 -> 0

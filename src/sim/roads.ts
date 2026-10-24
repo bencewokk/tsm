@@ -27,6 +27,12 @@ export interface Corridor {
 }
 
 const B = 3; // spatial hash bucket size (cells)
+/** a dead end within this many cells of another street is joined to it by the repair pass */
+const JOIN = 1.3;
+/** dev switch for before / after comparisons (`?norepair=1`, `npm run graph -- --norepair`) */
+export const REPAIR = { on: true };
+export interface RepairHooks { canKill(e: number): boolean; onKill(e: number): void }
+export interface RepairStats { merged: number; tSplit: number; crossed: number; dupKilled: number; joined: number; trimmed: number }
 const key = (bx: number, by: number) => by * 1000 + bx;
 
 /** Planar road graph: nodes + straight edges (curves are chains of short edges). */
@@ -108,11 +114,11 @@ export class RoadGraph {
     return false;
   }
 
-  /** Split edge e at (x,y); returns the new node. Both halves keep class and build year. */
-  splitEdge(e: number, x: number, y: number): number {
+  /** Split edge e at (x,y) (or at the existing node `at`); returns the node. Both halves keep class and build year. */
+  splitEdge(e: number, x: number, y: number, at = -1): number {
     const a = this.ea[e], b = this.eb[e], c = this.ecls[e], yr = this.eyear[e], imp = this.eimp[e];
     this.killEdge(e);
-    const n = this.addNode(x, y);
+    const n = at >= 0 ? at : this.addNode(x, y);
     this.eimp[this.addEdge(a, n, c, yr)] = imp;
     this.eimp[this.addEdge(n, b, c, yr)] = imp;
     // halves of an existing street do not need new plots
@@ -170,7 +176,7 @@ export class RoadGraph {
     return true;
   }
 
-  private terrainOk(ax: number, ay: number, bx: number, by: number, allowWater: boolean): boolean {
+  terrainOk(ax: number, ay: number, bx: number, by: number, allowWater: boolean): boolean {
     const L = Math.hypot(bx - ax, by - ay);
     const steps = Math.max(2, Math.ceil(L / 0.3));
     for (let k = 0; k <= steps; k++) {
@@ -216,7 +222,7 @@ export class RoadGraph {
    * `fromEdge` lets a street start mid-edge: (e, x, y) is split only if the street is accepted.
    * Returns the end node, or -1 if rejected.
    */
-  grow(from: number, tx: number, ty: number, cls: number, year: number, opts: { fromEdge?: { e: number; x: number; y: number }; allowWater?: boolean; snapScale?: number } = {}): number {
+  grow(from: number, tx: number, ty: number, cls: number, year: number, opts: { fromEdge?: { e: number; x: number; y: number }; allowWater?: boolean; snapScale?: number; minLen?: number; noParallel?: boolean } = {}): number {
     const ss = opts.snapScale ?? 1;
     let ax: number, ay: number;
     if (opts.fromEdge) { ax = opts.fromEdge.x; ay = opts.fromEdge.y; } else { ax = this.nx[from]; ay = this.ny[from]; }
@@ -250,7 +256,7 @@ export class RoadGraph {
       for (const n of [this.ea[e], this.eb[e]]) if (Math.hypot(this.nx[n] - ex, this.ny[n] - ey) < 0.5) { endNode = n; ex = this.nx[n]; ey = this.ny[n]; splitE = null; break; }
     }
     const L = Math.hypot(ex - ax, ey - ay);
-    if (L < RULES.minLen * (endNode >= 0 || splitE ? 0.7 : 1)) return this.rej('short');
+    if (L < (opts.minLen ?? RULES.minLen * (endNode >= 0 || splitE ? 0.7 : 1))) return this.rej('short');
     if (endNode >= 0 && !opts.fromEdge && this.adj[from].some((e) => this.other(e, from) === endNode)) return this.rej('linked');
     const endAng = Math.atan2(ay - ey, ax - ex);
     if (endNode >= 0 && (this.degree(endNode) >= RULES.maxDegree || !this.angleOk(endNode, endAng))) return this.rej('endAngle');
@@ -264,7 +270,7 @@ export class RoadGraph {
     const hit2 = this.firstCrossing(ax, ay, ex, ey, ends);
     if (hit2 && hit2.t < 0.98) return this.rej('cross2');
     if (!this.terrainOk(ax, ay, ex, ey, !!opts.allowWater)) return this.rej('terrain');
-    if (!this.parallelOk(ax, ay, ex, ey, ends)) return this.rej('parallel');
+    if (!opts.noParallel && !this.parallelOk(ax, ay, ex, ey, ends)) return this.rej('parallel');
     if (this.corridor && this.corridor.blocked(ax, ay, ex, ey)) return this.rej('blocked');
     // ---- commit
     this.corridor?.clear(ax, ay, ex, ey);
@@ -311,6 +317,178 @@ export class RoadGraph {
       if (n !== cur) this.addEdge(cur, n, cls, year);
       cur = n;
     }
+  }
+
+  // ------------------------------------------------------------ repair (the graph validator's defects, fixed at the source)
+  /** Move every street of node `drop` onto node `keep` (same edge ids, so plots stay attached); streets that would become loops or duplicates are closed. */
+  mergeNodes(keep: number, drop: number, hooks?: RepairHooks): void {
+    for (const e of this.adj[drop].slice()) {
+      const o = this.other(e, drop);
+      if (o === keep || this.adj[keep].some((f) => f !== e && this.other(f, keep) === o)) {
+        if (!hooks || hooks.canKill(e)) { hooks?.onKill(e); this.killEdge(e); }
+        continue;
+      }
+      this.bucketsOf(e, (k) => { const l = this.eh.get(k); if (l) { const i = l.indexOf(e); if (i >= 0) l.splice(i, 1); } });
+      if (this.ea[e] === drop) this.ea[e] = keep; else this.eb[e] = keep;
+      this.adj[keep].push(e);
+      this.bucketsOf(e, (k) => { let l = this.eh.get(k); if (!l) this.eh.set(k, (l = [])); l.push(e); });
+    }
+    this.adj[drop] = [];
+    this.version++;
+  }
+
+  /** Would a and b stay joined if edge `skip` went? */
+  private joinedWithout(a: number, b: number, skip: number, maxHops = 80): boolean {
+    const seen = new Set<number>([a]);
+    let frontier = [a];
+    for (let h = 0; h < maxHops && frontier.length; h++) {
+      const next: number[] = [];
+      for (const n of frontier) for (const e of this.adj[n]) {
+        if (e === skip) continue;
+        const o = this.other(e, n);
+        if (o === b) return true;
+        if (!seen.has(o)) { seen.add(o); next.push(o); }
+      }
+      frontier = next;
+    }
+    return false;
+  }
+
+  nodesNear(x: number, y: number, r: number): number[] {
+    const out: number[] = [];
+    const x0 = Math.floor((x - r) / B), x1 = Math.floor((x + r) / B), y0 = Math.floor((y - r) / B), y1 = Math.floor((y + r) / B);
+    for (let by = y0; by <= y1; by++) for (let bx = x0; bx <= x1; bx++)
+      for (const n of this.nh.get(key(bx, by)) ?? []) if (this.adj[n].length && Math.hypot(this.nx[n] - x, this.ny[n] - y) < r) out.push(n);
+    return out;
+  }
+
+  /**
+   * Clean the graph: merge overlapping nodes, split an edge at a node lying on it, put a node on every crossing, remove duplicate edges,
+   * join dead ends that nearly touch another street (a node, or the side of an edge: a real T-junction) and trim 5-way junctions.
+   * Runs after generation and after every growth tick; returns what it did.
+   */
+  repair(year: number, hooks?: RepairHooks): RepairStats {
+    const st: RepairStats = { merged: 0, tSplit: 0, crossed: 0, dupKilled: 0, joined: 0, trimmed: 0 };
+    if (!REPAIR.on) return st;
+    const kill = (e: number) => { if (!this.alive[e]) return false; if (hooks && !hooks.canKill(e)) return false; hooks?.onKill(e); this.killEdge(e); return true; };
+    const total = () => st.merged + st.tSplit + st.crossed + st.dupKilled + st.joined + st.trimmed;
+    for (let pass = 0; pass < 3; pass++) {
+      const before = total();
+      // 1) overlapping nodes, and edges of no length
+      for (let a = 0; a < this.nx.length; a++) {
+        if (!this.adj[a].length) continue;
+        for (const b of this.nodesNear(this.nx[a], this.ny[a], 0.14)) {
+          if (b <= a || !this.adj[a].length || !this.adj[b].length) continue;
+          this.mergeNodes(a, b, hooks); st.merged++;
+        }
+      }
+      // 2) a node lying on the interior of an edge it does not belong to
+      for (let n = 0; n < this.nx.length; n++) {
+        if (!this.adj[n].length) continue;
+        for (const e of this.edgesNear(this.nx[n], this.ny[n], 0.1)) {
+          if (!this.alive[e] || this.ea[e] === n || this.eb[e] === n) continue;
+          const a = this.ea[e], b = this.eb[e];
+          const p = pointSeg(this.nx[n], this.ny[n], this.nx[a], this.ny[a], this.nx[b], this.ny[b]);
+          if (p.t > 0.001 && p.t < 0.999 && p.d < 0.05) { this.splitEdge(e, this.nx[n], this.ny[n], n); st.tSplit++; }
+        }
+      }
+      // 3) crossings without a node
+      for (let e = 0; e < this.ea.length; e++) {
+        if (!this.alive[e]) continue;
+        for (const f of this.edgesAlongSeg(this.nx[this.ea[e]], this.ny[this.ea[e]], this.nx[this.eb[e]], this.ny[this.eb[e]], 0.05)) {
+          if (f <= e || !this.alive[f] || !this.alive[e]) continue;
+          if (this.ea[e] === this.ea[f] || this.ea[e] === this.eb[f] || this.eb[e] === this.ea[f] || this.eb[e] === this.eb[f]) continue;
+          const h = segIntersect(this.nx[this.ea[e]], this.ny[this.ea[e]], this.nx[this.eb[e]], this.ny[this.eb[e]], this.nx[this.ea[f]], this.ny[this.ea[f]], this.nx[this.eb[f]], this.ny[this.eb[f]]);
+          if (!h || h.t <= 1e-3 || h.t >= 1 - 1e-3 || h.u <= 1e-3 || h.u >= 1 - 1e-3) continue;
+          const x = this.nx[this.ea[e]] + (this.nx[this.eb[e]] - this.nx[this.ea[e]]) * h.t, y = this.ny[this.ea[e]] + (this.ny[this.eb[e]] - this.ny[this.ea[e]]) * h.t;
+          const n = this.splitEdge(e, x, y);
+          this.splitEdge(f, x, y, n);
+          st.crossed++;
+        }
+      }
+      // 4) duplicate edges between the same two nodes: keep the stronger class
+      for (let n = 0; n < this.nx.length; n++) {
+        const l = this.adj[n].slice();
+        for (let i = 0; i < l.length; i++) for (let j = i + 1; j < l.length; j++) {
+          const e = l[i], f = l[j];
+          if (!this.alive[e] || !this.alive[f] || this.other(e, n) !== this.other(f, n)) continue;
+          const drop = this.ecls[e] > this.ecls[f] || (this.ecls[e] === this.ecls[f] && e > f) ? e : f, keep = drop === e ? f : e;
+          if (kill(drop)) { this.ecls[keep] = Math.min(this.ecls[keep], this.ecls[drop]); st.dupKilled++; }
+        }
+      }
+      // 5) dead ends that nearly touch another street become a junction (a short connector street, through the normal growth rules)
+      for (let n = 0; n < this.nx.length; n++) {
+        if (this.adj[n].length !== 1) continue;
+        const e0 = this.adj[n][0], nb = this.other(e0, n);
+        const x = this.nx[n], y = this.ny[n];
+        // candidates: nearby nodes and the sides of nearby streets, nearest first (a refused join falls through to the next one)
+        const cands: { d: number; x: number; y: number }[] = [];
+        for (const m of this.nodesNear(x, y, JOIN)) {
+          if (m === n || m === nb || this.adj[m].some((f) => this.other(f, m) === n) || this.adj[m].length >= RULES.maxDegree) continue;
+          cands.push({ d: Math.hypot(this.nx[m] - x, this.ny[m] - y), x: this.nx[m], y: this.ny[m] });
+        }
+        for (const e of this.edgesNear(x, y, JOIN)) {
+          if (!this.alive[e] || e === e0 || this.ea[e] === nb || this.eb[e] === nb || this.ea[e] === n || this.eb[e] === n) continue;
+          const p = pointSeg(x, y, this.nx[this.ea[e]], this.ny[this.ea[e]], this.nx[this.eb[e]], this.ny[this.eb[e]]);
+          const L = this.edgeLen(e);
+          if (p.d < JOIN && p.t * L > 0.45 && (1 - p.t) * L > 0.45) cands.push({ d: p.d, x: p.x, y: p.y });
+        }
+        cands.sort((p, q) => p.d - q.d);
+        for (const { d: td, x: tx, y: ty } of cands) {
+          if (td <= 0.02) break;
+          if (!this.alive[e0]) break;
+          if (td < 0.35) {
+            // practically touching: the dead end moves onto the other street (it becomes the junction node there)
+            const ang = this.edgeAngle(e0, n);
+            let m = -1;
+            for (const c of this.nodesNear(tx, ty, 0.02)) if (c !== n) m = c;
+            if (m < 0) {
+              const pe = this.nearestEdge(tx, ty, 0.05, nb);
+              if (!pe || this.ea[pe.e] === n || this.eb[pe.e] === n) continue;
+              const ea = Math.atan2(this.ny[this.eb[pe.e]] - this.ny[this.ea[pe.e]], this.nx[this.eb[pe.e]] - this.nx[this.ea[pe.e]]);
+              if (lineDiff(ea, ang) < 0.35) continue;
+              m = this.splitEdge(pe.e, tx, ty);
+            } else if (this.adj[m].length >= RULES.maxDegree || !this.angleOk(m, ang)) continue;
+            this.mergeNodes(m, n, hooks);
+            st.joined++;
+            break;
+          }
+          // a short gap closer is not a new street: the block-spacing rule does not apply
+          if (this.grow(n, tx, ty, this.ecls[e0], year, { snapScale: 1.6, minLen: 0.05, noParallel: td < 1 }) >= 0) { st.joined++; break; }
+        }
+        // still a dead end lying on the side of another street (nothing could join it): an empty stub is closed
+        if (this.adj[n].length === 1 && cands.length && cands[0].d < 0.35 && this.ecls[e0] !== 0 && this.edgeLen(e0) < RULES.minLen * 2 && kill(e0)) st.trimmed++;
+      }
+      // 6) no five-way junctions: close the shortest street of the lowest class that leaves its ends joined
+      for (let n = 0; n < this.nx.length; n++) {
+        while (this.adj[n].length > RULES.maxDegree) {
+          const es = this.adj[n].slice().sort((p, q) => this.ecls[q] - this.ecls[p] || this.edgeLen(p) - this.edgeLen(q));
+          let done = false;
+          for (const e of es) if (this.joinedWithout(this.ea[e], this.eb[e], e) && kill(e)) { st.trimmed++; done = true; break; }
+          if (!done) break;
+        }
+      }
+      // 7) dangling slivers: a dead-end street shorter than 0.7 x minLen (about 42 m)
+      for (let n = 0; n < this.nx.length; n++) {
+        if (this.adj[n].length !== 1) continue;
+        const e = this.adj[n][0];
+        if (this.ecls[e] !== 0 && this.edgeLen(e) < RULES.minLen * 0.7 && kill(e)) st.trimmed++;
+      }
+      // 8) sliver wedges: two streets leaving a junction less than 15 degrees apart; the shorter, weaker one closes if that leaves its ends joined
+      for (let n = 0; n < this.nx.length; n++) {
+        const l = this.adj[n];
+        if (l.length < 2) continue;
+        let hit = -1;
+        for (let i = 0; i < l.length && hit < 0; i++) for (let j = i + 1; j < l.length && hit < 0; j++) {
+          if (angDiff(this.edgeAngle(l[i], n), this.edgeAngle(l[j], n)) >= 0.26) continue;
+          const a = l[i], b = l[j];
+          hit = this.ecls[a] !== this.ecls[b] ? (this.ecls[a] > this.ecls[b] ? a : b) : this.edgeLen(a) < this.edgeLen(b) ? a : b;
+        }
+        if (hit >= 0 && this.joinedWithout(this.ea[hit], this.eb[hit], hit) && kill(hit)) st.trimmed++;
+      }
+      if (total() === before) break;
+    }
+    return st;
   }
 
   /** Mark raster cells that a road passes through (hidden raster for the maths). */
