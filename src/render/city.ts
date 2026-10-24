@@ -50,6 +50,7 @@ interface Grow {
 }
 
 const imul = Math.imul;
+
 const sameBytes = (a: Uint8Array, b: Uint8Array) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
 
 export class CityView {
@@ -200,11 +201,48 @@ export class CityView {
     return m;
   }
 
-  update(s: StateMsg) {
-    this.lots = s.lots;
-    if (s.roads.version !== this.roadVersion) { this.roadVersion = s.roads.version; this.rebuildRoads(s.roads); }
+  /**
+   * Apply a state message. The cheap diff runs now; the rebuilds it calls for (roads, plot occupancy, each changed chunk, each new
+   * construction site, assembly sites) are queued and `pump` works through them within a time budget per frame. Every step only
+   * prepares its meshes; the last step swaps them all into the scene at once and rebuilds trees and cranes, so the month still changes
+   * in a single frame, it just no longer stalls one. If a message arrives while the previous one's queue is unfinished (overload),
+   * that queue is finished first. `flush` runs everything now (captures, headless tools). Default budget: everything at once.
+   */
+  update(s: StateMsg, budgetMs = Infinity) {
+    if (this.pending) this.flush();
+    this.queue = []; this.names = []; this.qi = 0; this.staged = [];
+    if (s.roads.version !== this.roadVersion) { const r = s.roads; this.step('roads', () => { this.roadVersion = r.version; this.rebuildRoads(r); }); }
     this.rebuild(s);
+    this.pump(budgetMs);
   }
+
+  private queue: (() => void)[] = [];
+  private names: string[] = [];
+  private qi = 0;
+  private step(name: string, f: () => void) { this.queue.push(f); this.names.push(name); }
+  /** name of the longest step (perf tools) */
+  maxStepName = '';
+  /** scene changes prepared by queued steps, applied together by the last step */
+  private staged: (() => void)[] = [];
+  private treesDirty = false;
+  /** longest single step since the last read (ms), for the perf tools */
+  maxStep = 0;
+
+  /** Run queued rebuild steps for up to `ms` milliseconds (at least one step). Returns true while work remains. */
+  pump(ms = 6): boolean {
+    const t0 = performance.now();
+    while (this.qi < this.queue.length) {
+      const t = performance.now(), i = this.qi++;
+      this.queue[i]();
+      const now = performance.now();
+      if (now - t > this.maxStep) { this.maxStep = now - t; this.maxStepName = this.names[i]; }
+      if (now - t0 >= ms) break;
+    }
+    return this.qi < this.queue.length;
+  }
+
+  flush() { this.pump(Infinity); }
+  get pending() { return this.queue.length - this.qi; }
 
   // ---------------------------------------------------------------- roads: asphalt on a pale kerb strip, cobbles in the old cores
   private rebuildRoads(r: RoadsMsg) {
@@ -321,8 +359,7 @@ export class CityView {
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    this.roads.geometry.dispose();
-    this.roads.geometry = g;
+    this.staged.push(() => { this.roads.geometry.dispose(); this.roads.geometry = g; });
     this.roadsDirty = true;
   }
 
@@ -361,9 +398,9 @@ export class CityView {
     // plot shapes: when none changed (and the roads did not), the occupancy grid for wild trees is still valid
     let ph = L.n;
     for (let i = 0; i < L.n * 8; i++) ph = imul(ph ^ Math.round(L.poly[i] * 64), 16777619);
-    const occChanged = this.roadsDirty || ph !== this.polyHash || !this.lotOcc;
-    if (occChanged) this.lotOcc = this.stampLots(L);
-    this.polyHash = ph;
+    // the road step (queued first, if any) sets roadsDirty; the occupancy step runs after it
+    if (this.queue.length || this.roadsDirty || ph !== this.polyHash || !this.lotOcc)
+      this.step('occupancy', () => { this.lotOcc = this.stampLots(L); this.polyHash = ph; this.roadsDirty = false; this.treesDirty = true; });
     // per-chunk signatures over static plots
     const sigs = new Map<number, number>();
     const members = new Map<number, number[]>();
@@ -379,27 +416,31 @@ export class CityView {
       let m = members.get(key); if (!m) members.set(key, (m = []));
       m.push(k);
     }
-    // rebuild only chunks whose lots changed (and inside them only the plots that changed)
-    let treesDirty = occChanged;
+    // rebuild only chunks whose lots changed (and inside them only the plots that changed): one step per chunk
     for (const [key, sig] of sigs) {
       const ch = this.chunks.get(key);
       if (ch && ch.sig === sig) continue;
-      this.buildChunk(key, sig, members.get(key)!, s);
-      treesDirty = true;
+      const ks = members.get(key)!;
+      this.step('chunk', () => { this.buildChunk(key, sig, ks, s); this.treesDirty = true; });
     }
-    for (const [key, ch] of this.chunks) if (!sigs.has(key)) { this.disposeChunk(ch); this.chunks.delete(key); treesDirty = true; }
+    for (const [key, ch] of this.chunks) if (!sigs.has(key)) this.staged.push(() => { this.disposeChunk(ch); this.chunks.delete(key); this.treesDirty = true; });
     this.rebuildGrows(s, grows);
-    if (this.rebuildSites(s)) treesDirty = true;
-    this.roadsDirty = false;
-    if (treesDirty) this.rebuildTrees(s);
-    // cranes over plots under construction
-    this.craneMast.reset(); this.craneJib.reset();
-    this.cranes = [];
-    for (const gr of this.grows.values()) if (gr.crane) this.cranes.push(gr.crane);
-    for (const st of this.sites.values()) for (const c of st.cranes) this.cranes.push(c);
-    for (const c of this.cranes) { this.craneMast.add(c.x, c.y, c.z, 1.6, c.h, 1.6, 0, 0xc9a24a); this.craneJib.add(c.x, c.y + c.h, c.z, 30, 1.4, 1.4, 0, 0xc9a24a); }
-    this.craneMast.finish(); this.craneJib.finish();
-    this.animate(0, 0);
+    this.planSites(s);
+    this.step('commit', () => {
+      // swap everything prepared above into the scene in this one step
+      this.lots = L;
+      for (const f of this.staged) f();
+      this.staged = [];
+      if (this.treesDirty) { this.treesDirty = false; this.rebuildTrees(s); }
+      // cranes over plots under construction
+      this.craneMast.reset(); this.craneJib.reset();
+      this.cranes = [];
+      for (const gr of this.grows.values()) if (gr.crane) this.cranes.push(gr.crane);
+      for (const st of this.sites.values()) for (const c of st.cranes) this.cranes.push(c);
+      for (const c of this.cranes) { this.craneMast.add(c.x, c.y, c.z, 1.6, c.h, 1.6, 0, 0xc9a24a); this.craneJib.add(c.x, c.y + c.h, c.z, 30, 1.4, 1.4, 0, 0xc9a24a); }
+      this.craneMast.finish(); this.craneJib.finish();
+      this.animate(0, 0);
+    });
   }
 
   /** Road occupancy plus every plot (5 x 5 sample points per plot) on the 12.5 m grid. */
@@ -501,8 +542,7 @@ export class CityView {
       if (m === 'ghost') mesh.renderOrder = 5;
       meshes.push(mesh);
     });
-    if (old) this.disposeChunk(old);
-    for (const mesh of meshes) this.chunkGroup.add(mesh);
+    const swap = () => { if (old) this.disposeChunk(old); for (const mesh of meshes) this.chunkGroup.add(mesh); };
     const trees: Tree[] = [], recs = noRecs();
     for (const e of entries) {
       for (const t of e.trees) trees.push(t);
@@ -510,7 +550,7 @@ export class CityView {
       for (const x of e.recs.pine) recs.pine.push(x);
       for (const x of e.recs.trunk) recs.trunk.push(x);
     }
-    this.chunks.set(key, { sig, meshes, trees, recs, parts, geos });
+    this.staged.push(() => { swap(); this.chunks.set(key, { sig, meshes, trees, recs, parts, geos }); });
     this.stats.chunksBuilt++;
   }
 
@@ -602,19 +642,22 @@ export class CityView {
       const mode = L.demo[k] > 0 ? 'demo' : 'build';
       const sig = imul(this.sigOf(L, k) ^ (mode === 'demo' ? 77 : 0), 31) + L.target[k] + L.ntype[k] * 7;
       const old = this.grows.get(id);
-      if (old && old.sig === sig) { old.k = k; continue; }
-      if (old) this.disposeGrow(old);
-      const gr = this.makeGrow(s, k, mode, sig);
-      if (gr) this.grows.set(id, gr); else this.grows.delete(id);
+      if (old && old.sig === sig) { this.staged.push(() => { old.k = k; }); continue; }
+      this.step('grow', () => {
+        const gr = this.makeGrow(s, k, mode, sig);
+        this.staged.push(() => {
+          if (old) this.disposeGrow(old);
+          if (gr) { this.growGroup.add(gr.group); this.grows.set(id, gr); } else this.grows.delete(id);
+        });
+      });
     }
-    for (const [id, gr] of this.grows) if (!keep.has(id)) { this.disposeGrow(gr); this.grows.delete(id); }
-    this.stats.grows = this.grows.size;
+    for (const [id, gr] of this.grows) if (!keep.has(id)) this.staged.push(() => { this.disposeGrow(gr); this.grows.delete(id); });
+    this.staged.push(() => { this.stats.grows = this.grows.size; });
   }
 
-  /** Returns true when a site was built or removed (its trees and cranes change). */
-  private rebuildSites(s: StateMsg): boolean {
+  /** Assembly sites: one queued step per site that changed (built off-scene, swapped in by the commit step). */
+  private planSites(s: StateMsg) {
     const L = s.lots;
-    let changed = false;
     const idx = new Map<number, number>();
     for (let k = 0; k < L.n; k++) if (L.asm[k] > 0 || s.assemblies.length) idx.set(L.id[k], k);
     const keep = new Set<number>();
@@ -623,15 +666,13 @@ export class CityView {
       const sig = siteSig(a, L, idx);
       const old = this.sites.get(a.id);
       if (old && old.sig === sig) { old.pct = a.pct; continue; }
-      if (old) this.disposeSite(old);
-      changed = true;
-      const st = buildSite(this, a, s, idx) as Site & { pct: number };
-      st.sig = sig; st.pct = a.pct;
-      this.siteGroup.add(st.group);
-      this.sites.set(a.id, st);
+      this.step('site', () => {
+        const st = buildSite(this, a, s, idx) as Site & { pct: number };
+        st.sig = sig; st.pct = a.pct;
+        this.staged.push(() => { if (old) this.disposeSite(old); this.siteGroup.add(st.group); this.sites.set(a.id, st); this.treesDirty = true; });
+      });
     }
-    for (const [id, st] of this.sites) if (!keep.has(id)) { this.disposeSite(st); this.sites.delete(id); changed = true; }
-    return changed;
+    for (const [id, st] of this.sites) if (!keep.has(id)) this.staged.push(() => { this.disposeSite(st); this.sites.delete(id); this.treesDirty = true; });
   }
 
   private disposeSite(st: Site) {
@@ -705,7 +746,6 @@ export class CityView {
       const q = Q.at(0.88, 0.3);
       crane = { x: q[0], y: g - 1, z: q[1], h: Math.min(85, ms.h + 12), k: L.id[k] };
     }
-    this.growGroup.add(group);
     return { sig, lot: L.id[k], mode, group, bodies, crane, k };
   }
 

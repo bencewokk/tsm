@@ -112,7 +112,7 @@ function cityTris(city: CityViewT) {
 }
 
 // ---------------------------------------------------------------- run
-interface Row { seed: number; line: boolean; month: number; tick: number; phases: Rec; rphases: Rec; applyBase: number; bufMB: number; snap: number; clone: number; bytes: number; apply: number; heapMB: number; tris: number; meshes: number; chunksBuilt: number; pop: number; lots: number; edges: number; stations: number }
+interface Row { seed: number; line: boolean; month: number; tick: number; phases: Rec; rphases: Rec; applyBase: number; bufMB: number; sync: number; step: number; snap: number; clone: number; bytes: number; apply: number; heapMB: number; tris: number; meshes: number; chunksBuilt: number; pop: number; lots: number; edges: number; stations: number }
 const rows: Row[] = [];
 
 async function run(seed: number, line: boolean) {
@@ -124,8 +124,8 @@ async function run(seed: number, line: boolean) {
   const racc: Rec = {};
   if (view) { const w = wrapper(racc); for (const p of RENDER_PHASES) if (typeof (view.city as unknown as Record<string, unknown>)[p] === 'function') w(view.city as unknown as Record<string, unknown>, p, p); }
   const maxM = Math.max(...marks);
-  const win: { tick: number; phases: Rec; snap: number; clone: number; bytes: number; apply: number; chunks: number; rphases: Rec; base: number }[] = [];
-  let lastChunks = 0;
+  const win: { tick: number; phases: Rec; snap: number; clone: number; bytes: number; apply: number; chunks: number; rphases: Rec; base: number; sync: number; step: number }[] = [];
+  let lastChunks = 0, stepMax = 0, stepName = '';
   for (let m = 0; m < maxM; m++) {
     if (line && m === LINE_MONTH) testLine(sim);
     for (const k of Object.keys(acc)) acc[k] = 0;
@@ -140,24 +140,29 @@ async function run(seed: number, line: boolean) {
     const buf = v8.serialize(snap);
     const msg = v8.deserialize(buf) as StateMsg;
     const tClone = performance.now() - t2;
-    let tApply = 0, tBase = 0;
+    let tApply = 0, tBase = 0, tSync = 0, tStep = 0;
     for (const k of Object.keys(racc)) racc[k] = 0;
     const applyBase = () => { if (!baseView) return; const t = performance.now(); baseView.life.setRoads(msg.roads); baseView.city.update(msg); tBase = performance.now() - t; };
     if (baseView && m % 2 === 0) applyBase();
     if (view) {
       const t3 = performance.now();
       view.life.setRoads(msg.roads);
-      view.city.update(msg);
+      view.city.maxStep = 0;
+      view.city.update(msg, 0);              // the diff and the first queued step, as in the browser's message handler
+      tSync = performance.now() - t3;
+      view.city.flush();
       tApply = performance.now() - t3;
+      tStep = view.city.maxStep; if (tStep > stepMax) { stepMax = tStep; stepName = view.city.maxStepName; }
       racc.other = tApply - Object.entries(racc).filter(([k]) => k !== 'other').reduce((a, [, b]) => a + b, 0);
     }
     if (baseView && m % 2 === 1) applyBase();
     const chunks = view ? view.city.stats.chunksBuilt : 0;
-    win.push({ tick, phases: { ...acc, other: tick - Object.values(acc).reduce((a, b) => a + b, 0) }, snap: tSnap, clone: tClone, bytes: buf.length, apply: tApply, chunks: chunks - lastChunks, rphases: { ...racc }, base: tBase });
+    win.push({ tick, phases: { ...acc, other: tick - Object.values(acc).reduce((a, b) => a + b, 0) }, snap: tSnap, clone: tClone, bytes: buf.length, apply: tApply, chunks: chunks - lastChunks, rphases: { ...racc }, base: tBase, sync: tSync, step: tStep });
     lastChunks = chunks;
     if (win.length > WINDOW) win.shift();
     if (marks.includes(sim.month)) {
       global.gc?.();
+      stepMax = 0;
       const mean = (f: (w: typeof win[0]) => number) => win.reduce((a, w) => a + f(w), 0) / win.length;
       const phases: Rec = {};
       for (const w of win) for (const [k, v] of Object.entries(w.phases)) phases[k] = (phases[k] ?? 0) + v / win.length;
@@ -166,11 +171,11 @@ async function run(seed: number, line: boolean) {
       const t = view ? cityTris(view.city) : { tris: 0, meshes: 0 };
       const st = sim.stats();
       rows.push({ seed, line, month: sim.month, tick: mean((w) => w.tick), phases, snap: mean((w) => w.snap), clone: mean((w) => w.clone), bytes: mean((w) => w.bytes),
-        apply: mean((w) => w.apply), applyBase: mean((w) => w.base), rphases: rph, heapMB: process.memoryUsage().heapUsed / 1048576, bufMB: process.memoryUsage().arrayBuffers / 1048576, tris: t.tris, meshes: t.meshes, chunksBuilt: mean((w) => w.chunks), pop: st.population,
+        apply: mean((w) => w.apply), applyBase: mean((w) => w.base), sync: mean((w) => w.sync), step: Math.max(...win.map((w) => w.step)), rphases: rph, heapMB: process.memoryUsage().heapUsed / 1048576, bufMB: process.memoryUsage().arrayBuffers / 1048576, tris: t.tris, meshes: t.meshes, chunksBuilt: mean((w) => w.chunks), pop: st.population,
         lots: sim.lots.lots.filter((l) => l.alive).length, edges: sim.roads.aliveEdges().length, stations: sim.metro.stations.length });
       const r = rows[rows.length - 1];
       console.log(`seed ${seed} ${line ? 'line' : 'none'} m${String(r.month).padStart(3)}  tick ${r.tick.toFixed(1).padStart(6)} ms  snap ${r.snap.toFixed(1)} clone ${r.clone.toFixed(1)} msg ${(r.bytes / 1024).toFixed(0)} KB` +
-        (view ? `  apply ${r.apply.toFixed(1)} ms${baseView ? ` (reference ${r.applyBase.toFixed(1)} ms)` : ''} (${r.chunksBuilt.toFixed(1)} chunks/tick, ${(r.tris / 1000).toFixed(0)}k tris, ${r.meshes} meshes)` : '') +
+        (view ? `  apply ${r.apply.toFixed(1)} ms${baseView ? ` (reference ${r.applyBase.toFixed(1)} ms)` : ''} [diff ${r.sync.toFixed(1)}, longest step ${r.step.toFixed(1)} (${stepName})] (${r.chunksBuilt.toFixed(1)} chunks/tick, ${(r.tris / 1000).toFixed(0)}k tris, ${r.meshes} meshes)` : '') +
         `  heap ${r.heapMB.toFixed(0)} MB buffers ${r.bufMB.toFixed(0)} MB  pop ${r.pop} lots ${r.lots} edges ${r.edges}`);
       const g = Object.entries(GROUPS).map(([name, ks]) => `${name} ${ks.reduce((a, k) => a + (phases[k] ?? 0), 0).toFixed(1)}`);
       console.log(`      ${g.join('  ')}  other ${(phases.other ?? 0).toFixed(1)}`);

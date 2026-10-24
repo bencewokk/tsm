@@ -36,6 +36,7 @@ window.__ff = async (target) => {
   const P = tsm.perf.mon;
   P.apply.clear(); for (const r of P.steps.values()) r.clear(); P.worker.tick.clear(); P.worker.snap.clear(); P.msgSize.clear();
   P.sizes = true;
+  const slices = [];
   tsm.send({ type: 'speed', speed: 0 });
   const t = performance.now();
   while (tsm.state.stats.month < target) {
@@ -43,9 +44,13 @@ window.__ff = async (target) => {
     if (tsm.state.event) { const id = tsm.state.event.id; tsm.send({ type: 'choose', event: id, choice: 0 }); await until(() => !tsm.state.event || tsm.state.event.id !== id); continue; }
     tsm.send({ type: 'step', months: 1 });
     await until(() => tsm.state.stats.month !== before);
+    // a hidden pane runs no animation frames: do the city's per-frame rebuild slices here (as the frame loop would), timed
+    while (tsm.city && tsm.city.pending) { const t0 = performance.now(); tsm.city.pump(6); slices.push(performance.now() - t0); await yieldNow(); }
   }
+  slices.sort((a, b) => a - b);
+  const sl = slices.length ? { p50: +slices[Math.floor(slices.length / 2)].toFixed(2), p95: +slices[Math.floor(slices.length * 0.95)].toFixed(2), max: +slices[slices.length - 1].toFixed(2), n: slices.length } : null;
   const r = tsm.perf.report();
-  return { month: tsm.state.stats.month, s: +((performance.now() - t) / 1000).toFixed(1), apply: r.apply, steps: r.steps, wtick: r.worker.tick, wsnap: r.worker.snap, msgKB: r.msgKB, heap: r.heapMB };
+  return { month: tsm.state.stats.month, s: +((performance.now() - t) / 1000).toFixed(1), apply: r.apply, frameSlices: sl, steps: r.steps, wtick: r.worker.tick, wsnap: r.worker.snap, msgKB: r.msgKB, heap: r.heapMB };
 };
 /** test line through the villages (sorted by y, stations about every 14 cells), as scripts/lib.ts */
 window.__line = async () => {

@@ -69,7 +69,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     }
     perf.step('life', () => { life?.setRoads(m.roads); if (newMonth) life?.setCity(m.stats.homes, m.stations); });
     if (newMonth) lastStateAt = performance.now();
-    perf.step('city', () => city?.update(m));
+    perf.step('city', () => city?.update(m, CITY_BUDGET));
     if (linesChanged) perf.step('metro', () => metro?.update(m));
     planner?.onState(m);
     perf.step('overlays', () => {
@@ -255,6 +255,8 @@ window.addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ frame loop
 const MS: Record<number, number> = { 0: Infinity, 1: 1500, 3: 500, 10: 150 };
+/** ms per frame the city may spend on rebuilding chunks after a state message (the rest waits for the next frames) */
+const CITY_BUDGET = 6;
 let xray = 0, xrayTarget = 0, night = 0, nightTarget = 0;
 const DAY_SECONDS = 160;
 let dayPhase = 0.05;
@@ -308,6 +310,7 @@ function drawFrame(now: number) {
   panByKeys(dt, shiftDown);
   env.controls.update();
   const frac = state ? Math.min(1, (now - lastStateAt) / (MS[state.speed] ?? 1500)) : 0;
+  if (city?.pending) perf.step('city', () => city!.pump(CITY_BUDGET));
   city?.animate(frac, now / 1000);
   paperAndLabels();
   life?.animate(dt * (state && state.speed > 0 ? 1 : 0.4), now / 1000, env.night);
@@ -385,6 +388,7 @@ async function demo(deal = 0, lineAt = 10) {
 /** Dev helper: save the canvas at full size to screenshots/<name>.png (served by the dev server only). */
 async function shot(name: string) {
   // a hidden pane does not run animation frames: settle the x-ray fade at once so the capture shows the toggled state
+  city?.flush();
   xray = xrayTarget; applyXray(xray); metro?.setXray(xray);
   env.timeOfDay = phaseToTime(dayPhase);
   env.applyTime();

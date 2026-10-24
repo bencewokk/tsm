@@ -10,7 +10,7 @@ import { testLine } from './lib';
 import type * as THREE from 'three';
 
 declare const process: { argv: string[]; exitCode: number };
-const nums = process.argv.slice(2).filter((a) => !a.startsWith('--')).map(Number);
+const nums = process.argv.slice(2).filter((a, i, all) => !a.startsWith('--') && all[i - 1] !== '--budget').map(Number);
 const seed = nums[0] ?? 4821, months = nums[1] ?? 72, every = nums[2] ?? 12;
 
 const sim = new Sim(seed);
@@ -73,19 +73,24 @@ function compare(a: CityView, b: CityView, month: number): number {
 }
 
 const live = make();
-let bad = 0, checks = 0;
+let bad = 0, checks = 0, maxFrames = 0;
+/** --budget ms: apply each message in time-sliced steps (as the browser does) before comparing */
+const bi = process.argv.indexOf('--budget'), budget = bi >= 0 ? Number(process.argv[bi + 1]) : Infinity;
 for (let m = 0; m < months; m++) {
   if (m === 6) testLine(sim);
   sim.tick();
   if (sim.pending) sim.apply({ type: 'choose', event: sim.eventInfo()!.id, choice: 0 });
   const msg = sim.snapshot();
-  live.update(msg);
+  live.update(msg, budget);
+  let frames = 0;
+  while (live.pending) { live.pump(budget); frames++; }
+  maxFrames = Math.max(maxFrames, frames);
   if (sim.month % every === 0) {
     const fresh = make();
     fresh.update(msg);
     const b = compare(live, fresh, sim.month);
     bad += b; checks++;
-    console.log(`m${sim.month}: ${b ? `${b} differences` : 'identical'} (designed ${live.stats.lotsDesigned}, reused ${live.stats.lotsReused}, tree rebuilds ${live.stats.treeRebuilds})`);
+    console.log(`m${sim.month}: ${b ? `${b} differences` : 'identical'} (slices up to ${maxFrames + 1}, designed ${live.stats.lotsDesigned}, reused ${live.stats.lotsReused}, tree rebuilds ${live.stats.treeRebuilds})`);
   }
 }
 console.log(bad ? `PARITY FAILED: ${bad} differences in ${checks} checks` : `parity ok: ${checks} checks identical`);
