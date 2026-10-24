@@ -2,10 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { HorizontalTiltShiftShader } from 'three/examples/jsm/shaders/HorizontalTiltShiftShader.js';
-import { VerticalTiltShiftShader } from 'three/examples/jsm/shaders/VerticalTiltShiftShader.js';
 import { MAP, VS } from './common';
 import { strataTexture } from './terrain';
 
@@ -19,16 +16,20 @@ export class Env {
   /** 0 = noon, 0.5 = midnight; advanced by the caller */
   timeOfDay = 0.16;
   night = 0; // 0..1 derived
-  tilt = false;
+  /**
+   * The scene renders into a linear half-float target and one output pass tone-maps it to the screen, so transparent layers (metro
+   * ribbons, paper, water, ghost blocks) blend in linear light as they always have. Dev only: false renders straight to the canvas
+   * (cheaper, but those layers blend after tone mapping and read paler).
+   */
+  linear = true;
   private composer: EffectComposer;
-  private hblur: ShaderPass;
-  private vblur: ShaderPass;
   private daySky = new THREE.Color('#e9eef0');
   private duskSky = new THREE.Color('#e8cdb8');
   private nightSky = new THREE.Color('#1a2233');
 
   constructor(container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+    // no MSAA on the canvas: the image comes from the output pass (a full-screen quad), the scene target has no MSAA either
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = true;
@@ -81,33 +82,19 @@ export class Env {
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.hblur = new ShaderPass(HorizontalTiltShiftShader);
-    this.vblur = new ShaderPass(VerticalTiltShiftShader);
-    this.composer.addPass(this.hblur);
-    this.composer.addPass(this.vblur);
     this.composer.addPass(new OutputPass());
-    this.sizeBlur();
 
     window.addEventListener('resize', () => {
       this.camera.aspect = container.clientWidth / container.clientHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(container.clientWidth, container.clientHeight);
       this.composer.setSize(container.clientWidth, container.clientHeight);
-      this.sizeBlur();
     });
     this.applyTime();
   }
 
-  private sizeBlur() {
-    const w = this.renderer.domElement.width, h = this.renderer.domElement.height;
-    this.hblur.uniforms.h.value = 2.2 / w;
-    this.vblur.uniforms.v.value = 2.2 / h;
-    this.hblur.uniforms.r.value = 0.5;
-    this.vblur.uniforms.r.value = 0.5;
-  }
-
   render() {
-    if (this.tilt) this.composer.render();
+    if (this.linear) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
 

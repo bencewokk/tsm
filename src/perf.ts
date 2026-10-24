@@ -58,7 +58,7 @@ export class PerfMon {
 
   attach(renderer: THREE.WebGLRenderer) {
     this.renderer = renderer;
-    renderer.info.autoReset = false;   // the composer renders several passes per frame: count them all
+    renderer.info.autoReset = false;   // count every pass of a frame (shadow map and main pass)
     const gl = renderer.getContext() as WebGL2RenderingContext;
     this.gl = gl;
     const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');

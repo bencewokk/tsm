@@ -15,7 +15,7 @@ window.__scen = async (frames = 60) => {
     out[name] = { p50: b.p50, p95: b.p95, gpu50: b.gpu50, gpu95: b.gpu95, calls: b.calls, ktris: Math.round(b.triangles / 1000), geo: b.geometries, tex: b.textures };
     window.__scenOut = out;
   };
-  const reset = () => { for (const t of ['heat', 'xray', 'zones', 'night', 'desire']) tsm.hud.toggle(t, false); tsm.hud.setTool('view'); tsm.hud.toggle('tilt', true); };
+  const reset = () => { for (const t of ['heat', 'xray', 'zones', 'night', 'desire']) tsm.hud.toggle(t, false); tsm.hud.setTool('view'); };
   reset();
   tsm.phase(0.05); tsm.view(cx, cy, 5200, 0.6, 0.85); await run('overview day');
   tsm.phase(0.86); tsm.view(cx, cy, 5200, 0.6, 0.85); await run('overview night');
@@ -23,8 +23,7 @@ window.__scen = async (frames = 60) => {
   tsm.phase(0.86); tsm.view(o.x, o.y, 520, 0.6, 1.05); await run('street night');
   tsm.phase(0.05); tsm.view(cx, cy, 5200, 0.6, 0.85); tsm.hud.toggle('xray', true); await run('overview xray');
   tsm.hud.toggle('xray', false); tsm.hud.toggle('heat', true); await run('overview heatmap');
-  tsm.hud.toggle('heat', false); tsm.hud.toggle('tilt', false); await run('overview no tilt');
-  tsm.hud.toggle('tilt', true); tsm.hud.setTool('plan'); await run('plan mode');
+  tsm.hud.toggle('heat', false); tsm.hud.setTool('plan'); await run('plan mode');
   reset(); tsm.phase(0.05); tsm.view(cx, cy, 5200, 0.6, 0.85); await tsm.perf.bench(5);
   window.__scenDone = true;
   return out;
@@ -64,13 +63,12 @@ window.__line = async () => {
 };
 'ok';
 
-/** Cost split at the current view: full frame, shadow map frozen (not re-rendered), tilt-shift off. */
+/** Cost split at the current view: full frame, shadow map frozen (not re-rendered). */
 window.__split = async (frames = 40) => {
   const r = tsm.env.renderer, out = {};
   const run = async (name) => { await tsm.perf.bench(10); const b = await tsm.perf.bench(frames); out[name] = { p50: b.p50, p95: b.p95, gpu50: b.gpu50, gpu95: b.gpu95, calls: b.calls, ktris: Math.round(b.triangles / 1000) }; };
   await run('full');
   r.shadowMap.autoUpdate = false; await run('shadow frozen'); r.shadowMap.autoUpdate = true;
-  const tilt = tsm.env.tilt; tsm.env.tilt = false; await run('no post'); tsm.env.tilt = tilt;
   return out;
 };
 
@@ -80,7 +78,6 @@ window.__ab = async (rounds = 5, frames = 8, only = null) => {
   const vis = (o) => [() => { o.visible = false; }, () => { o.visible = true; }];
   const X = {
     'shadow map frozen': [() => { r.shadowMap.autoUpdate = false; }, () => { r.shadowMap.autoUpdate = true; }],
-    'tilt-shift off': [() => { env.tilt = false; }, () => { env.tilt = true; }],
     'trees hidden': [() => { for (const o of city.group.children) if (o.isInstancedMesh && o.count > 1000) o.visible = false; }, () => { for (const o of city.group.children) if (o.isInstancedMesh) o.visible = true; }],
     'buildings hidden': vis(city.chunkGroup),
     'roads hidden': vis(city.roads),

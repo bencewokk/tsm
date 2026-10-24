@@ -20,7 +20,7 @@ export interface HudHandlers {
 export class Hud {
   root: HTMLElement;
   private el: Record<string, HTMLElement> = {};
-  toggles: Record<string, boolean> = { heat: false, zones: false, xray: false, night: false, desire: false, tilt: false };
+  toggles: Record<string, boolean> = { heat: false, zones: false, xray: false, night: false, desire: false };
   tool = 'view';
   handlers: HudHandlers = {};
 
@@ -74,7 +74,6 @@ export class Hud {
         <button data-toggle="xray" title="X-ray underground (X)">X-ray</button>
         <button data-toggle="night" title="Night (N)">Night</button>
         <button data-toggle="desire" title="Desire lines (L)">Desire lines</button>
-        <button data-toggle="tilt" title="Tilt-shift (T)">Tilt-shift</button>
       </div>
       <div class="hint panel" data-k="hint"></div>
       <div class="ticker" data-k="ticker"></div>

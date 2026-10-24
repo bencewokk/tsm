@@ -13,7 +13,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #e9eef0; col
 #app { position: fixed; inset: 0; }
 #app canvas { display: block; }
 .hud { position: fixed; inset: 0; pointer-events: none; font-size: 13px; }
-.panel { pointer-events: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); backdrop-filter: blur(6px); }
+.panel { pointer-events: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
 .topbar { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; align-items: center; gap: 18px; padding: 8px 14px; flex-wrap: wrap; }
 .brand { font-weight: 600; letter-spacing: 0.02em; margin-right: 6px; }
 .muted { color: var(--muted); font-weight: 400; }

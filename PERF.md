@@ -76,3 +76,24 @@ Half resolution (scene and post): 32.2 -> 17.8 ms with tilt-shift, 28.4 -> 18.0 
 4. Metro: 290 meshes (viaduct deck, edge stripe and pier per 25 m segment are separate meshes), about 200 extra draw calls in the main and
    shadow passes at month 240; `MetroView.update` 7-16 ms when a line changes.
 5. Protocol: about 310-390 KB per message, structured clone 0.5-1 ms each side; small next to the above.
+
+## Fix 1: blur post-processing removed (user decision: "we don't need blurs")
+
+- Removed the tilt-shift (two separable blur passes), its shaders and uniforms, `env.tilt`, the `?notilt=1` flag, the T key and the
+  Tilt-shift HUD button, and the HUD panels' CSS `backdrop-filter: blur(6px)` (a blur-based screen effect composited over the canvas
+  every frame). There was no depth-of-field or bokeh pass. The T key is now free.
+- Kept: the x-ray fade, the window-light shader, shadows. The scene still renders into a linear half-float target with one output pass
+  (tone mapping and sRGB), as it did under tilt-shift, so transparent layers (metro ribbons, paper sheet, water, ghost blocks) blend
+  exactly as before. Rendering straight to the canvas would save about 3 ms more but those layers blend after tone mapping and read
+  visibly paler (the red line ribbon turns pink), so that is left as a dev switch (`tsm.env.linear = false`), not the default.
+  The canvas no longer requests MSAA (`antialias: false`): it only ever showed the output quad, so nothing changes on screen.
+- GPU, month 240, seed 4821, interleaved in one page (the old passes re-inserted for the A/B):
+
+| view | before (tilt-shift) | after (no blur) | saved | direct to canvas (not used) |
+|---|---|---|---|---|
+| overview, day | 31.2 ms | 23.3 ms | 7.9 ms (25%) | 19.9 ms |
+| street, day | 28.6 ms | 20.3 ms | 8.3 ms (29%) | 17.4 ms |
+
+- Captures (seed 4821, month 240, same cameras): `screenshots/perf-before-m240-*.jpg` (tilt-shift) and `screenshots/perf-noblur-m240-*.jpg`
+  (overview day / night, street, mid zoom, x-ray, plan mode). The only intended difference is no blur (cars are placed at random each load).
+- For the planned visual pass: drop "shallow depth of field" from the architect's-model look; the T key is free.

@@ -90,7 +90,6 @@ send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin:
 let savedView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
 hud.handlers.onTool = (t) => {
   const c = env.controls;
-  env.tilt = hud.toggles.tilt && t !== 'plan';
   if (t === 'plan') {
     savedView = { pos: env.camera.position.clone(), target: c.target.clone() };
     const dist = Math.max(2500, env.camera.position.distanceTo(c.target));
@@ -119,10 +118,7 @@ hud.handlers.onToggle = (name, on) => {
   if (name === 'xray') xrayTarget = on ? 1 : 0;
   if (name === 'night') { nightTarget = on ? 1 : 0; fastDawn = !on; }
   if (name === 'desire') { desire.group.visible = on; if (on && state) desire.update(state.desire); }
-  if (name === 'tilt') env.tilt = on && hud.tool !== 'plan';
 };
-
-if (params.get('notilt') !== '1') hud.toggle('tilt', true);
 
 hud.onFocusLandmark = (x, y) => { env.focus((x + 0.5) * CELL, (y + 0.5) * CELL, 800); };
 hud.onFocusDocks = () => {
@@ -249,7 +245,6 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'z' || e.key === 'Z') hud.toggle('zones');
   else if (e.key === 'n' || e.key === 'N') hud.toggle('night');
   else if (e.key === 'l' || e.key === 'L') hud.toggle('desire');
-  else if (e.key === 't' || e.key === 'T') hud.toggle('tilt');
   else if (hud.tool === 'plan' && planner) {
     if (e.key === 'Enter') planner.commit();
     else if (e.key === 'Backspace') planner.undo();
