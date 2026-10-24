@@ -2,6 +2,7 @@ import type { StateMsg, Command } from '../sim/protocol';
 import { STATION_COST, TRAIN_COST, LINE_COLORS, METRO_SPEED } from '../sim/constants';
 import { quoteLine, RELIEF, SEG_NAMES, type Terr, type LineQuote } from '../sim/relief';
 import { money } from './hud';
+import { gameEvents } from './gameEvents';
 
 /** Metro planning: click empty land to dig a station, click stations in order, Enter to build. */
 export class Planner {
@@ -13,8 +14,6 @@ export class Planner {
   private last: StateMsg | null = null;
   /** stations dug while planning that are not on a line yet: Backspace / Esc / leaving plan mode gives the full price back */
   dug = new Set<number>();
-  /** UI sound hook */
-  onBlip?: (k: 'dig' | 'undo' | 'warn') => void;
 
   private water: Uint8Array;
   constructor(private send: (c: Command) => void, private terr: Terr) { this.water = terr.water; }
@@ -38,8 +37,8 @@ export class Planner {
       return;
     }
     if (this.water[Math.floor(y) * 128 + Math.floor(x)]) return;
-    if (s.stats.money < STATION_COST) { this.notice = `Not enough money to dig another station (${money(STATION_COST)}).`; this.onBlip?.('warn'); return; }
-    this.onBlip?.('dig');
+    if (s.stats.money < STATION_COST) { this.notice = `Not enough money to dig another station (${money(STATION_COST)}).`; return; }
+    gameEvents.emit({ kind: 'stationDug', x, y, cost: STATION_COST });
     // placeholder keeps click order while the worker digs the station
     this.pending.push({ x, y });
     this.draft.push(-this.pending.length);
@@ -70,8 +69,21 @@ export class Planner {
   private refund(id: number) {
     if (id >= 0 && this.dug.delete(id)) this.send({ type: 'removeStation', id, full: true });
   }
-  undo() { const id = this.draft.pop(); if (id !== undefined) { this.refund(id); this.onBlip?.('undo'); } this.notice = ''; }
-  cancel() { for (const id of this.draft) this.refund(id); for (const id of [...this.dug]) this.refund(id); this.draft = []; this.pending = []; this.notice = ''; }
+  private announceUndo(ids: number[]) { if (ids.length) gameEvents.emit({ kind: 'undo', stationIds: ids, refund: ids.length * STATION_COST }); }
+  undo() { const id = this.draft.pop(); if (id !== undefined) { const was = id >= 0 && this.dug.has(id); this.refund(id); if (was) this.announceUndo([id]); } this.notice = ''; }
+  cancel() {
+    const ids = new Set<number>([...this.draft.filter((id) => id >= 0 && this.dug.has(id)), ...this.dug]);
+    for (const id of ids) this.refund(id);
+    this.announceUndo([...ids]);
+    this.draft = []; this.pending = []; this.notice = '';
+  }
+
+  /** The draft's cost as data (for the preview and for any presenter). */
+  costInfo(s: StateMsg) {
+    const r = this.quote(s), q = r.q;
+    const paid = this.draft.filter((id) => this.dug.has(id)).length * STATION_COST;
+    return { kind: 'planCost' as const, draftStations: this.draft.length, km: r.km, cost: r.cost, paidForStations: paid, money: s.stats.money, affordable: r.cost <= s.stats.money && (!q || q.ok), notice: this.notice, trains: r.trains };
+  }
 
   private commitWhenReady = 0;
 

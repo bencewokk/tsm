@@ -1,5 +1,4 @@
 import type { Command, StateMsg } from '../sim/protocol';
-import type { GoalInfo, Moment } from '../sim/goals';
 import type { CityProfile } from '../sim/cityprofile';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -19,9 +18,6 @@ export interface HudHandlers {
   onQuality?: () => void;
   onSound?: () => boolean;
   onAuto?: (on: boolean) => void;
-  /** a new headline moment arrived (sound, camera, ripple) */
-  onMoment?: (m: Moment) => void;
-  onGoalFocus?: (g: GoalInfo) => void;
 }
 
 export class Hud {
@@ -42,7 +38,7 @@ export class Hud {
         <div class="stat"><span class="k">Money</span><span class="v" data-k="money">-</span></div>
         <div class="stat"><span class="k">Income / mo</span><span class="v pos" data-k="inc">-</span></div>
         <div class="stat"><span class="k">Expenses / mo</span><span class="v neg" data-k="exp">-</span></div>
-        <div class="stat"><span class="k">Transit share</span><span class="v" data-k="share">-</span></div>
+        <div class="stat" title="Share of all trips made by metro; the rest go by car. Goals reward beating the car."><span class="k">Metro vs car</span><span class="v" data-k="share">-</span><span class="mbar"><i data-k="sharebar"></i></span></div>
         <div class="stat"><span class="k">Rating</span><span class="v" data-k="rating">-</span></div>
       </div>
       <div class="side panel">
@@ -122,7 +118,10 @@ export class Hud {
   }
 
   /** Start card: the city's story from its profile; the clock starts when the player begins. */
+  /** the start card is up: keys do nothing yet */
+  introOpen = false;
   showIntro(cp: CityProfile, seed: number, onBegin: () => void) {
+    this.introOpen = true;
     const wrap = this.el.intro;
     const chip = (k: string, v: string) => `<span class="chip"><i>${k}</i> ${v}</span>`;
     const lvl = (v: number) => (v > 0.7 ? 'high' : v < 0.3 ? 'low' : 'medium');
@@ -135,7 +134,7 @@ export class Hud {
       <div class="firstgoal" data-introgoal></div>
       <div class="choices"><button class="choice" data-begin><b>Begin</b><span>Build the metro, grow the city. Time stands still while you plan a line (P).</span></button></div>
     </div>`;
-    wrap.querySelector<HTMLButtonElement>('[data-begin]')!.addEventListener('click', () => { wrap.innerHTML = ''; wrap.style.display = 'none'; onBegin(); });
+    wrap.querySelector<HTMLButtonElement>('[data-begin]')!.addEventListener('click', () => { wrap.innerHTML = ''; wrap.style.display = 'none'; this.introOpen = false; onBegin(); });
   }
 
   private last: StateMsg | null = null;
@@ -283,92 +282,9 @@ export class Hud {
     if (b) { b.textContent = `Sound: ${on ? 'on' : 'off'}`; b.classList.toggle('on', on); }
   }
 
-  // ---------------------------------------------------------------- goals
-  private goalSig = '';
-  private renderGoals(s: StateMsg) {
-    const sig = JSON.stringify([s.goals.map((g) => [g.id, Math.round(g.cur * 1000), g.target]), s.goalsDone, s.lines.length]);
-    if (sig === this.goalSig) return;
-    this.goalSig = sig;
-    this.el.goalcount.textContent = `${s.goalsDone} / ${s.goalsTotal}`;
-    const fmtV = (v: number, u: GoalInfo['unit']) => u === 'pct' ? `${Math.round(v * 100)}%` : u === 'k' ? (v >= 10000 ? `${(v / 1000).toFixed(0)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v))) : String(Math.round(v));
-    this.el.goals.innerHTML = s.goals.map((g, k) => {
-      const pct = Math.max(0, Math.min(1, g.cur / g.target));
-      const first = g.id === 'first_line';
-      return `<button class="goal ${first ? 'first' : ''}" data-goal="${k}" title="${g.text.replace(/"/g, '&quot;')}">
-        <span class="gt">${g.title}</span>
-        <span class="gb"><i style="width:${Math.round(pct * 100)}%"></i></span>
-        <span class="gm"><b>${fmtV(g.cur, g.unit)}</b> / ${fmtV(g.target, g.unit)}<em>${g.reward}</em></span>
-        ${first && !s.lines.length ? `<span class="gx">${g.text}</span>` : ''}
-      </button>`;
-    }).join('') || '<div class="muted small">Every goal reached. The city is yours.</div>';
-    this.el.goals.querySelectorAll<HTMLButtonElement>('button.goal').forEach((b) => b.addEventListener('click', () => { const g = s.goals[Number(b.dataset.goal)]; if (g) this.handlers.onGoalFocus?.(g); }));
-    this.root.querySelector('[data-tool="plan"]')?.classList.toggle('pulse', !s.lines.length && this.tool !== 'plan' && s.stats.month >= 0);
-  }
-
-  // ---------------------------------------------------------------- headlines and toasts
-  private seenSeq = -1;
-  private headlineQueue: Moment[] = [];
-  private headlineBusy = false;
-  /** wall-clock time of the last big headline, for the auto-speed rule */
-  lastBigAt = 0;
-
-  private processMoments(s: StateMsg) {
-    if (this.seenSeq < 0) { this.seenSeq = s.moments.reduce((a, m) => Math.max(a, m.seq), 0); return; }
-    for (const m of s.moments) {
-      if (m.seq <= this.seenSeq) continue;
-      this.seenSeq = m.seq;
-      this.handlers.onMoment?.(m);
-      if (m.big) { this.headlineQueue.push(m); this.lastBigAt = performance.now(); } else this.toast(m);
-    }
-    this.pumpHeadline();
-  }
-
-  private toast(m: Moment) {
-    const el = document.createElement('div');
-    el.className = `toast ${m.kind}`;
-    el.style.setProperty('--c', m.color);
-    el.innerHTML = `<b>${m.title}</b><span>${m.text}</span>`;
-    el.addEventListener('click', () => { this.handlers.onGoalFocus?.({ x: m.x, y: m.y } as GoalInfo); el.remove(); });
-    this.el.toasts.prepend(el);
-    while (this.el.toasts.children.length > 3) this.el.toasts.lastElementChild?.remove();
-    window.setTimeout(() => { el.classList.add('out'); window.setTimeout(() => el.remove(), 500); }, 9000);
-  }
-
-  private pumpHeadline() {
-    if (this.headlineBusy) return;
-    const m = this.headlineQueue.shift();
-    if (!m) return;
-    this.headlineBusy = true;
-    const wrap = this.el.headline;
-    const open = m.kind === 'open';
-    const confetti = !open ? Array.from({ length: 26 }, (_, k) => `<i style="--dx:${(Math.random() * 2 - 1) * 260}px;--dy:${-80 - Math.random() * 120}px;--r:${Math.random() * 720}deg;--d:${Math.random() * 0.25}s;background:${['#e0a526', '#d9534f', '#2f7fc1', '#3a9d5d', '#8e5bb5'][k % 5]}"></i>`).join('') : '';
-    wrap.innerHTML = `<div class="paper ${open ? 'opening' : 'goalcard'}" style="--c:${m.color}">
-      ${open ? '<div class="ribbon"><i class="l"></i><i class="r"></i><span>&#9986;</span></div>' : `<div class="confetti">${confetti}</div>`}
-      <div class="mast"><span>The Tidewater Times</span><span>${dateStr(m.month)}</span></div>
-      <h3>${m.title}</h3>
-      <p>${m.text}</p>
-      <div class="stripe"></div>
-    </div>`;
-    wrap.style.display = 'flex';
-    const paper = wrap.firstElementChild as HTMLElement;
-    const done = () => {
-      paper.classList.add('out');
-      window.setTimeout(() => { wrap.innerHTML = ''; wrap.style.display = 'none'; this.headlineBusy = false; this.pumpHeadline(); }, 450);
-    };
-    paper.addEventListener('click', done, { once: true });
-    window.setTimeout(done, this.headlineQueue.length ? 3800 : 7500);
-  }
-
-  /** Floating "+$12k" over a station: the station's fares for the month. */
-  floatersEl() { return this.el.floaters; }
-
   update(s: StateMsg) {
     this.last = s;
     this.renderLines(s);
-    this.renderGoals(s);
-    this.processMoments(s);
-    const ig = this.root.querySelector('[data-introgoal]');
-    if (ig && s.goals[0]) ig.innerHTML = `<span class="gl">First goal</span> <b>${s.goals[0].title}</b> <span class="muted">reward ${s.goals[0].reward}</span>`;
     this.renderEvent(s);
     this.renderDocks(s);
     this.renderLandmarks(s);
@@ -381,6 +297,7 @@ export class Hud {
     e.inc.textContent = money(st.income);
     e.exp.textContent = money(st.expenses);
     e.share.textContent = `${(st.transitShare * 100).toFixed(1)}%`;
+    e.sharebar.style.width = `${Math.min(100, st.transitShare * 100).toFixed(1)}%`;
     e.rating.textContent = s.lines.length ? `${Math.round(st.rating)}` : '-';
     e.homes.textContent = num(st.homes);
     e.jobs.textContent = num(st.jobs);

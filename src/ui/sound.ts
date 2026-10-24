@@ -1,3 +1,5 @@
+import { gameEvents } from './gameEvents';
+
 /** Tiny WebAudio blips (no assets). UI only: never touches the sim. Starts after the first click (browsers need a gesture) and can be muted. */
 export type Blip = 'dig' | 'undo' | 'open' | 'goal' | 'cranes' | 'tower' | 'warn' | 'coin' | 'tick';
 
@@ -61,4 +63,19 @@ export class Sound {
       o.start(t0); o.stop(t0 + n.d + 0.02);
     });
   }
+}
+
+/** Sound is just another presenter of the gameplay events: a blip per beat. */
+export function bindSound(sound: Sound) {
+  gameEvents.on('lineOpened', () => sound.play('open'));
+  gameEvents.on('objectiveReached', () => sound.play('goal'));
+  gameEvents.on('moment', (e) => {
+    const k = e.moment.kind;
+    if (k === 'growth') sound.play('cranes');
+    else if (k === 'tower') sound.play('tower');
+    else if (k === 'crowd') sound.play('warn');
+    else if (k === 'riders') sound.play('coin');
+  });
+  gameEvents.on('stationDug', () => sound.play('dig'));
+  gameEvents.on('undo', () => sound.play('undo'));
 }

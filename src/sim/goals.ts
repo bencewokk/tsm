@@ -20,6 +20,8 @@ export interface GoalInfo {
   reward: string;
   /** the first goal points at a place (cell units) while it is open */
   x?: number; y?: number;
+  /** a view that frames everything the goal is about (cell units; span = the longest distance in cells), for the plan camera */
+  frame?: { x: number; y: number; span: number };
 }
 
 /** A newsworthy thing that happened (a line opened, a goal reached, cranes at a new station). The UI turns these into headlines, toasts and sounds. */
@@ -33,6 +35,8 @@ export interface Moment {
   x: number; y: number;
   /** headline-sized (a newspaper card) rather than a toast */
   big: boolean;
+  /** what it is about: goal id, station id or line id (as a string), for presenters that pin the beat to an object */
+  ref: string;
 }
 
 interface GoalDef {
@@ -47,6 +51,7 @@ interface GoalDef {
   unlock?: 'signals' | 'atc';
   reward?: string;
   where?: (s: Sim) => { x: number; y: number } | null;
+  frame?: (s: Sim) => { x: number; y: number; span: number } | null;
 }
 
 const fmt = (v: number, unit: GoalInfo['unit']) => unit === 'k' ? (v >= 1000 ? `${(v / 1000).toFixed(v % 1000 ? 1 : 0)}k` : String(Math.round(v))) : unit === 'pct' ? `${Math.round(v * 100)}%` : String(Math.round(v));
@@ -80,6 +85,7 @@ export const GOALS: GoalDef[] = [
     target: 2,
     cur: (s) => { const p = firstPair(s); return (reached(s, p.a) ? 1 : 0) + (reached(s, p.b) ? 1 : 0); },
     where: (s) => { const p = firstPair(s); return !reached(s, p.a) ? p.a : !reached(s, p.b) ? p.b : null; },
+    frame: (s) => { const p = firstPair(s); return { x: (p.a.x + p.b.x) / 2, y: (p.a.y + p.b.y) / 2, span: Math.hypot(p.a.x - p.b.x, p.a.y - p.b.y) }; },
   },
   { id: 'stations_4', track: 'network', unit: 'n', grant: 10, title: () => 'Open 4 stations', text: () => 'More stops put more homes within a walk of the metro. Extend the line or dig a second one.', target: 4, cur: stationsOpen },
   { id: 'second_line', track: 'network', unit: 'n', grant: 20, title: () => 'Open a second line', text: () => 'A second line reaches new streets and gives riders somewhere to change.', target: 2, cur: (s) => s.metro.lines.length },
@@ -137,7 +143,7 @@ export class GoalSystem {
       if (g.unlock === 'signals') { s.metro.speedMul = 1.2; s.unlocks.push('signals'); s.refreshTransit(); }
       if (g.unlock === 'atc') { s.metro.capMul = 1.25; s.unlocks.push('atc'); s.refreshTransit(); }
       const w = g.where?.(s);
-      s.moment('goal', `Goal reached: ${g.title(s)}`, `${this.rewardText(g)} paid into the city account.`, '#e0a526', w?.x ?? N / 2, w?.y ?? N / 2, true);
+      s.moment('goal', `Goal reached: ${g.title(s)}`, `${this.rewardText(g)} paid into the city account.`, '#e0a526', w?.x ?? N / 2, w?.y ?? N / 2, true, g.id);
       s.say(`Goal reached: ${g.title(s)} (${this.rewardText(g)})`);
     }
   }
@@ -147,7 +153,7 @@ export class GoalSystem {
     return this.active().map((g) => {
       const target = this.targetOf(g);
       const w = g.where?.(s);
-      return { id: g.id, track: g.track, title: g.title(s), text: g.text(s), cur: Math.min(g.cur(s), target), target, unit: g.unit, reward: this.rewardText(g), x: w?.x, y: w?.y };
+      return { id: g.id, track: g.track, title: g.title(s), text: g.text(s), cur: Math.min(g.cur(s), target), target, unit: g.unit, reward: this.rewardText(g), x: w?.x, y: w?.y, frame: g.frame?.(s) ?? undefined };
     });
   }
   /** how many goals are done, for the HUD */

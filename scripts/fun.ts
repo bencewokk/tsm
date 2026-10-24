@@ -131,6 +131,10 @@ for (const seed of seeds) {
   }
   if (showEvents) for (const l of a.evLog.slice(0, 14)) console.log('    ' + l);
   if (showEvents) for (const mo of a.sim.moments) console.log(`    moment m${mo.month} [${mo.kind}] ${mo.title}`);
+  {
+    const done = Object.entries(a.sim.goals.done).sort((x, y) => x[1] - y[1]);
+    console.log(`  goals reached in ${months} months: ${done.length} (${done.map(([id, mo]) => `${id}@m${mo}`).join(', ')}); headline moments (incl. goals): ${(a.sim as unknown as { momentSeq: number }).momentSeq}; open-line to first grant ${done.length ? done[0][1] - open : '-'} mo`);
+  }
   const decs = a.evLog.filter((l) => !/hazard|flood|landslide/i.test(l)).length;
   console.log(`  decisions (events) in ${months} months: ${a.evLog.length}; first at ${a.evLog[0]?.split(' ')[0] ?? 'none'}`);
 }

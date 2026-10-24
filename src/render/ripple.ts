@@ -32,6 +32,9 @@ export class Ripple {
 
   get active() { return this.t >= 0; }
 
+  /** end the sweep at once (capture helper) */
+  stop() { this.t = -1; this.mesh.visible = false; this.data.fill(0); this.tex.needsUpdate = true; }
+
   /** `now` / `prev`: catchment rasters (walk minutes x 10, 255 = out of reach). */
   start(now: Uint8Array, prev: Uint8Array | null, color: string, delay = 0) {
     const c = new THREE.Color(color);

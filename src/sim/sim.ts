@@ -257,7 +257,7 @@ export class Sim {
           this.lines0++;
           this.moment('open', `Line ${l.id} opens: ${sts[0].name} to ${sts[sts.length - 1].name}`,
             `${l.stations.length} stations over ${l.lengthKm.toFixed(1)} km. ${Math.round(homes).toLocaleString('en-US')} homes and ${Math.round(jobs).toLocaleString('en-US')} jobs now lie within an 8-minute walk of a station. Land values are already moving${first ? ': watch for cranes round the stations' : ''}.`,
-            l.color, hx, hy, true);
+            l.color, hx, hy, true, String(l.id));
         }
         break;
       }
@@ -507,8 +507,8 @@ export class Sim {
   }
 
   /** A headline-worthy event for the UI (toast / newspaper card / sound). Content is plain data, never random. */
-  moment(kind: Moment['kind'], title: string, text: string, color: string, x: number, y: number, big = false) {
-    this.moments.push({ seq: ++this.momentSeq, month: this.month, kind, title, text, color, x, y, big });
+  moment(kind: Moment['kind'], title: string, text: string, color: string, x: number, y: number, big = false, ref = '') {
+    this.moments.push({ seq: ++this.momentSeq, month: this.month, kind, title, text, color, x, y, big, ref });
     if (this.moments.length > 24) this.moments.shift();
   }
 
@@ -966,11 +966,11 @@ export class Sim {
       const first = m.station(l.stations[0]);
       if (!(f & 1) && l.riders > 0) {
         this.lineFlags.set(l.id, f | 1);
-        this.moment('riders', `Line ${l.id}: first riders`, `${Math.round(l.riders).toLocaleString('en-US')} trips a day at $${FARE} a fare is $${Math.round(l.riders * FARE * 30 / 1000)}k a month. Stations in busy streets earn more: watch where the riders come from.`, l.color, first?.x ?? 0, first?.y ?? 0, false);
+        this.moment('riders', `Line ${l.id}: first riders`, `${Math.round(l.riders).toLocaleString('en-US')} trips a day at $${FARE} a fare is $${Math.round(l.riders * FARE * 30 / 1000)}k a month. Stations in busy streets earn more: watch where the riders come from.`, l.color, first?.x ?? 0, first?.y ?? 0, false, String(l.id));
       }
       if (!(f & 2) && l.crowd > 1.05) {
         this.lineFlags.set(l.id, (this.lineFlags.get(l.id) ?? 0) | 2);
-        this.moment('crowd', `Line ${l.id} is overcrowded`, `Peak load is ${Math.round(l.crowd * 100)}% of capacity: platforms are packed and the rating is falling. Add trains with the + button, or open a parallel line.`, '#d9534f', first?.x ?? 0, first?.y ?? 0, false);
+        this.moment('crowd', `Line ${l.id} is overcrowded`, `Peak load is ${Math.round(l.crowd * 100)}% of capacity: platforms are packed and the rating is falling. Add trains with the + button, or open a parallel line.`, '#d9534f', first?.x ?? 0, first?.y ?? 0, false, String(l.id));
       }
     }
     // first tower beside a station
@@ -985,7 +985,7 @@ export class Sim {
         const k = m.sIndex.get(st.id);
         if (k === undefined || !this.walk[k] || this.walk[k][l.cell] > 8) continue;
         this.stationFlags.set(st.id, f | 2);
-        this.moment('tower', `A ${l.hgt} m tower tops out by ${st.name}`, `${this.month - st.opened} months after the station opened, ${l.type === BT.Res ? 'homes' : 'offices'} rise ${l.hgt} m above the street. Land beside a busy station is the most valuable in the city.`, '#8e5bb5', l.x, l.y, false);
+        this.moment('tower', `A ${l.hgt} m tower tops out by ${st.name}`, `${this.month - st.opened} months after the station opened, ${l.type === BT.Res ? 'homes' : 'offices'} rise ${l.hgt} m above the street. Land beside a busy station is the most valuable in the city.`, '#8e5bb5', l.x, l.y, false, String(st.id));
       }
     }
   }
@@ -1119,7 +1119,7 @@ export class Sim {
           const bs = this.boomStation(c.l.cell);
           if (bs && !((this.stationFlags.get(bs.id) ?? 0) & 1)) {
             this.stationFlags.set(bs.id, (this.stationFlags.get(bs.id) ?? 0) | 1);
-            this.moment('growth', `Cranes at ${bs.name}`, `The first new ${c.kind === BT.Res ? 'homes' : 'shops and offices'} are going up beside the station, ${this.month - this.metro.station(bs.id)!.opened} months after it opened.`, '#e0a526', c.l.x, c.l.y, false);
+            this.moment('growth', `Cranes at ${bs.name}`, `The first new ${c.kind === BT.Res ? 'homes' : 'shops and offices'} are going up beside the station, ${this.month - this.metro.station(bs.id)!.opened} months after it opened.`, '#e0a526', c.l.x, c.l.y, false, String(bs.id));
           }
         } else this[poolKey] -= add;
         taken.add(c.l.id); zoneOps[z]++; ops++;
