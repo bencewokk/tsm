@@ -1,0 +1,14 @@
+== seed 4821 coast/port month 96 pop 60048 (reserves + squarePressure)
+   deliberate open land (plots): large parks 3, green wedge 35, campus lawn 0, other parks 38; vacant plots left: 918 (503 in built-up land)
+   new squares: 2 (6 plots), nearest two 28.5 cells apart; shops among the plots within 2.5 cells of a new square: 72% vs 31% city-wide
+   66|Public square planned at a busy junction: 4 plots bought
+== seed 187 hills/rail-junction month 96 pop 41414 (reserves + squarePressure)
+   deliberate open land (plots): large parks 81, green wedge 39, campus lawn 5, other parks 26; vacant plots left: 1105 (501 in built-up land)
+   new squares: 3 (8 plots), nearest two 23.6 cells apart; shops among the plots within 2.5 cells of a new square: 24% vs 20% city-wide
+   66|Public square planned at a busy junction: 3 plots bought
+== seed 304 coast/planned-capital month 96 pop 75353 (reserves + squarePressure)
+   deliberate open land (plots): large parks 53, green wedge 15, campus lawn 9, other parks 48; vacant plots left: 1182 (921 in built-up land)
+   new squares: 1 (4 plots), nearest two -; shops among the plots within 2.5 cells of a new square: 13% vs 41% city-wide
+== seed 57 river/market-town month 96 pop 46886 (reserves + squarePressure)
+   deliberate open land (plots): large parks 34, green wedge 4, campus lawn 14, other parks 29; vacant plots left: 554 (434 in built-up land)
+   new squares: 1 (2 plots), nearest two -; shops among the plots within 2.5 cells of a new square: 50% vs 37% city-wide

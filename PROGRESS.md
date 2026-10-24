@@ -185,3 +185,8 @@ Numbers (`npm run towers`, 60 m+ towers standing (+ rising) at months 48 / 60 / 
 - No metro, all seeds: tallest stays 24-25 m at month 96 (an intermediate run without the field cap had a 50-55 m event building on 4821 and 304).
 Capture: screenshots/task5-towers-after-m60-4821.jpg (month 60, demo line; compare towers-after-m60-4821.jpg from the earlier tuning round).
 Still weak: 60 m+ towers appear from about month 55, i.e. 30 months after the line (assembly plus construction is 12-15 months by design); the best station plots are in the protected old core, so the first towers stand one ring out.
+
+## Round 5, task 5.2: squares rarely form (fixed)
+Cause: the yearly pressure evaluation found junctions above the threshold (pressure 0.36-0.51 for years, streaks of 4-5 on seed 187), but the spacing rule (9 cells) and the candidate filter counted every BT.Square plot, and towers and development projects leave small forecourt plazas all over the centre, so no new square was ever far enough from a "square". On 4821 every junction above the threshold was in the old core or in the docks, which were excluded for good.
+Fix (`squares.ts`): spacing is measured only against pressure squares (deco 5); once the docks project is done, the redeveloped docks district can get a square too (its built plots can be bought like any other). Threshold, hysteresis, streak and yearly cadence unchanged.
+Numbers (`npm run structure -- 96`, test line from month 24; docs/metrics/task5-structure-before.txt / -after.txt): new squares by month 96 on 4821 / 187 / 304 / 57: 0 / 0 / 1 / 0 -> 2 / 3 / 1 / 1; the nearest two are 28.5 cells (4821) and 23.6 cells (187) apart; shops among the plots within 2.5 cells of a new square 72% vs 31% city-wide on 4821 (24% vs 20% on 187).

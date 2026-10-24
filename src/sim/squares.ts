@@ -69,7 +69,8 @@ export function evaluateSquares(sim: Sim) {
   if (!SQ.on || sim.month < 18) return;
   const R = sim.roads, c = sim.town;
   const squares: [number, number][] = [];
-  for (const l of sim.lots.lots) if (l.alive && l.type === BT.Square) squares.push([l.x, l.y]);
+  // spacing is kept from other pressure squares (deco 5), not from the small forecourt plazas that towers and projects leave (those used to block every square)
+  for (const l of sim.lots.lots) if (l.alive && l.type === BT.Square && l.deco === 5) squares.push([l.x, l.y]);
   for (const a of sim.asm.list) if (a.kind === 'square' && a.phase >= 0) squares.push([a.quad[0], a.quad[1]]);
   let best: { node: number; p: number } | null = null;
   const seen = new Set<number>();
@@ -77,7 +78,9 @@ export function evaluateSquares(sim: Sim) {
     if (R.adj[n].length < 3) { sim.sqStreak.delete(n); continue; }
     const x = R.nx[n], y = R.ny[n];
     const i = Math.floor(y) * N + Math.floor(x);
-    if (sim.g.water[i] || (sim.g.flags[i] & (Flag.Steep | Flag.Flood | Flag.Docks)) || inCoreXY(c, x, y, 0.95)) continue;
+    // the redeveloped docks district may get its square once the project is done (while it is being built its plots are spoken for)
+    const docksOk = sim.docks.state === 'done';
+    if (sim.g.water[i] || (sim.g.flags[i] & (Flag.Steep | Flag.Flood)) || ((sim.g.flags[i] & Flag.Docks) && !docksOk) || inCoreXY(c, x, y, 0.95)) continue;
     const t = c.terr[i];
     if (t === T.Port || t === T.Industry || t === T.Workers) continue;
     const { pressure } = squarePressure(sim, n);
@@ -99,7 +102,8 @@ function carveSquare(sim: Sim, node: number, pressure: number) {
   const radius = 1.6 + size * 1.6;
   const cand: Lot[] = [];
   for (const l of sim.lots.near(x, y, radius + 0.8)) {
-    if (!sim.asm.ok(l) || l.back || l.type === BT.Landmark || sim.asm.cost(l) > 3) continue;
+    const docksLot = sim.docks.state === 'done' && (l.flags & Flag.Docks) && !(l.flags & Flag.Planned) && l.alive && !l.asm && !l.constr && !l.demo && !l.lm && l.type !== BT.Square && l.type !== BT.Park;
+    if (!(sim.asm.ok(l) || docksLot) || l.back || l.type === BT.Landmark || sim.asm.cost(l) > 3) continue;
     if (Math.hypot(l.x - x, l.y - y) > radius + 0.4) continue;
     cand.push(l);
   }
