@@ -27,6 +27,7 @@ const MEDIAN = new THREE.Color(0x93b076);
 const KERB = new THREE.Color(0xd9d5cb);
 
 const CHUNK = 16; // cells per chunk side (800 m)
+const DESIGN_BATCH = 6; // changed plots designed per queued step
 const MATS: Mat[] = ['wall', 'glass', 'plain', 'ghost', 'lamp'];
 
 /** One plot's slice of its chunk's merged geometry (vertex start / count per material), reused while the plot's signature holds. */
@@ -247,12 +248,14 @@ export class CityView {
    */
   update(s: StateMsg, budgetMs = Infinity) {
     if (this.pending) this.flush();
-    this.queue = []; this.names = []; this.qi = 0; this.staged = [];
+    this.queue = []; this.names = []; this.qi = 0; this.staged = []; this.designed.clear();
     if (s.roads.version !== this.roadVersion) { const r = s.roads; this.step('roads', () => { this.roadVersion = r.version; this.rebuildRoads(r); }); }
     this.rebuild(s);
     this.pump(budgetMs);
   }
 
+  /** plots designed ahead of their chunk's assembly step (lot id -> design), filled by the 'design' steps */
+  private designed = new Map<number, { sig: number; mb: MB; trees: Tree[]; recs: TreeRecs; box: Float64Array }>();
   private queue: (() => void)[] = [];
   private names: string[] = [];
   private qi = 0;
@@ -458,6 +461,12 @@ export class CityView {
       const ch = this.chunks.get(key);
       if (ch && ch.sig === sig) continue;
       const ks = members.get(key)!;
+      // the plots that changed are designed a few at a time in their own steps, then the chunk is assembled
+      const todo = ks.filter((k) => { const op = ch?.parts.get(L.id[k]); return !op || op.sig !== this.lotSig[k]; });
+      for (let i = 0; i < todo.length; i += DESIGN_BATCH) {
+        const batch = todo.slice(i, i + DESIGN_BATCH);
+        this.step('design', () => { for (const k of batch) this.designed.set(L.id[k], { sig: this.lotSig[k], ...this.designPart(L, k) }); });
+      }
       this.step('chunk', () => { this.buildChunk(key, sig, ks, s); this.treesDirty = true; });
     }
     for (const [key, ch] of this.chunks) if (!sigs.has(key)) this.staged.push(() => { this.disposeChunk(ch); this.chunks.delete(key); this.treesDirty = true; });
@@ -524,17 +533,10 @@ export class CityView {
       const id = L.id[k], sg = this.lotSig[k];
       const op = old?.parts.get(id);
       if (op && op.sig === sg) { entries.push({ id, sig: sg, from: op, mb: null, trees: op.trees, recs: op.recs, box: op.box }); this.stats.lotsReused++; continue; }
-      const mb = new MB(), trees: Tree[] = [], recs = noRecs();
-      this.designInto(L, k, mb, trees);
-      for (const t of trees) this.treeRec(recs, t.x, this.ground(t.x, t.z), t.z, t.size, t.h, t.pine, t.seed);
-      // the plot's bounds per material (min xyz, max xyz): chunk bounding spheres come from these, not from a pass over every vertex
-      const box = new Float64Array(MATS.length * 6);
-      MATS.forEach((m, mi) => {
-        const P = mb.acc[m].pos, o = mi * 6;
-        box[o] = box[o + 1] = box[o + 2] = Infinity; box[o + 3] = box[o + 4] = box[o + 5] = -Infinity;
-        for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { const v = P[i + a]; if (v < box[o + a]) box[o + a] = v; if (v > box[o + 3 + a]) box[o + 3 + a] = v; }
-      });
-      entries.push({ id, sig: sg, from: null, mb, trees, recs, box });
+      const pre = this.designed.get(id);
+      const d = pre && pre.sig === sg ? pre : this.designPart(L, k);
+      this.designed.delete(id);
+      entries.push({ id, sig: sg, from: null, mb: d.mb, trees: d.trees, recs: d.recs, box: d.box });
       this.stats.lotsDesigned++;
     }
     const parts = new Map<number, LotPart>();
@@ -589,6 +591,21 @@ export class CityView {
     }
     this.staged.push(() => { swap(); this.chunks.set(key, { sig, meshes, trees, recs, parts, geos }); });
     this.stats.chunksBuilt++;
+  }
+
+  /** Design one plot: its geometry, trees (as instance records) and bounds per material. */
+  private designPart(L: LotsMsg, k: number) {
+    const mb = new MB(), trees: Tree[] = [], recs = noRecs();
+    this.designInto(L, k, mb, trees);
+    for (const t of trees) this.treeRec(recs, t.x, this.ground(t.x, t.z), t.z, t.size, t.h, t.pine, t.seed);
+    // the plot's bounds per material (min xyz, max xyz): chunk bounding spheres come from these, not from a pass over every vertex
+    const box = new Float64Array(MATS.length * 6);
+    MATS.forEach((m, mi) => {
+      const P = mb.acc[m].pos, o = mi * 6;
+      box[o] = box[o + 1] = box[o + 2] = Infinity; box[o + 3] = box[o + 4] = box[o + 5] = -Infinity;
+      for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { const v = P[i + a]; if (v < box[o + a]) box[o + a] = v; if (v > box[o + 3 + a]) box[o + 3 + a] = v; }
+    });
+    return { mb, trees, recs, box };
   }
 
   /** Run the building designer for one plot into `mb` (its own trees into `trees`). */
