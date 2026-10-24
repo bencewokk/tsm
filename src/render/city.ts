@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { N, CELL, Flag, BT } from '../sim/constants';
 import type { StateMsg, LotsMsg, RoadsMsg } from '../sim/protocol';
 import type { Village } from '../sim/terrain';
@@ -75,6 +76,18 @@ export function vertexNormals(g: THREE.BufferGeometry) {
   g.setAttribute('normal', new THREE.BufferAttribute(Nm, 3));
 }
 
+/**
+ * The leaf crowns (icosahedra) as an indexed mesh: 12 shared vertices instead of 60, for both the main and the shadow pass. The tree
+ * material is flat shaded (face normals come from screen derivatives), so the shading is unchanged; the vertex normals, now radial,
+ * only steer the shadow normal bias.
+ */
+function indexedFlat(geo: THREE.BufferGeometry): THREE.BufferGeometry {
+  const g = geo.clone();
+  g.deleteAttribute('normal'); g.deleteAttribute('uv');
+  const m = mergeVertices(g, 1e-4);
+  m.computeVertexNormals();
+  return m;
+}
 const sameBytes = (a: Uint8Array, b: Uint8Array) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
 
 export class CityView {
@@ -144,7 +157,7 @@ export class CityView {
     this.scafMat = new THREE.LineBasicMaterial({ color: 0xb59b5f, transparent: true, opacity: 0.9 });
     const plainInst = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });
     this.L = {
-      leaf: new Layer(g.sphere, this.treeMat, 60000),
+      leaf: new Layer(indexedFlat(g.sphere), this.treeMat, 60000),
       pine: new Layer(g.cone, this.treeMat, 20000),
       trunk: new Layer(g.cyl, plainInst, 40000, false),
     };
