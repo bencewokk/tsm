@@ -600,23 +600,37 @@ function designChurch(c: Ctx) {
 
 function designYard(c: Ctx) {
   const { Q, r, mb, g } = c;
-  // vacant plot in a built-up area: it never reads as leftover land, it is kept as something. A kerbed lawn with trees,
-  // allotment beds with a shed, or a small car park (back yards are gravelled)
-  const kind = c.back ? 2 : r(2);
-  if (kind < 0.5) {
+  // vacant plot in a built-up area: it never reads as leftover land, it is kept as something, and nothing here looks like a car park
+  // (the old car-park variant and the gravelled back yards read as parking lots all over the city):
+  // a kerbed pocket lawn with trees, allotment beds with a shed, a courtyard garden behind the street (back rows), or a fenced
+  // building plot waiting for a developer (rough meadow, post-and-rail fence, a sign board at the front)
+  const kind = c.back ? 0.9 : r(2);
+  if (kind < 0.42) {
     pad(c, GROUND.yard, 0.5, 0.18);
     edging(c, 0xdad5c8, 0, 0.35);
-    const n = Math.floor(r(1) * (1 + 3 * c.prof.yardChance));
+    const n = 1 + Math.floor(r(1) * (1 + 3 * c.prof.yardChance));
     for (let i = 0; i < n; i++) tree(c, Q.at(0.2 + r(10 + i) * 0.6, 0.2 + r(20 + i) * 0.6), 5 + r(30 + i) * 3, 40 + i);
-  } else if (kind < 0.78) {
+  } else if (kind < 0.7) {
     pad(c, 0xb8c79a, 0.4, 0.2);
     edging(c, 0x8a7a5e, 0, 0.7);
     for (let k = 0; k < 6; k++) mb.prism('plain', Q.strip(0.12, 0.78, 0.14 + k * 0.12, 0.14 + k * 0.12 + 0.07), g + 0.2, g + 0.55, k % 2 ? 0x7e9a5e : 0x6d5a45, k % 2 ? 0x7e9a5e : 0x6d5a45);
     mb.prism('plain', Q.strip(0.82, 0.94, 0.1, 0.24), g + 0.2, g + 2.6, 0xb59a74, 0x8a6a4a);
+  } else if (c.back) {
+    // courtyard garden: lawn quarters on a cross of pale paths, a tree in the middle, a hedge round it
+    pad(c, 0xa9c08a, 0.4, 0.2);
+    edging(c, 0, 0x6f8f55, 1.1);
+    mb.prism('plain', Q.strip(0.46, 0.54, 0.06, 0.94), g + 0.2, g + 0.3, 0xe3dccb, 0xe3dccb);
+    mb.prism('plain', Q.strip(0.06, 0.94, 0.46, 0.54), g + 0.2, g + 0.3, 0xe3dccb, 0xe3dccb);
+    tree(c, Q.centre(), 6 + r(3) * 2.5, 41);
   } else {
-    pad(c, 0x9d9f9f, 0.3, 0.25);
-    edging(c, 0xd9d4c6, 0, 0.5);
-    for (let k = 0; k < 6; k++) mb.prism('plain', Q.strip(0.1 + k * 0.14, 0.1 + k * 0.14 + 0.012, 0.15, 0.85), g + 0.25, g + 0.32, 0xe9e9e4, 0xe9e9e4);
+    // building plot for sale: rough meadow inside a timber post-and-rail fence, a sign board facing the street
+    pad(c, 0xc4c98e, 0.35, 0.2);
+    for (const [s0, s1, t0, t1] of [[0.03, 0.97, 0.03, 0.045], [0.03, 0.97, 0.955, 0.97], [0.03, 0.045, 0.03, 0.97], [0.955, 0.97, 0.03, 0.97]] as [number, number, number, number][]) mb.prism('plain', Q.strip(s0, s1, t0, t1), g + 0.9, g + 1.15, 0x9a7b55, 0x9a7b55);
+    for (let k = 0; k <= 6; k++) for (const t of [0.037, 0.962]) mb.prism('plain', Q.strip(0.03 + k * 0.157, 0.045 + k * 0.157, t - 0.008, t + 0.008), g, g + 1.3, 0x7d6244, 0x7d6244);
+    for (const s of [0.4, 0.6]) mb.prism('plain', Q.strip(s - 0.01, s + 0.01, 0.1, 0.115), g, g + 2.8, 0x6b5a48, 0x6b5a48);
+    mb.prism('plain', Q.strip(0.37, 0.63, 0.1, 0.118), g + 1.6, g + 3.3, 0xf1ece0, 0xc9572f);
+    // a few tufts of scrub
+    for (let i = 0; i < 3; i++) { const p = Q.at(0.2 + r(50 + i) * 0.6, 0.35 + r(60 + i) * 0.5); mb.prism('plain', circle(p[0], p[1], 1.6 + r(70 + i), 6), g + 0.2, g + 1.0, 0x9aa86a, 0x9aa86a); }
   }
 }
 
