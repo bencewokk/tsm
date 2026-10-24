@@ -245,7 +245,7 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
 
   return {
     mesh, water, heat, heatTex, material, waterMat, catchment, contours, zones, paper, skirt,
-    setPaper(a: number) { paper.visible = a > 0.01; paperMat.opacity = a; waterMat.color.set('#ffffff').lerp(new THREE.Color('#e6eef0'), a * 0.7); },
+    setPaper(a: number) { paper.visible = a > 0.01; paperMat.opacity = a; waterMat.color.copy(WHITE).lerp(PAPER_WATER, a * 0.7); },   // every frame: no allocations
     setZones(terr: Uint8Array, w: Uint8Array) {
       for (let i = 0; i < N * N; i++) {
         const t = terr[i], c = T_COLORS[t] ?? [0, 0, 0];
@@ -278,6 +278,8 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   };
 }
 
+
+const WHITE = new THREE.Color('#ffffff'), PAPER_WATER = new THREE.Color('#e6eef0');
 
 // ------------------------------------------------------------------ textures
 const noise2 = (x: number, y: number) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
