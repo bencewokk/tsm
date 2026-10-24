@@ -52,6 +52,12 @@ export class LandmarkSystem {
     if (def.needs?.hill) site = 'hill';
     else if (def.needs?.water) site = 'water';
     const out: [number, number][] = [];
+    // the university is sited on the edge of the campus lawn the city reserved for it (reserves.ts, deco 3), whichever site was chosen
+    if (def.id === 'university') {
+      let cx = 0, cy = 0, n = 0;
+      for (let i = 0; i < N * N; i++) if (s.reserve[i] === 3) { cx += (i % N) + 0.5; cy += ((i / N) | 0) + 0.5; n++; }
+      if (n) out.push([cx / n, cy / n]);
+    }
     if (site === 'centre') { out.push([o.x, o.y]); for (const d of s.town.districts.slice(1, 3)) out.push([d.x, d.y]); }
     else if (site === 'station') {
       const st = s.metro.stations.slice().sort((a, b) => b.riders - a.riders).slice(0, 3);
