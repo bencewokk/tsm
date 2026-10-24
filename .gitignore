@@ -2,3 +2,11 @@ node_modules
 dist
 
 screenshots/*.png
+.claude/worktrees/
+.env
+.env.*
+*.pem
+*.key
+*.log
+.DS_Store
+Thumbs.db
