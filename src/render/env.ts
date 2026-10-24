@@ -58,7 +58,7 @@ export class Env {
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff6e8, 2.4);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(4096, 4096);
+    this.sun.shadow.mapSize.set(2048, 2048);   // frustum, bias and radius are fitted every frame by SunShadow (shadows.ts)
     const sc = this.sun.shadow.camera;
     sc.left = -MAP * 0.75; sc.right = MAP * 0.75; sc.top = MAP * 0.75; sc.bottom = -MAP * 0.75;
     sc.near = 100; sc.far = 16000;

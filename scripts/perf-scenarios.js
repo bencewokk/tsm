@@ -145,6 +145,10 @@ window.__shots = async (tag) => {
   reset();
   tsm.phase(0.05); tsm.view(cx, cy, 5200, 0.6, 0.85); await shot('overview-day');
   tsm.phase(0.86); tsm.view(cx, cy, 5200, 0.6, 0.85); await shot('overview-night');
+  tsm.phase(0.70); tsm.view(cx, cy, 5200, 0.6, 0.85); await shot('overview-evening');
+  tsm.phase(0.735); tsm.view(cx, cy, 5200, 0.6, 0.85); await shot('overview-dusk');
+  tsm.phase(0.70); tsm.view(o.x, o.y, 520, 0.6, 1.05); await shot('street-evening');
+  tsm.phase(0.735); tsm.view(o.x, o.y, 520, 0.6, 1.05); await shot('street-dusk');
   tsm.phase(0.05); tsm.view(o.x, o.y, 520, 0.6, 1.05); await shot('street-day');
   tsm.phase(0.05); tsm.view(cx, cy, 2400, 1.2, 0.95); await shot('mid-day');
   tsm.view(cx, cy, 5200, 0.6, 0.85); tsm.hud.toggle('xray', true); await shot('overview-xray'); tsm.hud.toggle('xray', false);
