@@ -17,7 +17,8 @@
     "zones": "tsx scripts/zones.ts",
     "structure": "tsx scripts/structure.ts",
     "satellites": "tsx scripts/satellites.ts",
-    "bench": "node --expose-gc --import tsx scripts/bench.ts"
+    "bench": "node --expose-gc --import tsx scripts/bench.ts",
+    "parity": "tsx scripts/parity.ts"
   },
   "dependencies": {
     "three": "^0.186.1"
