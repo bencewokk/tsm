@@ -2,10 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { HorizontalTiltShiftShader } from 'three/examples/jsm/shaders/HorizontalTiltShiftShader.js';
-import { VerticalTiltShiftShader } from 'three/examples/jsm/shaders/VerticalTiltShiftShader.js';
 import { MAP, VS } from './common';
 import { strataTexture } from './terrain';
 
@@ -19,16 +16,27 @@ export class Env {
   /** 0 = noon, 0.5 = midnight; advanced by the caller */
   timeOfDay = 0.16;
   night = 0; // 0..1 derived
-  tilt = false;
+  /**
+   * The scene renders into a linear half-float target and one output pass tone-maps it to the screen, so transparent layers (metro
+   * ribbons, paper, water, ghost blocks) blend in linear light as they always have. Dev only: false renders straight to the canvas
+   * (cheaper, but those layers blend after tone mapping and read paler).
+   */
+  linear = true;
   private composer: EffectComposer;
-  private hblur: ShaderPass;
-  private vblur: ShaderPass;
+  /**
+   * Render scale of the 3D scene (1 = full canvas resolution): the scene target is smaller and the output pass upscales it. Below 1 the
+   * map labels (`addText`) move to an overlay drawn afterwards at full resolution, so text stays sharp; the HUD is HTML anyway.
+   */
+  scale = 1;
+  overlay = new THREE.Scene();
+  private texts: THREE.Object3D[] = [];
   private daySky = new THREE.Color('#e9eef0');
   private duskSky = new THREE.Color('#e8cdb8');
   private nightSky = new THREE.Color('#1a2233');
 
   constructor(container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+    // no MSAA on the canvas: the image comes from the output pass (a full-screen quad), the scene target has no MSAA either
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = true;
@@ -57,7 +65,7 @@ export class Env {
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff6e8, 2.4);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(4096, 4096);
+    this.sun.shadow.mapSize.set(2048, 2048);   // frustum, bias and radius are fitted every frame by SunShadow (shadows.ts)
     const sc = this.sun.shadow.camera;
     sc.left = -MAP * 0.75; sc.right = MAP * 0.75; sc.top = MAP * 0.75; sc.bottom = -MAP * 0.75;
     sc.near = 100; sc.far = 16000;
@@ -81,34 +89,36 @@ export class Env {
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.hblur = new ShaderPass(HorizontalTiltShiftShader);
-    this.vblur = new ShaderPass(VerticalTiltShiftShader);
-    this.composer.addPass(this.hblur);
-    this.composer.addPass(this.vblur);
     this.composer.addPass(new OutputPass());
-    this.sizeBlur();
 
     window.addEventListener('resize', () => {
       this.camera.aspect = container.clientWidth / container.clientHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(container.clientWidth, container.clientHeight);
       this.composer.setSize(container.clientWidth, container.clientHeight);
-      this.sizeBlur();
     });
     this.applyTime();
   }
 
-  private sizeBlur() {
-    const w = this.renderer.domElement.width, h = this.renderer.domElement.height;
-    this.hblur.uniforms.h.value = 2.2 / w;
-    this.vblur.uniforms.v.value = 2.2 / h;
-    this.hblur.uniforms.r.value = 0.5;
-    this.vblur.uniforms.r.value = 0.5;
+  render() {
+    if (this.linear) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
+    if (this.overlay.children.length) {
+      const r = this.renderer, ac = r.autoClear;
+      r.autoClear = false;
+      r.render(this.overlay, this.camera);
+      r.autoClear = ac;
+    }
   }
 
-  render() {
-    if (this.tilt) this.composer.render();
-    else this.renderer.render(this.scene, this.camera);
+  /** Text that should stay sharp at any render scale (map labels). */
+  addText(o: THREE.Object3D) { this.texts.push(o); (this.scale < 1 ? this.overlay : this.scene).add(o); }
+
+  setScale(s: number) {
+    if (s === this.scale) return;
+    this.scale = s;
+    this.composer.setPixelRatio(this.renderer.getPixelRatio() * s);
+    for (const o of this.texts) (s < 1 ? this.overlay : this.scene).add(o);
   }
 
   focus(x: number, z: number, dist: number) {

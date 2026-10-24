@@ -21,7 +21,9 @@
     "catch": "tsx scripts/catch.ts",
     "events": "tsx scripts/events.ts",
     "suburb": "tsx scripts/suburb.ts",
-    "hazards": "tsx scripts/hazards.ts"
+    "hazards": "tsx scripts/hazards.ts",
+    "bench": "node --expose-gc --import tsx scripts/bench.ts",
+    "parity": "tsx scripts/parity.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

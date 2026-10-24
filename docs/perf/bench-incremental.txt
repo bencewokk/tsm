@@ -1,0 +1,101 @@
+
+> tidewater-transit-demo@0.1.0 bench
+> node --expose-gc --import tsx scripts/bench.ts --ab --json docs/perf/bench-incremental.json
+
+seed 4821 none m 12  tick   27.7 ms  snap 2.2 clone 0.4 msg 307 KB  apply 34.1 ms (reference 195.9 ms) (12.3 chunks/tick, 533k tris, 106 meshes)  heap 25 MB buffers 116 MB  pop 8561 lots 2062 edges 247
+      construction 0.2  assemblies 0.1  aggregate 13.9  traffic 4.0  catchments 0.1  trips 1.7  growth 4.6  roads 1.4  events 0.1  other 1.5
+      apply: buildChunk 14.7, rebuildRoads 6.5, rebuildGrows 5.3, designInto 2.7, stampLots 2.2, other 1.2, wildTrees 0.9, rebuildTrees 0.5, animate 0.1, rebuildSites 0.0
+      top: field.update 10.2, grow 4.4, computeDriveTimes 3.9, computeLandValue 2.2, computeRiders 1.7, aggregate 1.5
+seed 4821 none m 60  tick   15.3 ms  snap 1.1 clone 0.4 msg 307 KB  apply 20.6 ms (reference 120.5 ms) (7.2 chunks/tick, 530k tris, 180 meshes)  heap 27 MB buffers 81 MB  pop 19966 lots 2056 edges 276
+      construction 0.1  assemblies 0.1  aggregate 8.5  traffic 3.0  catchments 0.1  trips 0.5  growth 1.8  roads 0.6  events 0.1  other 0.7
+      apply: buildChunk 9.4, rebuildGrows 5.2, rebuildRoads 1.7, designInto 1.2, stampLots 0.8, wildTrees 0.8, other 0.7, rebuildTrees 0.5, rebuildSites 0.2, animate 0.1, treeAt 0.0
+      top: field.update 6.6, computeDriveTimes 2.9, grow 1.7, computeLandValue 1.3, other 0.7, aggregate 0.6
+seed 4821 none m120  tick   15.1 ms  snap 1.4 clone 0.4 msg 315 KB  apply 17.0 ms (reference 65.7 ms) (4.7 chunks/tick, 591k tris, 77 meshes)  heap 28 MB buffers 87 MB  pop 28228 lots 2117 edges 345
+      construction 0.1  assemblies 0.1  aggregate 8.7  traffic 2.8  catchments 0.1  trips 1.0  growth 0.9  roads 1.1  events 0.1  other 0.4
+      apply: rebuildRoads 6.8, buildChunk 3.7, rebuildSites 1.9, stampLots 1.6, rebuildGrows 0.8, wildTrees 0.7, other 0.7, rebuildTrees 0.6, designInto 0.3, animate 0.0, treeAt 0.0
+      top: field.update 7.1, computeDriveTimes 2.7, computeLandValue 1.2, extendRoads 1.1, computeRiders 1.0, grow 0.8
+seed 4821 none m240  tick   14.4 ms  snap 2.2 clone 0.4 msg 338 KB  apply 31.4 ms (reference 140.9 ms) (6.8 chunks/tick, 658k tris, 94 meshes)  heap 30 MB buffers 97 MB  pop 37761 lots 2345 edges 493
+      construction 0.1  assemblies 0.1  aggregate 7.9  traffic 2.9  catchments 0.1  trips 0.7  growth 0.9  roads 1.2  events 0.0  other 0.5
+      apply: buildChunk 15.2, rebuildRoads 8.8, stampLots 2.1, rebuildGrows 1.7, designInto 0.9, other 0.8, wildTrees 0.7, rebuildSites 0.6, rebuildTrees 0.6, animate 0.0, treeAt 0.0
+      top: field.update 5.9, computeDriveTimes 2.9, computeLandValue 1.4, extendRoads 1.2, grow 0.9, computeRiders 0.7
+seed 4821 line m 12  tick   41.5 ms  snap 4.1 clone 0.5 msg 308 KB  apply 17.5 ms (reference 120.8 ms) (5.8 chunks/tick, 526k tris, 65 meshes)  heap 26 MB buffers 83 MB  pop 8029 lots 2061 edges 244
+      construction 0.2  assemblies 0.1  aggregate 21.3  traffic 5.7  catchments 1.9  trips 1.2  growth 7.0  roads 1.3  events 0.1  other 2.6
+      apply: buildChunk 6.6, rebuildRoads 4.1, rebuildGrows 2.5, designInto 1.3, stampLots 1.2, wildTrees 0.7, other 0.6, rebuildTrees 0.4, rebuildSites 0.0, animate 0.0
+      top: field.update 17.0, grow 6.7, computeDriveTimes 5.5, other 2.6, computeLandValue 2.4, aggregate 1.9
+seed 4821 line m 60  tick   18.2 ms  snap 2.5 clone 0.4 msg 319 KB  apply 25.0 ms (reference 138.6 ms) (7.0 chunks/tick, 548k tris, 87 meshes)  heap 26 MB buffers 85 MB  pop 21011 lots 2182 edges 272
+      construction 0.1  assemblies 0.1  aggregate 8.0  traffic 2.9  catchments 1.4  trips 0.7  growth 3.8  roads 0.6  events 0.1  other 0.5
+      apply: buildChunk 13.5, rebuildRoads 2.6, rebuildSites 2.2, rebuildGrows 1.7, designInto 1.5, stampLots 1.5, wildTrees 0.7, other 0.7, rebuildTrees 0.4, animate 0.0, treeAt 0.0
+      top: field.update 6.3, grow 3.7, computeDriveTimes 2.8, computeLandValue 1.3, computeWalkFields 1.0, computeRiders 0.7
+seed 4821 line m120  tick   17.9 ms  snap 2.2 clone 0.4 msg 329 KB  apply 34.2 ms (reference 161.4 ms) (7.0 chunks/tick, 592k tris, 152 meshes)  heap 28 MB buffers 101 MB  pop 58316 lots 2251 edges 307
+      construction 0.1  assemblies 0.1  aggregate 7.9  traffic 2.7  catchments 1.7  trips 0.8  growth 3.3  roads 0.7  events 0.0  other 0.5
+      apply: buildChunk 11.1, rebuildRoads 6.2, rebuildSites 5.6, designInto 4.1, rebuildGrows 3.2, stampLots 2.0, other 0.7, wildTrees 0.7, rebuildTrees 0.5, animate 0.0, treeAt 0.0
+      top: field.update 6.0, grow 3.1, computeDriveTimes 2.7, computeLandValue 1.4, computeWalkFields 1.3, computeRiders 0.8
+seed 4821 line m240  tick   22.7 ms  snap 2.4 clone 0.7 msg 343 KB  apply 36.6 ms (reference 180.6 ms) (7.7 chunks/tick, 700k tris, 142 meshes)  heap 31 MB buffers 101 MB  pop 128618 lots 2391 edges 340
+      construction 0.1  assemblies 0.2  aggregate 9.0  traffic 2.8  catchments 3.2  trips 1.8  growth 3.2  roads 1.7  events 0.0  other 0.6
+      apply: buildChunk 14.6, rebuildRoads 7.4, rebuildSites 5.4, designInto 3.0, rebuildGrows 2.4, stampLots 1.6, other 0.8, wildTrees 0.7, rebuildTrees 0.7, animate 0.0, treeAt 0.0
+      top: field.update 6.8, grow 3.1, computeDriveTimes 2.8, computeWalkFields 2.7, computeRiders 1.8, extendRoads 1.6
+seed 187 none m 12  tick   29.5 ms  snap 2.0 clone 0.4 msg 331 KB  apply 39.4 ms (reference 168.3 ms) (10.2 chunks/tick, 614k tris, 140 meshes)  heap 29 MB buffers 93 MB  pop 10856 lots 2310 edges 432
+      construction 0.1  assemblies 0.1  aggregate 19.0  traffic 4.4  catchments 0.1  trips 0.7  growth 2.9  roads 0.8  events 0.1  other 1.5
+      apply: buildChunk 14.1, rebuildRoads 9.5, rebuildGrows 5.3, designInto 4.4, stampLots 2.5, other 2.2, wildTrees 0.8, rebuildTrees 0.5, animate 0.0, rebuildSites 0.0
+      top: field.update 17.1, computeDriveTimes 4.4, grow 2.8, other 1.5, computeLandValue 1.4, extendRoads 0.8
+seed 187 none m 60  tick   25.1 ms  snap 2.1 clone 0.4 msg 333 KB  apply 23.8 ms (reference 135.2 ms) (9.5 chunks/tick, 626k tris, 170 meshes)  heap 29 MB buffers 99 MB  pop 24136 lots 2309 edges 477
+      construction 0.1  assemblies 0.1  aggregate 18.5  traffic 3.0  catchments 0.1  trips 0.6  growth 1.8  roads 0.4  events 0.1  other 0.6
+      apply: buildChunk 12.5, rebuildGrows 4.8, stampLots 2.0, designInto 1.5, rebuildSites 0.9, wildTrees 0.9, other 0.7, rebuildTrees 0.5, animate 0.0, rebuildRoads 0.0, treeAt 0.0
+      top: field.update 16.6, computeDriveTimes 2.9, grow 1.7, computeLandValue 1.5, other 0.6, computeRiders 0.6
+seed 187 none m120  tick   27.0 ms  snap 2.4 clone 0.5 msg 356 KB  apply 28.5 ms (reference 144.2 ms) (7.5 chunks/tick, 723k tris, 171 meshes)  heap 31 MB buffers 97 MB  pop 51359 lots 2560 edges 579
+      construction 0.1  assemblies 0.1  aggregate 18.8  traffic 3.0  catchments 0.1  trips 0.8  growth 1.6  roads 1.3  events 0.5  other 0.6
+      apply: buildChunk 10.4, rebuildRoads 8.8, rebuildGrows 3.8, stampLots 1.4, designInto 1.1, wildTrees 0.8, other 0.8, rebuildSites 0.7, rebuildTrees 0.7, animate 0.0, treeAt 0.0
+      top: field.update 16.7, computeDriveTimes 3.0, grow 1.5, computeLandValue 1.5, extendRoads 1.3, computeRiders 0.8
+seed 187 none m240  tick   29.8 ms  snap 2.4 clone 0.7 msg 370 KB  apply 7.9 ms (reference 51.8 ms) (1.5 chunks/tick, 769k tris, 111 meshes)  heap 32 MB buffers 102 MB  pop 58323 lots 2681 edges 683
+      construction 0.2  assemblies 0.1  aggregate 19.5  traffic 4.6  catchments 0.1  trips 1.3  growth 1.1  roads 1.4  events 0.5  other 1.1
+      apply: buildChunk 2.1, stampLots 1.2, rebuildSites 1.1, other 1.0, rebuildTrees 0.9, wildTrees 0.9, rebuildGrows 0.6, designInto 0.1, animate 0.0, rebuildRoads 0.0, treeAt 0.0
+      top: field.update 16.1, computeDriveTimes 4.5, computeLandValue 2.5, extendRoads 1.4, computeRiders 1.3, grow 1.1
+seed 187 line m 12  tick   33.5 ms  snap 2.5 clone 0.6 msg 334 KB  apply 42.3 ms (reference 215.8 ms) (9.7 chunks/tick, 624k tris, 127 meshes)  heap 28 MB buffers 90 MB  pop 11022 lots 2335 edges 433
+      construction 0.1  assemblies 0.1  aggregate 19.4  traffic 3.7  catchments 1.5  trips 1.5  growth 4.6  roads 1.8  events 0.1  other 0.8
+      apply: rebuildRoads 12.5, buildChunk 11.1, rebuildGrows 7.9, stampLots 3.1, designInto 3.1, other 2.7, wildTrees 1.2, rebuildTrees 0.6, animate 0.1, rebuildSites 0.0
+      top: field.update 16.6, grow 4.5, computeDriveTimes 3.6, computeLandValue 2.2, computeRiders 1.5, extendRoads 1.1
+seed 187 line m 60  tick   29.5 ms  snap 3.1 clone 0.6 msg 344 KB  apply 26.0 ms (reference 223.8 ms) (7.8 chunks/tick, 655k tris, 172 meshes)  heap 30 MB buffers 93 MB  pop 24932 lots 2428 edges 468
+      construction 0.1  assemblies 0.1  aggregate 17.5  traffic 4.1  catchments 0.6  trips 1.2  growth 4.2  roads 0.6  events 0.4  other 0.7
+      apply: buildChunk 13.6, rebuildGrows 5.7, rebuildSites 1.9, designInto 1.5, wildTrees 1.1, other 0.9, rebuildTrees 0.8, stampLots 0.5, animate 0.1, rebuildRoads 0.0, treeAt 0.0
+      top: field.update 14.8, grow 4.1, computeDriveTimes 4.1, computeLandValue 2.0, computeRiders 1.2, other 0.7
+seed 187 line m120  tick   31.2 ms  snap 3.3 clone 0.8 msg 361 KB  apply 43.7 ms (reference 176.2 ms) (7.3 chunks/tick, 733k tris, 165 meshes)  heap 32 MB buffers 99 MB  pop 50848 lots 2623 edges 552
+      construction 0.2  assemblies 0.1  aggregate 19.0  traffic 3.9  catchments 1.5  trips 2.0  growth 1.6  roads 2.1  events 0.1  other 0.8
+      apply: buildChunk 17.0, rebuildRoads 10.9, stampLots 5.0, rebuildGrows 3.3, designInto 3.1, rebuildSites 1.3, wildTrees 1.0, other 1.0, rebuildTrees 0.9, animate 0.0, treeAt 0.0
+      top: field.update 15.3, computeDriveTimes 3.9, computeLandValue 2.9, extendRoads 2.0, computeRiders 2.0, grow 1.5
+seed 187 line m240  tick   27.5 ms  snap 3.1 clone 0.6 msg 395 KB  apply 51.1 ms (reference 264.3 ms) (10.3 chunks/tick, 830k tris, 182 meshes)  heap 34 MB buffers 116 MB  pop 119032 lots 2952 edges 637
+      construction 0.2  assemblies 0.2  aggregate 13.2  traffic 3.2  catchments 3.6  trips 2.1  growth 2.0  roads 1.8  events 0.1  other 1.0
+      apply: buildChunk 20.6, rebuildRoads 15.7, rebuildSites 4.2, stampLots 3.5, rebuildGrows 2.3, designInto 1.9, other 1.0, wildTrees 0.9, rebuildTrees 0.8, animate 0.0, treeAt 0.0
+      top: field.update 10.4, computeDriveTimes 3.1, computeWalkFields 3.1, computeRiders 2.1, computeLandValue 2.0, grow 2.0
+seed 304 none m 12  tick   32.3 ms  snap 3.1 clone 0.9 msg 320 KB  apply 40.5 ms (reference 201.9 ms) (6.7 chunks/tick, 520k tris, 103 meshes)  heap 27 MB buffers 84 MB  pop 10932 lots 2219 edges 284
+      construction 0.1  assemblies 0.1  aggregate 17.8  traffic 5.1  catchments 0.1  trips 0.7  growth 5.7  roads 1.0  events 0.1  other 1.5
+      apply: buildChunk 12.7, rebuildRoads 10.5, stampLots 4.5, other 4.4, rebuildGrows 4.2, designInto 2.2, wildTrees 1.3, rebuildTrees 0.7, animate 0.0, rebuildSites 0.0
+      top: field.update 14.7, grow 5.5, computeDriveTimes 5.1, computeLandValue 2.4, other 1.5, extendRoads 1.0
+seed 304 none m 60  tick   15.8 ms  snap 1.1 clone 0.4 msg 333 KB  apply 21.4 ms (reference 87.6 ms) (8.2 chunks/tick, 553k tris, 135 meshes)  heap 28 MB buffers 88 MB  pop 22795 lots 2355 edges 340
+      construction 0.1  assemblies 0.0  aggregate 8.8  traffic 3.6  catchments 0.1  trips 0.5  growth 1.8  roads 0.4  events 0.1  other 0.5
+      apply: buildChunk 8.4, rebuildRoads 4.5, stampLots 2.6, rebuildGrows 2.6, designInto 0.8, other 0.7, wildTrees 0.6, rebuildSites 0.6, rebuildTrees 0.5, animate 0.0, treeAt 0.0
+      top: field.update 7.1, computeDriveTimes 3.6, grow 1.7, computeLandValue 1.2, other 0.5, aggregate 0.5
+seed 304 none m120  tick   15.0 ms  snap 1.3 clone 0.4 msg 349 KB  apply 20.9 ms (reference 101.3 ms) (6.8 chunks/tick, 669k tris, 114 meshes)  heap 31 MB buffers 91 MB  pop 45506 lots 2530 edges 396
+      construction 0.1  assemblies 0.1  aggregate 8.8  traffic 2.8  catchments 0.1  trips 0.8  growth 0.8  roads 1.0  events 0.1  other 0.5
+      apply: buildChunk 7.5, rebuildRoads 4.5, rebuildGrows 2.9, stampLots 1.7, rebuildSites 1.7, other 0.7, rebuildTrees 0.7, designInto 0.7, wildTrees 0.6, animate 0.0, treeAt 0.0
+      top: field.update 6.9, computeDriveTimes 2.8, computeLandValue 1.3, extendRoads 1.0, computeRiders 0.8, grow 0.7
+seed 304 none m240  tick   52.8 ms  snap 5.0 clone 1.2 msg 361 KB  apply 15.0 ms (reference 136.3 ms) (2.3 chunks/tick, 715k tris, 81 meshes)  heap 32 MB buffers 120 MB  pop 44040 lots 2648 edges 435
+      construction 0.2  assemblies 0.2  aggregate 33.6  traffic 9.3  catchments 0.1  trips 2.7  growth 2.3  roads 2.7  events 0.2  other 1.5
+      apply: buildChunk 6.9, wildTrees 2.1, rebuildTrees 2.1, other 1.8, rebuildGrows 1.2, designInto 0.9, rebuildSites 0.0, animate 0.0, rebuildRoads 0.0, stampLots 0.0, treeAt 0.0
+      top: field.update 27.2, computeDriveTimes 9.2, computeLandValue 4.9, computeRiders 2.7, extendRoads 2.7, grow 2.2
+seed 304 line m 12  tick   29.5 ms  snap 2.5 clone 0.6 msg 325 KB  apply 21.7 ms (reference 99.5 ms) (4.8 chunks/tick, 535k tris, 67 meshes)  heap 27 MB buffers 88 MB  pop 9853 lots 2273 edges 287
+      construction 0.1  assemblies 0.0  aggregate 11.7  traffic 3.3  catchments 3.3  trips 1.6  growth 6.8  roads 1.3  events 0.8  other 0.5
+      apply: buildChunk 7.5, rebuildRoads 5.9, stampLots 2.7, designInto 2.3, other 0.7, wildTrees 0.7, rebuildSites 0.7, rebuildGrows 0.6, rebuildTrees 0.4, animate 0.0
+      top: field.update 8.9, grow 6.0, computeDriveTimes 3.3, computeLandValue 2.4, computeWalkFields 1.8, computeRiders 1.6
+seed 304 line m 60  tick   21.0 ms  snap 2.1 clone 0.4 msg 342 KB  apply 27.3 ms (reference 94.4 ms) (6.2 chunks/tick, 564k tris, 138 meshes)  heap 29 MB buffers 96 MB  pop 32876 lots 2421 edges 336
+      construction 0.1  assemblies 0.1  aggregate 8.5  traffic 2.7  catchments 2.8  trips 0.9  growth 3.8  roads 0.7  events 1.0  other 0.5
+      apply: rebuildRoads 7.6, buildChunk 6.0, rebuildSites 4.5, rebuildGrows 2.6, stampLots 2.5, designInto 2.4, other 0.8, wildTrees 0.6, rebuildTrees 0.4, animate 0.0, treeAt 0.0
+      top: field.update 6.9, grow 3.6, computeDriveTimes 2.7, computeWalkFields 1.8, computeLandValue 1.2, checkEvents 1.0
+seed 304 line m120  tick   38.8 ms  snap 4.3 clone 0.6 msg 372 KB  apply 60.5 ms (reference 264.6 ms) (12.2 chunks/tick, 653k tris, 343 meshes)  heap 33 MB buffers 106 MB  pop 80976 lots 2724 edges 381
+      construction 0.2  assemblies 0.2  aggregate 16.4  traffic 4.2  catchments 5.3  trips 2.4  growth 7.6  roads 1.0  events 0.6  other 1.0
+      apply: buildChunk 17.2, rebuildGrows 12.0, rebuildRoads 11.8, rebuildSites 8.2, stampLots 5.3, designInto 3.0, other 1.2, wildTrees 0.9, rebuildTrees 0.8, animate 0.1, treeAt 0.0
+      top: field.update 11.7, grow 7.1, computeDriveTimes 4.1, computeLandValue 3.9, computeWalkFields 3.9, computeRiders 2.4
+seed 304 line m240  tick   52.8 ms  snap 6.6 clone 1.1 msg 391 KB  apply 74.2 ms (reference 371.4 ms) (9.5 chunks/tick, 818k tris, 150 meshes)  heap 35 MB buffers 115 MB  pop 166177 lots 2962 edges 425
+      construction 0.3  assemblies 0.4  aggregate 20.7  traffic 6.8  catchments 6.6  trips 6.7  growth 6.1  roads 3.1  events 0.2  other 1.9
+      apply: buildChunk 25.7, rebuildRoads 25.5, rebuildSites 6.1, stampLots 4.6, rebuildGrows 4.2, designInto 2.8, other 1.8, rebuildTrees 1.8, wildTrees 1.4, animate 0.1, treeAt 0.0
+      top: field.update 15.9, computeDriveTimes 6.8, computeRiders 6.7, grow 6.1, computeWalkFields 4.4, computeLandValue 3.3
+total 345.5 s

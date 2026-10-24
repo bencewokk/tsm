@@ -47,6 +47,9 @@ export class DensityField {
 
   private blur = new Float32Array(N * N);
   private tmp = new Float32Array(N * N);
+  /** max over the smaller centres (districts 1..n) of their centrality: they do not move, so it is cached (same values bit for bit) */
+  private sub = new Float64Array(N * N);
+  private subKey = '';
 
   update(sim: Sim) {
     const pop = sim.homes * PERSONS_PER_HOME;
@@ -80,13 +83,23 @@ export class DensityField {
         this.blur[y * N + x] = s / 5;
       }
     }
+    const key = `${FIELD.subR}|${ds.slice(1).map((d) => `${d.x},${d.y},${FIELD.subW[d.kind ?? 'village'] ?? 0.4}`).join(';')}`;
+    if (key !== this.subKey) {
+      this.subKey = key;
+      for (let i = 0; i < N * N; i++) {
+        const x = (i % N) + 0.5, y = ((i / N) | 0) + 0.5;
+        let c = 0;
+        for (let k = 1; k < ds.length; k++) {
+          const d = ds[k], w = FIELD.subW[d.kind ?? 'village'] ?? 0.4;
+          c = Math.max(c, w * Math.exp(-Math.pow(Math.hypot(x - d.x, y - d.y) / FIELD.subR, 2)));
+        }
+        this.sub[i] = c;
+      }
+    }
     for (let i = 0; i < N * N; i++) {
       const x = (i % N) + 0.5, y = ((i / N) | 0) + 0.5;
-      let c = Math.exp(-Math.pow(Math.hypot(x - this.main.x, y - this.main.y) / this.mainR, 2));
-      for (let k = 1; k < ds.length; k++) {
-        const d = ds[k], w = FIELD.subW[d.kind ?? 'village'] ?? 0.4;
-        c = Math.max(c, w * Math.exp(-Math.pow(Math.hypot(x - d.x, y - d.y) / FIELD.subR, 2)));
-      }
+      // max(main, sub_1, ..., sub_n): the sub-centre terms are >= 0, so folding them from 0 first gives the same maximum
+      const c = Math.max(Math.exp(-Math.pow(Math.hypot(x - this.main.x, y - this.main.y) / this.mainR, 2)), this.sub[i]);
       this.cent[i] = c;
       this.jc[i] = clamp(this.blur[i] / FIELD.jobsRef, 0, 1);
       const a = sim.accCell[i];

@@ -1,10 +1,11 @@
 import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { N, CELL, Flag, BT } from '../sim/constants';
 import type { StateMsg, LotsMsg, RoadsMsg } from '../sim/protocol';
 import type { Village } from '../sim/terrain';
 import { vhash, VS } from './common';
 import { patchBuildingMaterial } from './look';
-import { Layer, unitGeos } from './layers';
+import { Layer, REC, unitGeos } from './layers';
 import { kindOf, SITE, PAL, type Kind } from './forms';
 import { Harbour } from './harbour';
 import { MB, Quad, type Pt, type Mat } from './poly';
@@ -29,9 +30,18 @@ const KERB = new THREE.Color(0xd9d5cb);
 export const ROADFX = { on: true };
 
 const CHUNK = 16; // cells per chunk side (800 m)
+const DESIGN_BATCH = 6; // changed plots designed per queued step
 const MATS: Mat[] = ['wall', 'glass', 'plain', 'ghost', 'lamp'];
 
-interface Chunk { sig: number; meshes: THREE.Mesh[]; trees: Tree[] }
+/** One plot's slice of its chunk's merged geometry (vertex start / count per material), reused while the plot's signature holds. */
+interface LotPart { sig: number; start: Int32Array; count: Int32Array; trees: Tree[]; recs: TreeRecs; box: Float64Array }
+/** Precomputed tree instances per layer (Layer.rec records), re-added by copying when the tree layers are rebuilt. */
+interface TreeRecs { leaf: number[]; pine: number[]; trunk: number[] }
+const noRecs = (): TreeRecs => ({ leaf: [], pine: [], trunk: [] });
+interface Chunk { sig: number; meshes: THREE.Mesh[]; trees: Tree[]; recs: TreeRecs; parts: Map<number, LotPart>; geos: (THREE.BufferGeometry | null)[] }
+/** Static wild-tree candidates (terrain only), in the original generation order: occupancy-grid index, layer (0 leaf, 1 pine), record. */
+interface Wild { occ: Int32Array; pine: Uint8Array; rec: Float32Array }
+const ATTRS: [string, number][] = [['position', 3], ['normal', 3], ['color', 3], ['aH', 1], ['aSeed', 1]];
 
 /** A plot being demolished or built: its own small meshes, scaled in y as the work progresses. */
 interface Grow {
@@ -40,10 +50,49 @@ interface Grow {
   mode: 'build' | 'demo';
   group: THREE.Group;
   bodies: THREE.Object3D[]; // scaled in y
+  k: number;              // index of the plot in the current lots message
   crane: { x: number; y: number; z: number; h: number; k: number } | null;
 }
 
 const imul = Math.imul;
+
+/**
+ * BufferGeometry.computeVertexNormals for an indexed mesh, on the typed arrays directly (same arithmetic, same float32 rounding,
+ * same results), without a Vector3 round trip per vertex: the road mesh is rebuilt whenever the street graph changes.
+ */
+export function vertexNormals(g: THREE.BufferGeometry) {
+  const P = (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array, I = g.index!.array;
+  const Nm = new Float32Array(P.length);
+  for (let i = 0; i < I.length; i += 3) {
+    const a = I[i] * 3, b = I[i + 1] * 3, c = I[i + 2] * 3;
+    const cbx = P[c] - P[b], cby = P[c + 1] - P[b + 1], cbz = P[c + 2] - P[b + 2];
+    const abx = P[a] - P[b], aby = P[a + 1] - P[b + 1], abz = P[a + 2] - P[b + 2];
+    const x = cby * abz - cbz * aby, y = cbz * abx - cbx * abz, z = cbx * aby - cby * abx;
+    // read all three first, then write (as three does: a repeated vertex gets the face once)
+    const ax = Nm[a] + x, ay = Nm[a + 1] + y, az = Nm[a + 2] + z, bx = Nm[b] + x, by = Nm[b + 1] + y, bz = Nm[b + 2] + z, cx = Nm[c] + x, cy = Nm[c + 1] + y, cz = Nm[c + 2] + z;
+    Nm[a] = ax; Nm[a + 1] = ay; Nm[a + 2] = az; Nm[b] = bx; Nm[b + 1] = by; Nm[b + 2] = bz; Nm[c] = cx; Nm[c + 1] = cy; Nm[c + 2] = cz;
+  }
+  for (let i = 0; i < Nm.length; i += 3) {
+    const x = Nm[i], y = Nm[i + 1], z = Nm[i + 2];
+    const k = 1 / (Math.sqrt(x * x + y * y + z * z) || 1);
+    Nm[i] = x * k; Nm[i + 1] = y * k; Nm[i + 2] = z * k;
+  }
+  g.setAttribute('normal', new THREE.BufferAttribute(Nm, 3));
+}
+
+/**
+ * The leaf crowns (icosahedra) as an indexed mesh: 12 shared vertices instead of 60, for both the main and the shadow pass. The tree
+ * material is flat shaded (face normals come from screen derivatives), so the shading is unchanged; the vertex normals, now radial,
+ * only steer the shadow normal bias.
+ */
+function indexedFlat(geo: THREE.BufferGeometry): THREE.BufferGeometry {
+  const g = geo.clone();
+  g.deleteAttribute('normal'); g.deleteAttribute('uv');
+  const m = mergeVertices(g, 1e-4);
+  m.computeVertexNormals();
+  return m;
+}
+const sameBytes = (a: Uint8Array, b: Uint8Array) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
 
 export class CityView {
   group = new THREE.Group();
@@ -78,7 +127,17 @@ export class CityView {
   private occ = new Uint8Array(N * 4 * N * 4); // 12.5 m occupancy grid (roads) for wild tree placement
   private coreEdge = new Set<number>();
   private streetTrees: { x: number; z: number; s: number; seed: number }[] = [];
-  stats = { chunksBuilt: 0, lots: 0, grows: 0 };
+  private streetRecs: TreeRecs = noRecs();
+  stats = { chunksBuilt: 0, lotsDesigned: 0, lotsReused: 0, treeRebuilds: 0, lots: 0, grows: 0 };
+  /** plot occupancy (12.5 m grid, roads + plots) that keeps wild trees off built land; rebuilt only when roads or plot shapes change */
+  private lotOcc: Uint8Array | null = null;
+  private polyHash = 0;
+  private roadsDirty = true;
+  private lotSig = new Int32Array(0);
+  private bb = new THREE.Box3(); private bv = new THREE.Vector3();
+  private wild: Wild | null = null;
+  private wildFlags: Uint8Array | null = null;
+  private jm = new THREE.Matrix4(); private jq = new THREE.Quaternion(); private jv = new THREE.Vector3(); private js = new THREE.Vector3(30, 1.4, 1.4); private up = new THREE.Vector3(0, 1, 0);
 
   profiles: DistrictProfile[];
   city: CityProfile;
@@ -102,7 +161,7 @@ export class CityView {
     this.scafMat = new THREE.LineBasicMaterial({ color: 0xb59b5f, transparent: true, opacity: 0.9 });
     const plainInst = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });
     this.L = {
-      leaf: new Layer(g.sphere, this.treeMat, 60000),
+      leaf: new Layer(indexedFlat(g.sphere), this.treeMat, 60000),
       pine: new Layer(g.cone, this.treeMat, 20000),
       trunk: new Layer(g.cyl, plainInst, 40000, false),
     };
@@ -183,11 +242,54 @@ export class CityView {
     return m;
   }
 
-  update(s: StateMsg) {
-    this.lots = s.lots;
-    if (s.roads.version !== this.roadVersion) { this.roadVersion = s.roads.version; this.rebuildRoads(s.roads); }
+  /**
+   * Apply a state message. The cheap diff runs now; the rebuilds it calls for (roads, plot occupancy, each changed chunk, each new
+   * construction site, assembly sites) are queued and `pump` works through them within a time budget per frame. Every step only
+   * prepares its meshes; the last step swaps them all into the scene at once and rebuilds trees and cranes, so the month still changes
+   * in a single frame, it just no longer stalls one. If a message arrives while the previous one's queue is unfinished (overload),
+   * that queue is finished first. `flush` runs everything now (captures, headless tools). Default budget: everything at once.
+   */
+  update(s: StateMsg, budgetMs = Infinity) {
+    if (this.pending) this.flush();
+    this.queue = []; this.names = []; this.qi = 0; this.staged = []; this.designed.clear();
+    if (s.roads.version !== this.roadVersion) { const r = s.roads; this.step('roads', () => { this.roadVersion = r.version; this.rebuildRoads(r); }); }
     this.rebuild(s);
+    this.pump(budgetMs);
   }
+
+  /** plots designed ahead of their chunk's assembly step (lot id -> design), filled by the 'design' steps */
+  private designed = new Map<number, { sig: number; mb: MB; trees: Tree[]; recs: TreeRecs; box: Float64Array }>();
+  private queue: (() => void)[] = [];
+  private names: string[] = [];
+  private qi = 0;
+  private step(name: string, f: () => void) { this.queue.push(f); this.names.push(name); }
+  /** name of the longest step (perf tools) */
+  maxStepName = '';
+  /** scene changes prepared by queued steps, applied together by the last step */
+  private staged: (() => void)[] = [];
+  private treesDirty = false;
+  /** longest single step since the last read (ms), for the perf tools */
+  maxStep = 0;
+
+  /** Run queued rebuild steps for up to `ms` milliseconds (at least one step). Returns true while work remains. */
+  pump(ms = 6): boolean {
+    const t0 = performance.now();
+    while (this.qi < this.queue.length) {
+      const t = performance.now(), i = this.qi++;
+      this.queue[i]();
+      const now = performance.now();
+      if (now - t > this.maxStep) { this.maxStep = now - t; this.maxStepName = this.names[i]; }
+      if (now - t0 >= ms) break;
+    }
+    return this.qi < this.queue.length;
+  }
+
+  flush() { this.pump(Infinity); }
+  /** set when the city's casters changed (the sun's shadow map is redrawn); the caller clears it */
+  shadowDirty = true;
+  /** casters that move on their own: crane jibs turning, buildings rising or being demolished */
+  get moving() { return this.cranes.length > 0 || this.grows.size > 0; }
+  get pending() { return this.queue.length - this.qi; }
 
   // ---------------------------------------------------------------- roads: asphalt on a pale kerb strip, cobbles in the old cores
   private rebuildRoads(r: RoadsMsg) {
@@ -340,6 +442,8 @@ export class CityView {
         }
       }
     }
+    this.streetRecs = noRecs();
+    for (const t of this.streetTrees) this.treeRec(this.streetRecs, t.x, this.sample(t.x, t.z), t.z, t.s, t.s * 1.15, vhash(t.seed, 7) < 0.12, t.seed);
     // kerb / pavement strip first, then the carriageway on top
     // carriageways are layered by class (the bigger street on top), so a side street ends under the main road's edge instead of poking into it
     const liftOf = (cls: number) => (ROADFX.on ? 0.25 + (2 - cls) * 0.1 : 0.25);   // steps of 10 cm: far enough apart for the depth buffer at any zoom
@@ -374,9 +478,9 @@ export class CityView {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.setIndex(idx);
-    g.computeVertexNormals();
-    this.roads.geometry.dispose();
-    this.roads.geometry = g;
+    vertexNormals(g);
+    this.staged.push(() => { this.roads.geometry.dispose(); this.roads.geometry = g; });
+    this.roadsDirty = true;
   }
 
   // ---------------------------------------------------------------- plots: merged chunks of buildings, growing plots, trees
@@ -411,64 +515,183 @@ export class CityView {
   private rebuild(s: StateMsg) {
     const L = s.lots;
     this.stats.lots = L.n;
-    const W4 = N * 4;
-    const lotOcc = this.occ.slice();
+    // plot shapes: when none changed (and the roads did not), the occupancy grid for wild trees is still valid
+    let ph = L.n;
+    for (let i = 0; i < L.n * 8; i++) ph = imul(ph ^ Math.round(L.poly[i] * 64), 16777619);
+    // the road step (queued first, if any) sets roadsDirty; the occupancy step runs after it
+    if (this.queue.length || this.roadsDirty || ph !== this.polyHash || !this.lotOcc)
+      this.step('occupancy', () => { this.lotOcc = this.stampLots(L); this.polyHash = ph; this.roadsDirty = false; this.treesDirty = true; });
     // per-chunk signatures over static plots
     const sigs = new Map<number, number>();
     const members = new Map<number, number[]>();
     const grows = new Set<number>();
+    if (this.lotSig.length < L.n) this.lotSig = new Int32Array(L.n * 2);
     for (let k = 0; k < L.n; k++) {
-      // keep wild trees off every plot
+      if (L.asm[k] > 0 && L.constr[k] > 0) continue;        // assembly sites draw their own structure
+      if (L.constr[k] > 0 || L.demo[k] > 0) { grows.add(k); continue; }
+      const key = Math.floor(L.y[k] / CHUNK) * 100 + Math.floor(L.x[k] / CHUNK);
+      const sg = this.sigOf(L, k);
+      this.lotSig[k] = sg;
+      sigs.set(key, (sigs.get(key) ?? 0) + sg);
+      let m = members.get(key); if (!m) members.set(key, (m = []));
+      m.push(k);
+    }
+    // rebuild only chunks whose lots changed (and inside them only the plots that changed): one step per chunk
+    for (const [key, sig] of sigs) {
+      const ch = this.chunks.get(key);
+      if (ch && ch.sig === sig) continue;
+      const ks = members.get(key)!;
+      // the plots that changed are designed a few at a time in their own steps, then the chunk is assembled
+      const todo = ks.filter((k) => { const op = ch?.parts.get(L.id[k]); return !op || op.sig !== this.lotSig[k]; });
+      for (let i = 0; i < todo.length; i += DESIGN_BATCH) {
+        const batch = todo.slice(i, i + DESIGN_BATCH);
+        this.step('design', () => { for (const k of batch) this.designed.set(L.id[k], { sig: this.lotSig[k], ...this.designPart(L, k) }); });
+      }
+      this.step('chunk', () => { this.buildChunk(key, sig, ks, s); this.treesDirty = true; });
+    }
+    for (const [key, ch] of this.chunks) if (!sigs.has(key)) this.staged.push(() => { this.disposeChunk(ch); this.chunks.delete(key); this.treesDirty = true; });
+    this.rebuildGrows(s, grows);
+    this.planSites(s);
+    this.step('commit', () => {
+      // swap everything prepared above into the scene in this one step
+      this.lots = L;
+      this.shadowDirty = true;
+      for (const f of this.staged) f();
+      this.staged = [];
+      if (this.treesDirty) { this.treesDirty = false; this.rebuildTrees(s); }
+      // cranes over plots under construction
+      this.craneMast.reset(); this.craneJib.reset();
+      this.cranes = [];
+      for (const gr of this.grows.values()) if (gr.crane) this.cranes.push(gr.crane);
+      for (const st of this.sites.values()) for (const c of st.cranes) this.cranes.push(c);
+      for (const c of this.cranes) { this.craneMast.add(c.x, c.y, c.z, 1.6, c.h, 1.6, 0, 0xc9a24a); this.craneJib.add(c.x, c.y + c.h, c.z, 30, 1.4, 1.4, 0, 0xc9a24a); }
+      this.craneMast.finish(); this.craneJib.finish();
+      this.animate(0, 0);
+    });
+  }
+
+  /** Road occupancy plus every plot (5 x 5 sample points per plot) on the 12.5 m grid. */
+  private stampLots(L: LotsMsg): Uint8Array {
+    const W4 = N * 4;
+    const lotOcc = this.occ.slice();
+    for (let k = 0; k < L.n; k++) {
       const Q = this.quadOf(L, k);
       for (let a = 0; a <= 4; a++) for (let b = 0; b <= 4; b++) {
         const p = Q.at(a / 4, b / 4);
         const gx = Math.floor(p[0] / 12.5), gz = Math.floor(p[1] / 12.5);
         if (gx >= 0 && gz >= 0 && gx < W4 && gz < W4) lotOcc[gz * W4 + gx] = 1;
       }
-      if (L.asm[k] > 0 && L.constr[k] > 0) continue;        // assembly sites draw their own structure
-      if (L.constr[k] > 0 || L.demo[k] > 0) { grows.add(k); continue; }
-      const key = Math.floor(L.y[k] / CHUNK) * 100 + Math.floor(L.x[k] / CHUNK);
-      sigs.set(key, (sigs.get(key) ?? 0) + this.sigOf(L, k));
-      let m = members.get(key); if (!m) members.set(key, (m = []));
-      m.push(k);
     }
-    // rebuild only chunks whose lots changed
-    for (const [key, sig] of sigs) {
-      const ch = this.chunks.get(key);
-      if (ch && ch.sig === sig) continue;
-      this.buildChunk(key, sig, members.get(key)!, s);
-    }
-    for (const [key, ch] of this.chunks) if (!sigs.has(key)) { this.disposeChunk(ch); this.chunks.delete(key); }
-    this.rebuildGrows(s, grows);
-    this.rebuildSites(s);
-    // trees: lot trees (cached per chunk), street trees, wild trees
+    return lotOcc;
+  }
+
+  /** Trees: lot trees (cached per chunk), site trees, street trees, wild trees; only when one of them changed. */
+  private rebuildTrees(s: StateMsg) {
+    this.stats.treeRebuilds++;
     for (const l of Object.values(this.L)) l.reset();
-    for (const ch of this.chunks.values()) for (const t of ch.trees) this.treeAt(t.x, this.ground(t.x, t.z), t.z, t.size, t.h, t.pine, t.seed);
+    const addRecs = (r: TreeRecs) => { this.L.leaf.addRecs(r.leaf); this.L.pine.addRecs(r.pine); this.L.trunk.addRecs(r.trunk); };
+    for (const ch of this.chunks.values()) addRecs(ch.recs);
     for (const st of this.sites.values()) for (const t of st.trees) this.treeAt(t.x, this.ground(t.x, t.z), t.z, t.size, t.h, t.pine, t.seed);
-    for (const t of this.streetTrees) this.treeAt(t.x, this.sample(t.x, t.z), t.z, t.s, t.s * 1.15, vhash(t.seed, 7) < 0.12, t.seed);
-    this.wildTrees(s, lotOcc);
+    addRecs(this.streetRecs);
+    this.wildTrees(s, this.lotOcc!);
     for (const l of Object.values(this.L)) l.finish();
-    // cranes over plots under construction
-    this.craneMast.reset(); this.craneJib.reset();
-    this.cranes = [];
-    for (const gr of this.grows.values()) if (gr.crane) this.cranes.push(gr.crane);
-    for (const st of this.sites.values()) for (const c of st.cranes) this.cranes.push(c);
-    for (const c of this.cranes) { this.craneMast.add(c.x, c.y, c.z, 1.6, c.h, 1.6, 0, 0xc9a24a); this.craneJib.add(c.x, c.y + c.h, c.z, 30, 1.4, 1.4, 0, 0xc9a24a); }
-    this.craneMast.finish(); this.craneJib.finish();
-    this.animate(0, 0);
   }
 
   private disposeChunk(ch: Chunk) {
     for (const m of ch.meshes) { this.chunkGroup.remove(m); m.geometry.dispose(); }
   }
 
+  /**
+   * A chunk is one merged mesh per material. Plots whose signature did not change copy their vertices out of the old merged
+   * arrays; only changed plots run the (slow) building designer. The result is the same arrays, in the same plot order.
+   */
   private buildChunk(key: number, sig: number, ks: number[], s: StateMsg) {
     const old = this.chunks.get(key);
-    if (old) this.disposeChunk(old);
     const L = s.lots;
-    const mb = new MB();
-    const trees: Tree[] = [];
+    type Entry = { id: number; sig: number; from: LotPart | null; mb: MB | null; trees: Tree[]; recs: TreeRecs; box: Float64Array };
+    const entries: Entry[] = [];
     for (const k of ks) {
+      const id = L.id[k], sg = this.lotSig[k];
+      const op = old?.parts.get(id);
+      if (op && op.sig === sg) { entries.push({ id, sig: sg, from: op, mb: null, trees: op.trees, recs: op.recs, box: op.box }); this.stats.lotsReused++; continue; }
+      const pre = this.designed.get(id);
+      const d = pre && pre.sig === sg ? pre : this.designPart(L, k);
+      this.designed.delete(id);
+      entries.push({ id, sig: sg, from: null, mb: d.mb, trees: d.trees, recs: d.recs, box: d.box });
+      this.stats.lotsDesigned++;
+    }
+    const parts = new Map<number, LotPart>();
+    for (const e of entries) parts.set(e.id, { sig: e.sig, start: new Int32Array(MATS.length), count: new Int32Array(MATS.length), trees: e.trees, recs: e.recs, box: e.box });
+    const geos: (THREE.BufferGeometry | null)[] = [];
+    const meshes: THREE.Mesh[] = [];
+    MATS.forEach((m, mi) => {
+      let total = 0;
+      for (const e of entries) total += e.from ? e.from.count[mi] : e.mb!.acc[m].pos.length / 3;
+      if (!total) { geos.push(null); return; }
+      const arrs = ATTRS.map(([, n]) => new Float32Array(total * n));
+      const oldGeo = old?.geos[mi] ?? null;
+      const src = oldGeo ? ATTRS.map(([name]) => (oldGeo.getAttribute(name) as THREE.BufferAttribute).array as Float32Array) : null;
+      let off = 0;
+      // reused plots are mostly consecutive in the old arrays too: copy them in runs
+      let runSrc = -1, runDst = 0, runN = 0;
+      const flush = () => { if (runN) for (let a = 0; a < ATTRS.length; a++) { const w = ATTRS[a][1]; arrs[a].set(src![a].subarray(runSrc * w, (runSrc + runN) * w), runDst * w); } runN = 0; };
+      for (const e of entries) {
+        const part = parts.get(e.id)!;
+        if (e.from) {
+          const st = e.from.start[mi], n = e.from.count[mi];
+          if (n) { if (runN && runSrc + runN === st) runN += n; else { flush(); runSrc = st; runDst = off; runN = n; } }
+          part.start[mi] = off; part.count[mi] = n; off += n;
+        } else {
+          flush();
+          const A = e.mb!.acc[m], n = A.pos.length / 3;
+          if (n) { arrs[0].set(A.pos, off * 3); arrs[1].set(A.nrm, off * 3); arrs[2].set(A.col, off * 3); arrs[3].set(A.aH, off); arrs[4].set(A.seed, off); }
+          part.start[mi] = off; part.count[mi] = n; off += n;
+        }
+      }
+      flush();
+      const geo = new THREE.BufferGeometry();
+      ATTRS.forEach(([name, w], a) => geo.setAttribute(name, new THREE.BufferAttribute(arrs[a], w)));
+      // bounding sphere from the union of the plots' boxes (encloses the same vertices; used only for frustum culling)
+      const o = mi * 6, bb = this.bb.makeEmpty();
+      for (const e of entries) if (e.box[o] <= e.box[o + 3]) { this.bv.set(e.box[o], e.box[o + 1], e.box[o + 2]); bb.expandByPoint(this.bv); this.bv.set(e.box[o + 3], e.box[o + 4], e.box[o + 5]); bb.expandByPoint(this.bv); }
+      geo.boundingSphere = bb.getBoundingSphere(new THREE.Sphere());
+      geos.push(geo);
+      const mesh = new THREE.Mesh(geo, this.polyMats[m]);
+      mesh.castShadow = m !== 'ghost' && m !== 'lamp';
+      mesh.receiveShadow = m !== 'lamp';
+      if (m === 'ghost') mesh.renderOrder = 5;
+      meshes.push(mesh);
+    });
+    const swap = () => { if (old) this.disposeChunk(old); for (const mesh of meshes) this.chunkGroup.add(mesh); };
+    const trees: Tree[] = [], recs = noRecs();
+    for (const e of entries) {
+      for (const t of e.trees) trees.push(t);
+      for (const x of e.recs.leaf) recs.leaf.push(x);
+      for (const x of e.recs.pine) recs.pine.push(x);
+      for (const x of e.recs.trunk) recs.trunk.push(x);
+    }
+    this.staged.push(() => { swap(); this.chunks.set(key, { sig, meshes, trees, recs, parts, geos }); });
+    this.stats.chunksBuilt++;
+  }
+
+  /** Design one plot: its geometry, trees (as instance records) and bounds per material. */
+  private designPart(L: LotsMsg, k: number) {
+    const mb = new MB(), trees: Tree[] = [], recs = noRecs();
+    this.designInto(L, k, mb, trees);
+    for (const t of trees) this.treeRec(recs, t.x, this.ground(t.x, t.z), t.z, t.size, t.h, t.pine, t.seed);
+    // the plot's bounds per material (min xyz, max xyz): chunk bounding spheres come from these, not from a pass over every vertex
+    const box = new Float64Array(MATS.length * 6);
+    MATS.forEach((m, mi) => {
+      const P = mb.acc[m].pos, o = mi * 6;
+      box[o] = box[o + 1] = box[o + 2] = Infinity; box[o + 3] = box[o + 4] = box[o + 5] = -Infinity;
+      for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { const v = P[i + a]; if (v < box[o + a]) box[o + a] = v; if (v > box[o + 3 + a]) box[o + 3 + a] = v; }
+    });
+    return { mb, trees, recs, box };
+  }
+
+  /** Run the building designer for one plot into `mb` (its own trees into `trees`). */
+  private designInto(L: LotsMsg, k: number, mb: MB, trees: Tree[]) {
+    {
       const Q = this.quadOf(L, k);
       const flags = L.flags[k], planned = (flags & Flag.Planned) !== 0;
       const dens = L.dens[k];
@@ -480,25 +703,12 @@ export class CityView {
         const m = massing({ ...c, kind: pk, level: L.planLevel[k] });
         const gc = (flags & Flag.CarLocked) ? 0xd9785a : L.served[k] ? 0x6fb0e8 : 0xf2c46a;
         mb.prism('ghost', m.poly, c.g, c.g + m.h, gc, gc);
-        continue;
+        return;
       }
-      if (kind === 'none') { if (dens >= 1 && L.type[k] === BT.None && !L.asm[k]) kind = 'yard'; else continue; }
+      if (kind === 'none') { if (dens >= 1 && L.type[k] === BT.None && !L.asm[k]) kind = 'yard'; else return; }
       const c = this.ctxFor(L, k, Q, mb, kind, L.level[k], trees);
       designLot(c);
     }
-    const meshes: THREE.Mesh[] = [];
-    for (const m of MATS) {
-      const geo = mb.acc[m].build();
-      if (!geo) continue;
-      const mesh = new THREE.Mesh(geo, this.polyMats[m]);
-      mesh.castShadow = m !== 'ghost' && m !== 'lamp';
-      mesh.receiveShadow = m !== 'lamp';
-      if (m === 'ghost') mesh.renderOrder = 5;
-      this.chunkGroup.add(mesh);
-      meshes.push(mesh);
-    }
-    this.chunks.set(key, { sig, meshes, trees });
-    this.stats.chunksBuilt++;
   }
 
   /** Dev: a row of every tower style (and a few landmark-sized samples) on an empty spot, for screenshots. */
@@ -567,16 +777,21 @@ export class CityView {
       const mode = L.demo[k] > 0 ? 'demo' : 'build';
       const sig = imul(this.sigOf(L, k) ^ (mode === 'demo' ? 77 : 0), 31) + L.target[k] + L.ntype[k] * 7;
       const old = this.grows.get(id);
-      if (old && old.sig === sig) continue;
-      if (old) this.disposeGrow(old);
-      const gr = this.makeGrow(s, k, mode, sig);
-      if (gr) this.grows.set(id, gr); else this.grows.delete(id);
+      if (old && old.sig === sig) { this.staged.push(() => { old.k = k; }); continue; }
+      this.step('grow', () => {
+        const gr = this.makeGrow(s, k, mode, sig);
+        this.staged.push(() => {
+          if (old) this.disposeGrow(old);
+          if (gr) { this.growGroup.add(gr.group); this.grows.set(id, gr); } else this.grows.delete(id);
+        });
+      });
     }
-    for (const [id, gr] of this.grows) if (!keep.has(id)) { this.disposeGrow(gr); this.grows.delete(id); }
-    this.stats.grows = this.grows.size;
+    for (const [id, gr] of this.grows) if (!keep.has(id)) this.staged.push(() => { this.disposeGrow(gr); this.grows.delete(id); });
+    this.staged.push(() => { this.stats.grows = this.grows.size; });
   }
 
-  private rebuildSites(s: StateMsg) {
+  /** Assembly sites: one queued step per site that changed (built off-scene, swapped in by the commit step). */
+  private planSites(s: StateMsg) {
     const L = s.lots;
     const idx = new Map<number, number>();
     for (let k = 0; k < L.n; k++) if (L.asm[k] > 0 || s.assemblies.length) idx.set(L.id[k], k);
@@ -586,13 +801,13 @@ export class CityView {
       const sig = siteSig(a, L, idx);
       const old = this.sites.get(a.id);
       if (old && old.sig === sig) { old.pct = a.pct; continue; }
-      if (old) this.disposeSite(old);
-      const st = buildSite(this, a, s, idx) as Site & { pct: number };
-      st.sig = sig; st.pct = a.pct;
-      this.siteGroup.add(st.group);
-      this.sites.set(a.id, st);
+      this.step('site', () => {
+        const st = buildSite(this, a, s, idx) as Site & { pct: number };
+        st.sig = sig; st.pct = a.pct;
+        this.staged.push(() => { if (old) this.disposeSite(old); this.siteGroup.add(st.group); this.sites.set(a.id, st); this.treesDirty = true; });
+      });
     }
-    for (const [id, st] of this.sites) if (!keep.has(id)) { this.disposeSite(st); this.sites.delete(id); }
+    for (const [id, st] of this.sites) if (!keep.has(id)) this.staged.push(() => { this.disposeSite(st); this.sites.delete(id); this.treesDirty = true; });
   }
 
   private disposeSite(st: Site) {
@@ -666,8 +881,14 @@ export class CityView {
       const q = Q.at(0.88, 0.3);
       crane = { x: q[0], y: g - 1, z: q[1], h: Math.min(85, ms.h + 12), k: L.id[k] };
     }
-    this.growGroup.add(group);
-    return { sig, lot: L.id[k], mode, group, bodies, crane };
+    return { sig, lot: L.id[k], mode, group, bodies, crane, k };
+  }
+
+  /** The instances `treeAt` would add, as records (same layers, same order). */
+  private treeRec(out: TreeRecs, x: number, g: number, z: number, size: number, h: number, pine: boolean, seed: number) {
+    const c = pine ? PAL.pine[Math.floor(vhash(seed, 1) * PAL.pine.length)] : PAL.leaf[Math.floor(vhash(seed, 1) * PAL.leaf.length)];
+    if (pine) { Layer.rec(out.pine, x, g + 1, z, size, h, size, 0, c); Layer.rec(out.trunk, x, g - 0.5, z, 1, 2, 1, 0, PAL.trunk); }
+    else { Layer.rec(out.trunk, x, g - 0.5, z, 1.1, 3.5, 1.1, 0, PAL.trunk); Layer.rec(out.leaf, x, g + 2.4, z, size, h, size, vhash(seed, 2) * 6, c); }
   }
 
   private treeAt(x: number, g: number, z: number, size: number, h: number, pine: boolean, seed: number) {
@@ -676,34 +897,41 @@ export class CityView {
     else { this.L.trunk.add(x, g - 0.5, z, 1.1, 3.5, 1.1, 0, PAL.trunk); this.L.leaf.add(x, g + 2.4, z, size, h, size, vhash(seed, 2) * 6, c); }
   }
 
-  /** Trees on open land, denser woodland on slopes too steep to build. */
+  /** Trees on open land, denser woodland on slopes too steep to build (candidates depend on the terrain only: computed once). */
   private wildTrees(s: StateMsg, occ: Uint8Array) {
-    const W = N * 4;
+    if (!this.wild || !this.wildFlags || !sameBytes(this.wildFlags, s.flags)) { this.wild = this.wildCandidates(s.flags); this.wildFlags = s.flags.slice(); }
+    const leaf = this.L.leaf, pine = this.L.pine, w = this.wild;
+    for (let k = 0; k < w.occ.length; k++) if (!occ[w.occ[k]]) (w.pine[k] ? pine : leaf).addRecs(w.rec, k * REC, 1);
+  }
+
+  private wildCandidates(flags: Uint8Array): Wild {
+    const W = N * 4, occs: number[] = [], pines: number[] = [], rec: number[] = [];
     for (let i = 0; i < N * N; i++) {
       if (this.water[i]) continue;
       if (this.flags[i] & Flag.Docks) continue;
-      const flood = (s.flags[i] & Flag.Flood) !== 0;
+      const flood = (flags[i] & Flag.Flood) !== 0;
       const cx = (i % N) * CELL, cz = ((i / N) | 0) * CELL;
       // slope (m per m) from the terrain surface: woods on the flanks, thin willows on wetland, bare above the tree line
       const mx = cx + CELL / 2, mz = cz + CELL / 2;
       const gl = (this.sample(mx + CELL, mz) - this.sample(mx - CELL, mz)) / (2 * CELL * VS), gm = (this.sample(mx, mz + CELL) - this.sample(mx, mz - CELL)) / (2 * CELL * VS);
       const slope = Math.hypot(gl, gm), hm = this.sample(mx, mz) / VS;
       const tree = hm > 125 ? 0 : hm > 95 ? 0.3 : 1;
-      const steep = ((s.flags[i] & Flag.Steep) !== 0 || slope > 0.1) && hm > 4;
+      const steep = ((flags[i] & Flag.Steep) !== 0 || slope > 0.1) && hm > 4;
       const r0 = vhash(i, 77);
       const want = flood ? (r0 < 0.12 ? 1 : 0) : tree * (steep ? 1 : 0.4 + (slope > 0.06 ? 0.4 : 0)) > 0 && r0 < (steep ? 0.85 : slope > 0.06 ? 0.45 : 0.16) * tree ? (steep ? 3 : 1) + Math.floor(vhash(i, 78) * 3) : 0;
       for (let k = 0; k < want; k++) {
         const x = cx + vhash(i, 90 + k) * CELL, z = cz + vhash(i, 100 + k) * CELL;
         const gx = Math.floor(x / 12.5), gz = Math.floor(z / 12.5);
-        if (occ[gz * W + gx]) continue;
         const sc = 6 + vhash(i, 80 + k) * 5;
         const pine = vhash(i, 110 + k) < (steep ? 0.55 : 0.2);
         const c = pine ? PAL.pine[Math.floor(vhash(i, 120 + k) * 3)] : PAL.leaf[Math.floor(vhash(i, 120 + k) * 5)];
         const y = this.sample(x, z);
-        if (pine) this.L.pine.add(x, y - 0.5, z, sc * 0.8, sc * 2, sc * 0.8, 0, c);
-        else this.L.leaf.add(x, y - 0.5, z, sc, sc * 1.1, sc, vhash(i, 130 + k) * 6, c);
+        occs.push(gz * W + gx); pines.push(pine ? 1 : 0);
+        if (pine) Layer.rec(rec, x, y - 0.5, z, sc * 0.8, sc * 2, sc * 0.8, 0, c);
+        else Layer.rec(rec, x, y - 0.5, z, sc, sc * 1.1, sc, vhash(i, 130 + k) * 6, c);
       }
     }
+    return { occ: Int32Array.from(occs), pine: Uint8Array.from(pines), rec: Float32Array.from(rec) };
   }
 
   /** Demolition + rising buildings + cranes. frac = fraction of the current month elapsed. */
@@ -711,11 +939,9 @@ export class CityView {
     const L = this.lots;
     if (!L) return;
     if (this.grows.size) {
-      const idx = new Map<number, number>();
-      for (let k = 0; k < L.n; k++) if (L.constr[k] > 0 || L.demo[k] > 0) idx.set(L.id[k], k);
       for (const gr of this.grows.values()) {
-        const k = idx.get(gr.lot);
-        if (k === undefined) continue;
+        const k = gr.k;
+        if (k >= L.n || L.id[k] !== gr.lot) continue;
         let p: number;
         if (gr.mode === 'demo') { const f = Math.min(1, frac * 1.2); p = 1 - 0.9 * f * f * (3 - 2 * f); }
         else {
@@ -729,12 +955,12 @@ export class CityView {
     }
     for (const st of this.sites.values()) for (const o of st.skin) o.scale.y = Math.max(0.03, st.pct);
     if (!this.cranes.length) return;
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const m = this.jm, q = this.jq, v = this.jv;
     for (let k = 0; k < this.cranes.length; k++) {
       const c = this.cranes[k];
-      v.set(c.x, c.y + c.h, c.z); sc.set(30, 1.4, 1.4);
-      q.setFromAxisAngle(up, time * 0.25 + c.k);
-      m.compose(v, q, sc);
+      v.set(c.x, c.y + c.h, c.z);
+      q.setFromAxisAngle(this.up, time * 0.25 + c.k);
+      m.compose(v, q, this.js);
       this.craneJib.mesh.setMatrixAt(k, m);
     }
     this.craneJib.touch();

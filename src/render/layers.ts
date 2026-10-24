@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { hexColor } from './poly';
 
 /** Unit geometries, base at y = 0, footprint [-0.5, 0.5] in x and z. */
 export function unitGeos() {
@@ -34,6 +35,9 @@ export function unitGeos() {
  * An InstancedMesh with per-instance placement kept on the side, so instances can "rise out of the ground":
  * height and base offset scale with a 0..1 progress value.
  */
+/** Floats per precomputed instance record (see Layer.rec). */
+export const REC = 27;
+
 export class Layer {
   mesh: THREE.InstancedMesh;
   n = 0;
@@ -61,10 +65,39 @@ export class Layer {
   add(x: number, y: number, z: number, w: number, h: number, d: number, rot: number, color: number, yoff = 0): number {
     if (this.n >= this.cap) return -1;
     const i = this.n++;
-    this.d.set([x, y, z, w, h, d, rot, yoff], i * 8);
-    this.mesh.setColorAt(i, Layer.c.setHex(color));
+    const a = this.d, o = i * 8;
+    a[o] = x; a[o + 1] = y; a[o + 2] = z; a[o + 3] = w; a[o + 4] = h; a[o + 5] = d; a[o + 6] = rot; a[o + 7] = yoff;
+    this.mesh.setColorAt(i, hexColor(color));
     this.set(i, 1);
     return i;
+  }
+
+  /**
+   * Precomputed instance record (REC floats: placement 8, matrix 16, linear colour 3), appended to `out`: what `add` would write,
+   * so static instances can be re-added later by a plain copy (`addRec`).
+   */
+  static rec(out: number[], x: number, y: number, z: number, w: number, h: number, d: number, rot: number, color: number, yoff = 0) {
+    // the placement goes through float32 first, exactly as `add` stores it before composing the matrix
+    const f = Math.fround;
+    x = f(x); y = f(y); z = f(z); w = f(w); h = f(h); d = f(d); rot = f(rot); yoff = f(yoff);
+    Layer.v.set(x, y + yoff, z);
+    Layer.s.set(w, Math.max(0.01, h), d);
+    Layer.q.setFromAxisAngle(Layer.up, rot);
+    Layer.m.compose(Layer.v, Layer.q, Layer.s);
+    const c = hexColor(color);
+    const e = Layer.m.elements;
+    out.push(x, y, z, w, h, d, rot, yoff, e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8], e[9], e[10], e[11], e[12], e[13], e[14], e[15], c.r, c.g, c.b);
+  }
+
+  /** Append the records rec[o .. o + n * REC) (see `rec`). */
+  addRecs(rec: ArrayLike<number>, o = 0, n = rec.length / REC) {
+    const mat = this.mesh.instanceMatrix.array as Float32Array, col = this.mesh.instanceColor!.array as Float32Array, a = this.d;
+    for (let k = 0; k < n && this.n < this.cap; k++) {
+      const i = this.n++, b = o + k * REC;
+      for (let q = 0; q < 8; q++) a[i * 8 + q] = rec[b + q];
+      for (let q = 0; q < 16; q++) mat[i * 16 + q] = rec[b + 8 + q];
+      col[i * 3] = rec[b + 24]; col[i * 3 + 1] = rec[b + 25]; col[i * 3 + 2] = rec[b + 26];
+    }
   }
 
   set(i: number, p: number) {
@@ -76,11 +109,13 @@ export class Layer {
     this.mesh.setMatrixAt(i, Layer.m);
   }
 
+  /** Upload only the used part of the instance buffers (they are sized for the cap, mostly empty). */
   finish() {
     this.mesh.count = this.n;
-    this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    const m = this.mesh.instanceMatrix, c = this.mesh.instanceColor;
+    m.clearUpdateRanges(); m.addUpdateRange(0, Math.max(1, this.n) * 16); m.needsUpdate = true;
+    if (c) { c.clearUpdateRanges(); c.addUpdateRange(0, Math.max(1, this.n) * 3); c.needsUpdate = true; }
   }
 
-  touch() { this.mesh.instanceMatrix.needsUpdate = true; }
+  touch() { const m = this.mesh.instanceMatrix; m.clearUpdateRanges(); m.addUpdateRange(0, Math.max(1, this.n) * 16); m.needsUpdate = true; }
 }

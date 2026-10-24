@@ -7,12 +7,22 @@ import { SQ } from './squares';
 import { ART, REPAIR } from './roads';
 import { Sim } from './sim';
 import { GRAPHCHECK } from './graphcheck';
-import type { Command, WorkerOut } from './protocol';
+import type { Command, StateMsg, WorkerOut } from './protocol';
 
 let sim: Sim | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 const post = (m: WorkerOut) => (self as unknown as Worker).postMessage(m);
+
+/** State snapshots are built from fresh copies every time, so their typed arrays are transferred (moved, not cloned). */
+function postState(m: StateMsg) {
+  const bufs: ArrayBuffer[] = [];
+  const add = (v: unknown) => { if (ArrayBuffer.isView(v) && v.buffer instanceof ArrayBuffer && !bufs.includes(v.buffer)) bufs.push(v.buffer); };
+  for (const v of Object.values(m.roads)) add(v);
+  for (const v of Object.values(m.lots)) add(v);
+  add(m.road); add(m.lv); add(m.flags); add(m.terr); add(m.catchment);
+  (self as unknown as Worker).postMessage(m, bufs);
+}
 
 /** ms per month at each speed setting */
 const MS: Record<number, number> = { 1: 1500, 3: 500, 10: 150 };
@@ -27,8 +37,12 @@ function schedule() {
 function step() {
   if (!sim) return;
   try {
+    const t0 = performance.now();
     if (!sim.paused()) sim.tick();
-    post(sim.snapshot());
+    const t1 = performance.now();
+    const snap = sim.snapshot();
+    snap.perf = { tick: t1 - t0, snap: performance.now() - t1 };
+    postState(snap);
   } catch (e) {
     post({ type: 'error', message: String((e as Error).stack ?? e) });
   }
@@ -47,7 +61,7 @@ self.onmessage = (ev: MessageEvent) => {
       if (m.nores) { RES.on = false; SQ.on = false; }
       sim = new Sim(m.seed, { terrain: m.terrain as never, origin: m.origin as never });
       post(sim.initMsg());
-      post(sim.snapshot());
+      postState(sim.snapshot());
       schedule();
       return;
     }
@@ -58,8 +72,12 @@ self.onmessage = (ev: MessageEvent) => {
     }
     // Speed, station placement and choices apply immediately so the UI feels responsive;
     // they are recorded in the action log against the current month (deterministic replay).
+    const t0 = performance.now();
     sim.apply(m);
-    post(sim.snapshot());
+    const t1 = performance.now();
+    const snap = sim.snapshot();
+    snap.perf = { tick: m.type === 'step' ? (t1 - t0) / Math.max(1, m.months) : 0, snap: performance.now() - t1 };
+    postState(snap);
     if (m.type === 'speed' || !timer) schedule();
   } catch (e) {
     post({ type: 'error', message: String((e as Error).stack ?? e) });

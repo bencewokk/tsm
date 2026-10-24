@@ -15,6 +15,10 @@ import { Hud } from './ui/hud';
 import { Planner } from './ui/planner';
 import { CELL, N, STATION_COST, TRAIN_COST, METRO_SPEED } from './sim/constants';
 import { quoteLine } from './sim/relief';
+import { perf } from './perf';
+import { SunShadow, CarBlobs, SHADOW } from './render/shadows';
+import { Quality, qualityFromUrl, type QualityMode } from './render/quality';
+import { VS } from './render/common';
 
 const params = new URLSearchParams(location.search);
 if (params.get('norepair') === '1') ROADFX.on = false;
@@ -22,6 +26,10 @@ const seed = Number(params.get('seed') ?? 4821) | 0 || 4821;
 
 const app = document.getElementById('app')!;
 const env = new Env(app);
+perf.attach(env.renderer);
+if (params.get('perf') === '1') perf.show();
+// render quality (?quality=auto|high|performance, HUD button): the 3D scene's resolution scale
+const quality = new Quality((s) => env.setScale(s));
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
 const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean }) => worker.postMessage(c);
 
@@ -36,6 +44,8 @@ let metro: MetroView | null = null;
 let labels: Labels | null = null;
 let life: Life | null = null;
 let planner: Planner | null = null;
+let sunShadow: SunShadow | null = null;
+let carBlobs: CarBlobs | null = null;
 let state: StateMsg | null = null;
 const desire = new DesireView();
 env.scene.add(desire.group);
@@ -48,6 +58,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   if (m.type === 'init') {
     init = m;
     terrain = buildTerrain(m.height, m.water, m.flags);
+    { let top = 0; for (let i = 0; i < m.height.length; i++) if (m.height[i] > top) top = m.height[i]; sunShadow = new SunShadow(env.sun, env.renderer, top * VS + 10, top * VS + 320); }
     env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours, terrain.zones, terrain.paper, terrain.skirt);
     city = new CityView(m.water, m.flags, m.villages, (x, z) => terrain!.sample(x, z), m);
     env.scene.add(city.group);
@@ -55,6 +66,8 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     env.scene.add(life.group);
     ships = new Ships(m.water, seed);
     env.scene.add(ships.group);
+    carBlobs = new CarBlobs((life as unknown as { cars: THREE.InstancedMesh }).cars, () => !!life?.group.visible);
+    env.scene.add(carBlobs.mesh);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
     env.scene.add(metro.group);
     markers = new ProjectMarkers((x, z) => terrain!.sample(x, z));
@@ -67,27 +80,30 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     hud.showIntro(m.city, seed, () => send({ type: 'speed', speed: 1 }));
   } else if (m.type === 'state') {
     if (m.graph) { graphReport = m.graph; for (const l of m.graph.log) (m.graph.defects ? console.warn : console.info)(l); }
+    perf.size(m);
+    const tApply = performance.now();
     const newMonth = !state || state.stats.month !== m.stats.month;
     const sig = (s: StateMsg) => JSON.stringify([s.lines.map((l) => [l.id, l.stations, l.trains]), s.stations.map((st) => (st.riders < 1200 ? 0 : st.riders < 5000 ? 1 : 2))]);
     const linesChanged = !state || sig(state) !== sig(m);
     state = m;
     if (!labels && init && terrain) {
       labels = new Labels(init.villages, init.city.site, m.docks.centre, (x, z) => terrain!.sample(x, z));
-      env.scene.add(labels.group);
+      env.addText(labels.group);
     }
-    life?.setRoads(m.roads);
-    if (newMonth) life?.setCity(m.stats.homes, m.stations);
+    perf.step('life', () => { life?.setRoads(m.roads); if (newMonth) life?.setCity(m.stats.homes, m.stations); });
     if (newMonth) lastStateAt = performance.now();
-    city?.update(m);
+    perf.step('city', () => city?.update(m, CITY_BUDGET));
     markers?.update(m.projects);
-    if (linesChanged) metro?.update(m);
+    if (linesChanged) { perf.step('metro', () => metro?.update(m)); if (sunShadow) sunShadow.dirty = true; }
     planner?.onState(m);
-    if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
-    if (hud.toggles.zones) terrain?.setZones(m.terr, init!.water);
-    if (hud.toggles.desire) desire.update(m.desire);
-    if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
-    hud.update(m);
-    refreshPlan();
+    perf.step('overlays', () => {
+      if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
+      if (hud.toggles.zones) terrain?.setZones(m.terr, init!.water);
+      if (hud.toggles.desire) desire.update(m.desire);
+      if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
+    });
+    perf.step('hud', () => { hud.update(m); refreshPlan(); });
+    perf.message(m, performance.now() - tApply);
   } else if (m.type === 'error') {
     console.error('[sim]', m.message);
   }
@@ -98,7 +114,6 @@ send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin:
 let savedView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
 hud.handlers.onTool = (t) => {
   const c = env.controls;
-  env.tilt = hud.toggles.tilt && t !== 'plan';
   if (t === 'plan') {
     savedView = { pos: env.camera.position.clone(), target: c.target.clone() };
     const dist = Math.max(2500, env.camera.position.distanceTo(c.target));
@@ -127,10 +142,14 @@ hud.handlers.onToggle = (name, on) => {
   if (name === 'xray') xrayTarget = on ? 1 : 0;
   if (name === 'night') { nightTarget = on ? 1 : 0; fastDawn = !on; }
   if (name === 'desire') { desire.group.visible = on; if (on && state) desire.update(state.desire); }
-  if (name === 'tilt') env.tilt = on && hud.tool !== 'plan';
 };
 
-if (params.get('notilt') !== '1') hud.toggle('tilt', true);
+quality.setMode(qualityFromUrl(params));
+const QUALITY_CYCLE: QualityMode[] = ['auto', 'high', 'performance'];
+const qualityLabel = () => `Quality: ${quality.mode === 'auto' ? `Auto (${Math.round(quality.scale * 100)}%)` : quality.mode === 'high' ? 'High' : 'Performance'}`;
+hud.handlers.onQuality = () => { quality.setMode(QUALITY_CYCLE[(QUALITY_CYCLE.indexOf(quality.mode) + 1) % 3]); hud.setQuality(qualityLabel()); };
+hud.setQuality(qualityLabel());
+let gpuSeq = 0;
 
 hud.onFocusLandmark = (x, y) => { env.focus((x + 0.5) * CELL, (y + 0.5) * CELL, 800); };
 hud.onFocusDocks = () => {
@@ -257,7 +276,6 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'z' || e.key === 'Z') hud.toggle('zones');
   else if (e.key === 'n' || e.key === 'N') hud.toggle('night');
   else if (e.key === 'l' || e.key === 'L') hud.toggle('desire');
-  else if (e.key === 't' || e.key === 'T') hud.toggle('tilt');
   else if (hud.tool === 'plan' && planner) {
     if (e.key === 'Enter') planner.commit();
     else if (e.key === 'Backspace') planner.undo();
@@ -268,6 +286,8 @@ window.addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ frame loop
 const MS: Record<number, number> = { 0: Infinity, 1: 1500, 3: 500, 10: 150 };
+/** ms per frame the city may spend on rebuilding chunks after a state message (the rest waits for the next frames) */
+const CITY_BUDGET = 6;
 let xray = 0, xrayTarget = 0, night = 0, nightTarget = 0;
 const DAY_SECONDS = 160;
 let dayPhase = 0.05;
@@ -302,7 +322,14 @@ function applyXray(v: number) {
   if (board) for (const m of board.material as THREE.Material[]) fade(m, 0.05);
 }
 let t0 = performance.now();
+const blobDir = new THREE.Vector3();
 function frame(now: number) {
+  drawFrame(now);
+  requestAnimationFrame(frame);
+}
+/** One frame: camera, animation, day / night, render (also driven by `tsm.perf.bench` in a hidden pane). */
+function drawFrame(now: number) {
+  perf.frameBegin(now);
   const dt = Math.min(0.1, (now - t0) / 1000);
   t0 = now;
   if (fly) {
@@ -315,6 +342,7 @@ function frame(now: number) {
   panByKeys(dt, shiftDown);
   env.controls.update();
   const frac = state ? Math.min(1, (now - lastStateAt) / (MS[state.speed] ?? 1500)) : 0;
+  if (city?.pending) perf.step('city', () => city!.pump(CITY_BUDGET));
   city?.animate(frac, now / 1000);
   paperAndLabels();
   life?.animate(dt * (state && state.speed > 0 ? 1 : 0.4), now / 1000, env.night);
@@ -332,12 +360,23 @@ function frame(now: number) {
   }
   env.timeOfDay = phaseToTime(dayPhase);
   env.applyTime();
+  if (sunShadow && city) {
+    if (city.shadowDirty) { sunShadow.dirty = true; city.shadowDirty = false; }
+    sunShadow.movers = city.moving;
+  }
+  sunShadow?.frame(env.camera, now);
+  if (carBlobs && sunShadow) carBlobs.update(sunShadow.dir(blobDir), 1 - env.night);
   night = env.night;
   lookUniforms.uNight.value = night;
   if (city) city.roadMat.emissiveIntensity = night * 0.05;
   if (metro) { metro.setXray(xray); metro.animate(now / 1000); }
   env.render();
-  requestAnimationFrame(frame);
+  perf.frameEnd();
+  // Auto quality: one sample per resolved GPU timer query (else the frame interval)
+  const fresh = perf.gpuSeq !== gpuSeq;
+  gpuSeq = perf.gpuSeq;
+  if (perf.hasGpuTimer) { if (fresh) quality.frame(now, perf.lastGpu, perf.lastInterval); } else quality.frame(now, null, perf.lastInterval);
+  if (quality.mode === 'auto') hud.setQuality(qualityLabel());
 }
 requestAnimationFrame(frame);
 
@@ -424,9 +463,12 @@ async function demo(deal = 0, lineAt = 10) {
 /** Dev helper: save the canvas at full size to screenshots/<name>.png (served by the dev server only). */
 async function shot(name: string) {
   // a hidden pane does not run animation frames: settle the x-ray fade at once so the capture shows the toggled state
+  city?.flush();
   xray = xrayTarget; applyXray(xray); metro?.setXray(xray);
   env.timeOfDay = phaseToTime(dayPhase);
   env.applyTime();
+  sunShadow?.redraw(env.camera);
+  if (carBlobs && sunShadow) carBlobs.update(sunShadow.dir(blobDir), 1 - env.night);
   lookUniforms.uNight.value = env.night;
   if (city) city.roadMat.emissiveIntensity = env.night * 0.05;
   paperAndLabels();
@@ -465,4 +507,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; } };
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; }, get sunShadow() { return sunShadow; }, quality, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };

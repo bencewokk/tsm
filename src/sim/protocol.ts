@@ -136,6 +136,8 @@ export interface StateMsg {
   desire: DesireLine[];
   log: string[];
   speed: number;
+  /** worker timings of the tick and snapshot that produced this message (ms, dev perf overlay) */
+  perf?: { tick: number; snap: number };
 }
 
 export type Command =

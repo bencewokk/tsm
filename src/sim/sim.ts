@@ -70,6 +70,8 @@ export const TUNE = {
 };
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+/** land value factor by distance to the nearest road (cells) */
+const ROAD_DIST_F = [1, 1, 0.85, 0.65, 0.45, 0.35];
 
 /** dev switch: seed the walk field from the side of a street passing the station entrance (off = only from nodes within 2.5 cells) */
 export const WALK = { edgeAccess: true };
@@ -635,16 +637,29 @@ export class Sim {
     return this._docksZones;
   }
 
+  /** zone-pair road distance (m) and midpoint zone: static (terrain effort, circuity), computed once */
+  private pairDist: Float64Array | null = null;
+  private pairMid: Uint16Array | null = null;
+  private pairCirc = 0;
   private computeDriveTimes() {
     const dt = this.driveTime;
+    if (!this.pairDist || this.pairCirc !== TUNE.circuity) {
+      this.pairDist = new Float64Array(ZONES * ZONES); this.pairMid = new Uint16Array(ZONES * ZONES); this.pairCirc = TUNE.circuity;
+      for (let a = 0; a < ZONES; a++) {
+        const ax = (a % NZ) + 0.5, ay = ((a / NZ) | 0) + 0.5;
+        for (let b = 0; b < ZONES; b++) {
+          const bx = (b % NZ) + 0.5, by = ((b / NZ) | 0) + 0.5;
+          const mx = Math.min(NZ - 1, Math.floor((ax + bx) / 2)), my = Math.min(NZ - 1, Math.floor((ay + by) / 2));
+          this.pairDist[a * ZONES + b] = a === b ? 300 : Math.hypot(ax - bx, ay - by) * ZONE * CELL * TUNE.circuity * this.effort[a * ZONES + b];
+          this.pairMid[a * ZONES + b] = my * NZ + mx;
+        }
+      }
+    }
+    const PD = this.pairDist, PM = this.pairMid!, zs = this.zSpeed, ds = this.driveSpeed;
     for (let a = 0; a < ZONES; a++) {
-      const ax = (a % NZ) + 0.5, ay = ((a / NZ) | 0) + 0.5;
       for (let b = 0; b < ZONES; b++) {
-        const bx = (b % NZ) + 0.5, by = ((b / NZ) | 0) + 0.5;
-        const mx = Math.min(NZ - 1, Math.floor((ax + bx) / 2)), my = Math.min(NZ - 1, Math.floor((ay + by) / 2));
-        const dist = a === b ? 300 : Math.hypot(ax - bx, ay - by) * ZONE * CELL * TUNE.circuity * this.effort[a * ZONES + b];
-        const sp = (this.zSpeed[a] + this.zSpeed[b] + this.zSpeed[my * NZ + mx] + this.driveSpeed) / 4;
-        dt[a * ZONES + b] = (dist / 1000) / sp * 60 + TUNE.accessMin;
+        const sp = (zs[a] + zs[b] + zs[PM[a * ZONES + b]] + ds) / 4;
+        dt[a * ZONES + b] = (PD[a * ZONES + b] / 1000) / sp * 60 + TUNE.accessMin;
       }
     }
     const J = this.jobs || 1;
@@ -813,27 +828,31 @@ export class Sim {
     return (f[y0 * N + x0] * (1 - tx) + f[y0 * N + x1] * tx) * (1 - ty) + (f[y1 * N + x0] * (1 - tx) + f[y1 * N + x1] * tx) * ty;
   }
 
+  private lvInd = new Float32Array(N * N);
+  private lvPark = new Float32Array(N * N);
   computeLandValue() {
     const g = this.g;
-    const ind = new Float32Array(N * N), park = new Float32Array(N * N);
+    const ind = this.lvInd, park = this.lvPark;
+    ind.fill(0); park.fill(0);
+    const spread = (x: number, y: number, v: number, R: number, out: Float32Array) => {
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+        if (!inb(x + dx, y + dy)) continue;
+        const f = 1 - Math.hypot(dx, dy) / (R + 1);
+        if (f > 0) out[idx(x + dx, y + dy)] += f * v;
+      }
+    };
     for (let i = 0; i < N * N; i++) {
       const vi = this.cInd[i], vp = this.cPark[i];
       if (!vi && !vp) continue;
       const x = i % N, y = (i / N) | 0;
-      for (const [v, R, out] of [[vi, 4, ind], [vp, 3, park]] as [number, number, Float32Array][]) {
-        if (!v) continue;
-        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
-          if (!inb(x + dx, y + dy)) continue;
-          const f = 1 - Math.hypot(dx, dy) / (R + 1);
-          if (f > 0) out[idx(x + dx, y + dy)] += f * v;
-        }
-      }
+      if (vi) spread(x, y, vi, 4, ind);
+      if (vp) spread(x, y, vp, 3, park);
     }
     const cx = this.centre.x, cy = this.centre.y;
     for (let i = 0; i < N * N; i++) {
       if (g.water[i]) { this.lv[i] = 0; continue; }
       const x = (i % N) + 0.5, y = ((i / N) | 0) + 0.5;
-      const rdf = [1, 1, 0.85, 0.65, 0.45, 0.35][Math.min(5, this.roadDist[i])] ?? 0.3;
+      const rdf = ROAD_DIST_F[Math.min(5, this.roadDist[i])] ?? 0.3;
       const car = this.zoneSampleXY(this.zCarAcc, x, y) * rdf;
       const dw = g.distWater[i];
       const water = dw <= 4 ? TUNE.wWater * (1 - (dw - 1) / 4) : 0;

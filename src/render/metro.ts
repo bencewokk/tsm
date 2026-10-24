@@ -171,6 +171,11 @@ export class MetroView {
     const deckMat = new THREE.MeshStandardMaterial({ color: 0xcfc8ba, roughness: 0.9 });
     const stripe = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
     const box = new THREE.BoxGeometry(1, 1, 1);
+    // one instanced mesh per part (deck, edge stripe, piers) instead of a mesh per 25 m segment: same transforms, a few draw calls
+    const decks: THREE.Matrix4[] = [], edges: THREE.Matrix4[] = [], piers: THREE.Matrix4[] = [];
+    const e = new THREE.Euler(), q = new THREE.Quaternion();
+    const mat = (x: number, y: number, z: number, sx: number, sy: number, sz: number, ang: number) =>
+      new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q.setFromEuler(e.set(0, ang, 0)), new THREE.Vector3(sx, sy, sz));
     for (let k = 1; k < pts.length; k++) {
       const a = pts[k - 1], b = pts[k];
       const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
@@ -178,18 +183,24 @@ export class MetroView {
       if (ty - gy < 5 * VS) continue;
       const len = Math.hypot(b.x - a.x, b.z - a.z);
       const ang = Math.atan2(b.x - a.x, b.z - a.z);
-      const deck = new THREE.Mesh(box, deckMat);
-      deck.scale.set(16, 3.2, len + 1); deck.position.set(mx, ty - 1.2, mz); deck.rotation.y = ang; deck.castShadow = true; deck.receiveShadow = true;
-      const edge = new THREE.Mesh(box, stripe);
-      edge.scale.set(16.4, 0.8, len + 1); edge.position.set(mx, ty + 0.6, mz); edge.rotation.y = ang;
-      this.ribbons.add(deck, edge);
+      decks.push(mat(mx, ty - 1.2, mz, 16, 3.2, len + 1, ang));
+      edges.push(mat(mx, ty + 0.6, mz, 16.4, 0.8, len + 1, ang));
       if (k % 2 === 0) {
         const h = ty - 2.8 - gy;
-        const pier = new THREE.Mesh(box, deckMat);
-        pier.scale.set(5, h, 5); pier.position.set(mx, gy + h / 2, mz); pier.rotation.y = ang; pier.castShadow = true;
-        this.ribbons.add(pier);
+        piers.push(mat(mx, gy + h / 2, mz, 5, h, 5, ang));
       }
     }
+    const inst = (ms: THREE.Matrix4[], m: THREE.Material, cast: boolean, receive: boolean) => {
+      if (!ms.length) return;
+      const im = new THREE.InstancedMesh(box, m, ms.length);
+      ms.forEach((x, i) => im.setMatrixAt(i, x));
+      im.castShadow = cast; im.receiveShadow = receive;
+      im.computeBoundingSphere();
+      this.ribbons.add(im);
+    };
+    inst(decks, deckMat, true, true);
+    inst(edges, stripe, false, false);
+    inst(piers, deckMat, true, false);
   }
 
   private addStation(st: StationInfo, color: string, pav: THREE.Material, boxGeo: THREE.BufferGeometry, dir: number) {

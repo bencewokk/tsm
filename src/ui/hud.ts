@@ -15,12 +15,13 @@ export const num = (v: number) => (v >= 1e4 ? `${(v / 1e3).toFixed(1)}k` : Math.
 export interface HudHandlers {
   onTool?: (tool: string) => void;
   onToggle?: (name: string, on: boolean) => void;
+  onQuality?: () => void;
 }
 
 export class Hud {
   root: HTMLElement;
   private el: Record<string, HTMLElement> = {};
-  toggles: Record<string, boolean> = { heat: false, zones: false, xray: false, night: false, desire: false, tilt: false };
+  toggles: Record<string, boolean> = { heat: false, zones: false, xray: false, night: false, desire: false };
   tool = 'view';
   handlers: HudHandlers = {};
 
@@ -77,7 +78,8 @@ export class Hud {
         <button data-toggle="xray" title="X-ray underground (X)">X-ray</button>
         <button data-toggle="night" title="Night (N)">Night</button>
         <button data-toggle="desire" title="Desire lines (L)">Desire lines</button>
-        <button data-toggle="tilt" title="Tilt-shift (T)">Tilt-shift</button>
+        <span class="sep"></span>
+        <button data-quality title="Render quality: Auto lowers the 3D resolution while the frame is over budget; High = full, Performance = 67%">Quality: Auto</button>
       </div>
       <div class="hint panel" data-k="hint"></div>
       <div class="ticker" data-k="ticker"></div>
@@ -90,6 +92,7 @@ export class Hud {
       b.addEventListener('click', () => this.send({ type: 'speed', speed: Number(b.dataset.speed) })));
     this.root.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((b) => b.addEventListener('click', () => this.setTool(b.dataset.tool!)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-toggle]').forEach((b) => b.addEventListener('click', () => this.toggle(b.dataset.toggle!)));
+    this.root.querySelector<HTMLButtonElement>('[data-quality]')?.addEventListener('click', () => this.handlers.onQuality?.());
     this.el.hint.style.display = 'none';
     this.el.lines.addEventListener('click', (ev) => {
       const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-line]');
@@ -228,6 +231,9 @@ export class Hud {
         </div></div>`;
     }).join('');
   }
+
+  /** Quality button text, e.g. "Quality: Auto (80%)". */
+  setQuality(label: string) { const b = this.root.querySelector<HTMLButtonElement>('[data-quality]'); if (b && b.textContent !== label) b.textContent = label; }
 
   setTool(t: string) {
     this.tool = t;
