@@ -26,8 +26,12 @@ function schedule() {
 function step() {
   if (!sim) return;
   try {
+    const t0 = performance.now();
     if (!sim.paused()) sim.tick();
-    post(sim.snapshot());
+    const t1 = performance.now();
+    const snap = sim.snapshot();
+    snap.perf = { tick: t1 - t0, snap: performance.now() - t1 };
+    post(snap);
   } catch (e) {
     post({ type: 'error', message: String((e as Error).stack ?? e) });
   }
@@ -55,8 +59,12 @@ self.onmessage = (ev: MessageEvent) => {
     }
     // Speed, station placement and choices apply immediately so the UI feels responsive;
     // they are recorded in the action log against the current month (deterministic replay).
+    const t0 = performance.now();
     sim.apply(m);
-    post(sim.snapshot());
+    const t1 = performance.now();
+    const snap = sim.snapshot();
+    snap.perf = { tick: m.type === 'step' ? (t1 - t0) / Math.max(1, m.months) : 0, snap: performance.now() - t1 };
+    post(snap);
     if (m.type === 'speed' || !timer) schedule();
   } catch (e) {
     post({ type: 'error', message: String((e as Error).stack ?? e) });

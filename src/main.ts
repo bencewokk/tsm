@@ -12,12 +12,15 @@ import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
 import { Hud } from './ui/hud';
 import { Planner } from './ui/planner';
 import { CELL, N } from './sim/constants';
+import { perf } from './perf';
 
 const params = new URLSearchParams(location.search);
 const seed = Number(params.get('seed') ?? 4821) | 0 || 4821;
 
 const app = document.getElementById('app')!;
 const env = new Env(app);
+perf.attach(env.renderer);
+if (params.get('perf') === '1') perf.show();
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
 const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean }) => worker.postMessage(c);
 
@@ -54,6 +57,8 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     send({ type: 'speed', speed: 0 });
     hud.showIntro(m.city, seed, () => send({ type: 'speed', speed: 1 }));
   } else if (m.type === 'state') {
+    perf.size(m);
+    const tApply = performance.now();
     const newMonth = !state || state.stats.month !== m.stats.month;
     const sig = (s: StateMsg) => JSON.stringify([s.lines.map((l) => [l.id, l.stations, l.trains]), s.stations.map((st) => (st.riders < 1200 ? 0 : st.riders < 5000 ? 1 : 2))]);
     const linesChanged = !state || sig(state) !== sig(m);
@@ -62,18 +67,19 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
       labels = new Labels(init.villages, init.city.site, m.docks.centre, (x, z) => terrain!.sample(x, z));
       env.scene.add(labels.group);
     }
-    life?.setRoads(m.roads);
-    if (newMonth) life?.setCity(m.stats.homes, m.stations);
+    perf.step('life', () => { life?.setRoads(m.roads); if (newMonth) life?.setCity(m.stats.homes, m.stations); });
     if (newMonth) lastStateAt = performance.now();
-    city?.update(m);
-    if (linesChanged) metro?.update(m);
+    perf.step('city', () => city?.update(m));
+    if (linesChanged) perf.step('metro', () => metro?.update(m));
     planner?.onState(m);
-    if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
-    if (hud.toggles.zones) terrain?.setZones(m.terr, init!.water);
-    if (hud.toggles.desire) desire.update(m.desire);
-    if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
-    hud.update(m);
-    refreshPlan();
+    perf.step('overlays', () => {
+      if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
+      if (hud.toggles.zones) terrain?.setZones(m.terr, init!.water);
+      if (hud.toggles.desire) desire.update(m.desire);
+      if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
+    });
+    perf.step('hud', () => { hud.update(m); refreshPlan(); });
+    perf.message(m, performance.now() - tApply);
   } else if (m.type === 'error') {
     console.error('[sim]', m.message);
   }
@@ -289,6 +295,12 @@ function applyXray(v: number) {
 }
 let t0 = performance.now();
 function frame(now: number) {
+  drawFrame(now);
+  requestAnimationFrame(frame);
+}
+/** One frame: camera, animation, day / night, render (also driven by `tsm.perf.bench` in a hidden pane). */
+function drawFrame(now: number) {
+  perf.frameBegin(now);
   const dt = Math.min(0.1, (now - t0) / 1000);
   t0 = now;
   if (fly) {
@@ -322,7 +334,7 @@ function frame(now: number) {
   if (city) city.roadMat.emissiveIntensity = night * 0.05;
   if (metro) { metro.setXray(xray); metro.animate(now / 1000); }
   env.render();
-  requestAnimationFrame(frame);
+  perf.frameEnd();
 }
 requestAnimationFrame(frame);
 
@@ -399,4 +411,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; } };
+(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, ff, shot, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), mon: perf } };
