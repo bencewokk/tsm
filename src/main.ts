@@ -1,4 +1,5 @@
 import './style.css';
+import './ui/diegetic/diegetic.css';
 import * as THREE from 'three';
 import { Env } from './render/env';
 import { buildTerrain, type TerrainView } from './render/terrain';
@@ -11,7 +12,10 @@ import { Ships } from './render/ships';
 import { Life } from './render/life';
 import { lookUniforms } from './render/look';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
-import { Hud } from './ui/hud';
+import { Hud, money as fmtMoney } from './ui/hud';
+import { DiegeticLayer } from './ui/diegetic/layer';
+import { syncWorld, logSlips } from './ui/diegetic/world';
+import { skinHud } from './ui/diegetic/hudskin';
 import { Planner } from './ui/planner';
 import { CELL, N, STATION_COST, TRAIN_COST, METRO_SPEED } from './sim/constants';
 import { quoteLine } from './sim/relief';
@@ -52,6 +56,11 @@ env.scene.add(desire.group);
 desire.group.visible = false;
 let lastStateAt = performance.now();
 const hud = new Hud(document.body, send, seed);
+// diegetic presentation (src/ui/diegetic): paper tags and flags pinned on the model, the HUD dressed as table objects; ?hud=classic keeps the old HUD
+const classicHud = params.get('hud') === 'classic';
+const dg = classicHud ? null : new DiegeticLayer(document.body, env.camera, hud.root);
+const skin = classicHud ? null : skinHud(hud);
+const seenLog = new Set<string>();
 
 worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   const m = ev.data;
@@ -103,6 +112,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
       if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
     });
     perf.step('hud', () => { hud.update(m); refreshPlan(); });
+    if (dg && terrain) { skin?.update(m); syncWorld(dg, m, (x, z) => terrain!.sample(x, z)); logSlips(dg, m, seenLog); }
     perf.message(m, performance.now() - tApply);
   } else if (m.type === 'error') {
     console.error('[sim]', m.message);
@@ -170,6 +180,10 @@ function refreshPlan() {
   if (hud.tool !== 'plan') { hud.hint(null); metro.draft([], null, '#000'); return; }
   metro.draft(planner.points(state), planner.hover, planner.color(state), planner.profile(state, true));
   hud.hint(planner.hint(state));
+  if (dg && terrain && planner.draft.length && planner.hover) {
+    const r = planner.quote(state), ok = r.cost <= state.stats.money && (!r.q || r.q.ok);
+    dg.cost({ x: planner.hover.x * CELL, y: terrain.sample(planner.hover.x * CELL, planner.hover.y * CELL) + 2, z: planner.hover.y * CELL }, { title: fmtMoney(r.cost), sub: `${r.km.toFixed(1)} km  ·  ${planner.draft.length} stations  ·  ${r.trains} trains`, badge: ok ? '' : 'too dear', color: ok ? '#2f7d5a' : '#c0503a', look: 2, ok });
+  } else dg?.cost(null);
 }
 
 // ------------------------------------------------------------------ picking
@@ -371,6 +385,7 @@ function drawFrame(now: number) {
   if (city) city.roadMat.emissiveIntensity = night * 0.05;
   if (metro) { metro.setXray(xray); metro.animate(now / 1000); }
   env.render();
+  if (dg) { dg.setNight(env.night); dg.draw(now); skin?.plan(hud.tool === 'plan'); }
   perf.frameEnd();
   // Auto quality: one sample per resolved GPU timer query (else the frame interval)
   const fresh = perf.gpuSeq !== gpuSeq;
@@ -487,11 +502,12 @@ async function shotUI(name: string) {
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d')!;
   g.drawImage(gl, 0, 0);
+  if (dg) { dg.setNight(env.night); dg.draw(performance.now()); g.drawImage(dg.canvas, 0, 0, W, H); }
   const css = [...document.styleSheets].map((sh) => { try { return [...sh.cssRules].map((r) => r.cssText).join(' '); } catch { return ''; } }).join(' ');
   const clone = document.body.cloneNode(true) as HTMLElement;
   clone.querySelectorAll('canvas, script').forEach((e) => e.remove());
   const html = new XMLSerializer().serializeToString(clone).replace(/^<body[^>]*>/, '').replace(/<\/body>$/, '');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')}</style>${html}</div></foreignObject></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" class="${document.body.className}" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')}</style>${html}</div></foreignObject></svg>`;
   const img = new Image();
   await new Promise((r, j) => { img.onload = r; img.onerror = j; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
   g.drawImage(img, 0, 0);
@@ -507,4 +523,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; }, get sunShadow() { return sunShadow; }, quality, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };
+(window as unknown as { tsm: unknown }).tsm = { dg, env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; }, get sunShadow() { return sunShadow; }, quality, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };
