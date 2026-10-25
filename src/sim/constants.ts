@@ -31,7 +31,7 @@ export const IND_JOBS = [0, 30, 90, 90];
 export const BUILD_MONTHS = [0, 1, 2, 4];
 
 export const PERSONS_PER_HOME = 2.3;
-export const TRIPS_PER_HOME = 3.0;     // motorised trips per household per day
+// trips per resident and the mode choice live in TRIP (sim.ts, round 7 calibration)
 export const PEAK_FACTOR = 0.12;       // share of daily trips in the peak hour, per direction
 export const WORKERS_PER_HOME = 1.15;
 

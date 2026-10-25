@@ -24,7 +24,8 @@
     "hazards": "tsx scripts/hazards.ts",
     "bench": "node --expose-gc --import tsx scripts/bench.ts",
     "parity": "tsx scripts/parity.ts",
-    "fun": "tsx scripts/fun.ts"
+    "fun": "tsx scripts/fun.ts",
+    "calib": "tsx scripts/calib.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

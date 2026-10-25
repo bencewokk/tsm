@@ -74,7 +74,7 @@ const towersOnLine = (s: Sim) => {
   for (const l of s.lots.lots) if (l.alive && l.level > 0 && !l.constr && l.hgt >= 60 && (l.type === BT.Res || l.type === BT.Com) && s.walkToStation(l.cell) <= 8) n++;
   return n;
 };
-const share = (s: Sim) => (s.totalTrips > 0 ? s.transitTrips / s.totalTrips : 0);
+const share = (s: Sim) => s.motorShare();
 
 export const GOALS: GoalDef[] = [
   // ---- network

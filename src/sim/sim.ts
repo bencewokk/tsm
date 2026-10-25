@@ -1,5 +1,5 @@
 import { N, CELL, ZONE, NZ, ZONES, BT, Flag, Water, isAmenity, HOMES, COM_JOBS, IND_JOBS, BUILD_MONTHS, PERSONS_PER_HOME, WORKERS_PER_HOME } from './constants';
-import { STATION_COST, TRAIN_COST, START_MONEY, TRIPS_PER_HOME, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
+import { STATION_COST, TRAIN_COST, START_MONEY, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
 import { generateTerrain, idx, inb, DIR4, SAT, type Grid } from './terrain';
 import type { Command, InitMsg, StateMsg, Stats, DocksInfo, EventInfo, RoadsMsg, LotsMsg } from './protocol';
@@ -76,6 +76,30 @@ export const TUNE = {
  * (refilled every month by each young station, scaled by how busy it is) when the city-wide demand pool is dry. Towers do not use the boom
  * (the density field's height cap is untouched). `BOOM.on = false` gives the old behaviour for before / after numbers.
  */
+/**
+ * Trip model (round 7 calibration). Real ranges it was tuned against: 2.5-3.5 trips per resident a day by all modes; a European city of
+ * 100-250k without rail has roughly 45-60% car, 25-35% walking, 5-15% cycling; a busy metro station carries 10-40k entries a day in a city
+ * of several hundred thousand, a short six-station line in a city of ~100k low thousands to ~20k.
+ */
+export const TRIP = {
+  perResident: 2.8,     // trips per resident per day, all modes, both directions
+  distDecay: 2.6,       // km: gravity decay of destinations
+  beta: 0.1,            // logit scale per perceived minute
+  walkWeight: 2,        // a minute walking to / from the station feels like two on the train
+  transitASC: 3,        // minutes: the metro's fixed penalty against the car (stairs, ticket, reliability)
+  circuity: 1.3,
+  walkKmh: 4.8, walkASC: 0,
+  bikeKmh: 14, bikeASC: 16,  // few people cycle: a high fixed penalty
+  carShare0: 0.6,       // car share before any trips are computed (congestion at month 0)
+};
+
+/** Line rating 0..100 from crowding (peak load / capacity) and headway: degrades smoothly, never a cliff (a packed line keeps ~45 at 140%). */
+export function lineRating(crowd: number, headway: number) {
+  const c = 60 * (1 - Math.exp(-Math.max(0, crowd - 0.6) * 1.6));
+  const h = 25 * (1 - Math.exp(-Math.max(0, headway - 4) / 6));
+  return clamp(100 - c - h, 10, 100);
+}
+
 export const BOOM = { on: true, months: 30, full: 14, res: 40, com: 46, thresh: 0.12, rank: 0.4, lvBonus: 0.15, upBonus: 0.1, fastAge: 3, zoneOps: 10 };
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -122,6 +146,8 @@ export class Sim {
   zSpeed = new Float64Array(ZONES);
   zCarAcc = new Float64Array(ZONES);
   zTransitShare = new Float64Array(ZONES);
+  /** car share of each home zone's trips (all modes): feeds congestion */
+  zCarShare = new Float64Array(ZONES).fill(TRIP.carShare0);
   zCarLocked = new Float64Array(ZONES);
   driveTime = new Float64Array(ZONES * ZONES);
   // pools + headline numbers
@@ -138,6 +164,14 @@ export class Sim {
   zoneNear: { s: number; w: number }[][] = [];
   egress = new Float64Array(0);
   egressVia = new Int32Array(0);
+  /**
+   * Station access groups per zone, at cell level: each cell walks to its nearest station (walk field), so a zone is split into the share of
+   * its homes (zAccO) and of its trip attraction (zAccD) that walks to each station, with the mean walk. Trips choose the metro per group,
+   * so every station gets the riders of the streets it is nearest to (one centroid per 400 m zone used to hand all of a zone's trips to a
+   * single station and left stations next to a better one at zero).
+   */
+  zAccO: { s: number; w: number; f: number }[][] = [];
+  zAccD: { s: number; w: number; f: number }[][] = [];
   /** per used station (matrix index): walk minutes over the street network to every cell */
   walk: Float32Array[] = [];
   private walkKey = '';
@@ -374,7 +408,7 @@ export class Sim {
     const pct = (v: number) => Math.round(v * 100);
     return {
       ...SITE_TEXT[this.cp.site], village: this.g.villages[0]?.name ?? 'harbour', cells: plots, homes, planned, built, locked,
-      share: pct(dW ? dT / dW : 0), cityShare: pct(this.totalTrips ? this.transitTrips / this.totalTrips : 0), cong: pct(cz ? cong / cz : 0),
+      share: pct(dW ? dT / dW : 0), cityShare: pct(this.motorShare()), cong: pct(cz ? cong / cz : 0),
     };
   }
 
@@ -647,7 +681,8 @@ export class Sim {
   private computeCongestion() {
     const ends = new Float64Array(ZONES);
     for (let z = 0; z < ZONES; z++) {
-      const car = 1 - this.zTransitShare[z] * 0.9;
+      // congestion was tuned with the car carrying all motorised trips but the metro's: scale by the car share against the no-metro share
+      const car = clamp(this.zCarShare[z] / TRIP.carShare0, 0.1, 1.3);
       ends[z] = (this.zHomes[z] * WORKERS_PER_HOME * 2 + this.zJobs[z] * 1.2) * car;
     }
     const docksZ = this.docksZones();
@@ -803,6 +838,8 @@ export class Sim {
     for (let z = 0; z < ZONES; z++) this.zoneNear.push([]);
     this.egress = new Float64Array(S * ZONES).fill(Infinity);
     this.egressVia = new Int32Array(S * ZONES).fill(-1);
+    this.zAccO = []; this.zAccD = [];
+    for (let z = 0; z < ZONES; z++) { this.zAccO.push([]); this.zAccD.push([]); }
     const used = m.stations.filter((st) => m.sIndex.has(st.id)).sort((a, b) => m.sIndex.get(a.id)! - m.sIndex.get(b.id)!);
     this.computeWalkFields(used);
     if (S === 0) return;
@@ -820,6 +857,25 @@ export class Sim {
       for (let k = 0; k < S; k++) {
         const wt = this.walk[k][cell];
         if (wt < TUNE.walkCap) this.zoneNear[z].push({ s: k, w: wt + 1 });  // the escalator time is already inside the walk field
+      }
+    }
+    {
+      // cell level: nearest station by walk, summed per zone into access groups (homes for trip origins, jobs + 0.3 homes for destinations)
+      const oW = new Float64Array(ZONES * S), oT = new Float64Array(ZONES * S), dW = new Float64Array(ZONES * S), dT = new Float64Array(ZONES * S);
+      const zO = new Float64Array(ZONES), zD = new Float64Array(ZONES);
+      for (let i = 0; i < N * N; i++) {
+        const h = this.cHomes[i], d = this.cJobs[i] + 0.3 * h;
+        if (!h && !d) continue;
+        const z = this.zoneOf(i);
+        zO[z] += h; zD[z] += d;
+        let bk = -1, bt = TUNE.walkCap;
+        for (let k = 0; k < S; k++) { const t = this.walk[k][i]; if (t < bt) { bt = t; bk = k; } }
+        if (bk < 0) continue;
+        oW[z * S + bk] += h; oT[z * S + bk] += h * bt; dW[z * S + bk] += d; dT[z * S + bk] += d * bt;
+      }
+      for (let z = 0; z < ZONES; z++) for (let k = 0; k < S; k++) {
+        if (oW[z * S + k] > 0) this.zAccO[z].push({ s: k, w: oT[z * S + k] / oW[z * S + k] + 1, f: oW[z * S + k] / zO[z] });
+        if (dW[z * S + k] > 0) this.zAccD[z].push({ s: k, w: dT[z * S + k] / dW[z * S + k] + 1, f: dW[z * S + k] / zD[z] });
       }
     }
     const T = m.T, eg = this.egress;
@@ -1435,71 +1491,87 @@ export class Sim {
   }
 
   // ---------------------------------------------------------------- riders
+  /** daily trips by mode (both directions), from the last computeRiders */
+  modeTrips = { car: 0, transit: 0, walk: 0, bike: 0 };
+  /**
+   * Trips and mode choice (calibrated in round 7 against real ranges; numbers in PROGRESS "Round 7, step 1").
+   * Every resident makes TRIP.perResident trips a day by all modes (both directions); half of them are home-based trips out, distributed by
+   * gravity over jobs and homes, and each comes back the same way, so a station counts an entry at both ends and a line a boarding each way.
+   * Mode choice is a multinomial logit over car, metro, walking and cycling on perceived minutes: walking to and from the station counts
+   * double (people dislike it more than sitting on a train), and walking and cycling compete for the short trips the metro used to win.
+   */
   computeRiders() {
     const m = this.metro, S = m.sIndex.size;
     const segLoad = m.lines.map((l) => l.segTime.map(() => [0, 0]));
     const boards = new Float64Array(m.lines.length);
     const stEntries = new Float64Array(S);
     const stOD = new Float64Array(S * S);
-    const zTrips = new Float64Array(ZONES), zTransit = new Float64Array(ZONES);
+    const zTrips = new Float64Array(ZONES), zTransit = new Float64Array(ZONES), zCar = new Float64Array(ZONES);
     const attr = new Float64Array(ZONES);
     for (let b = 0; b < ZONES; b++) attr[b] = this.zJobs[b] + 0.3 * this.zHomes[b];
     const zd = (a: number, b: number) => a === b ? 0.3 : Math.hypot((a % NZ) - (b % NZ), ((a / NZ) | 0) - ((b / NZ) | 0)) * ZONE * CELL / 1000;
     const gv = new Float64Array(ZONES);
     const desire: { a: number; b: number; trips: number }[] = [];
-    let total = 0, transit = 0;
+    let total = 0, transit = 0, car = 0, walk = 0, bike = 0;
+    const beta = TRIP.beta, ww = TRIP.walkWeight, T_ = m.T;
     // attraction of open landmarks pulls ordinary trips toward their zone
     const lmOpen = this.lm.open();
     for (const o of lmOpen) attr[o.zone] += o.def.attr * (o.st.eventDay ? 1.5 : 1);
-    /** Route T trips from zone a to zone b: logistic car / transit choice, stations and desire lines. */
+    /** Route T round trips from zone a to zone b and back: logit over car / metro / walk / bike, stations and desire lines. */
     const route = (a: number, b: number, T: number, asc: number, extraDrive = 0) => {
-      const near = this.zoneNear[a] ?? [];
-      if (a === b || !near.length) { if (a !== b && T > 30 && zd(a, b) > 1.2) desire.push({ a, b, trips: T }); return; }
-      let best = Infinity, bs = -1;
-      for (const { s, w } of near) {
-        const v = w + this.egress[s * ZONES + b];
-        if (v < best) { best = v; bs = s; }
-      }
+      const dk = zd(a, b);
       const drive = this.driveTime[a * ZONES + b] + TUNE.parkMin * Math.min(1, this.zJobs[b] / 2500) + extraDrive;
-      // logistic mode choice on the time difference; smooth, no hard cutoff
-      const share = bs >= 0 && best < Infinity ? 1 / (1 + Math.exp(TUNE.modeBeta * (best + asc - drive))) : 0;
-      const F = T * share;
-      if (T * (1 - share) > 30 && zd(a, b) > 1.2) desire.push({ a, b, trips: T * (1 - share) });
-      if (F <= 0.01) return;
-      transit += F; zTransit[a] += F;
-      const t = this.egressVia[bs * ZONES + b];
-      if (t >= 0) { stOD[bs * S + t] += F; stEntries[bs] += F; }
+      const walkT = dk * TRIP.circuity / TRIP.walkKmh * 60 + TRIP.walkASC, bikeT = dk * TRIP.circuity / TRIP.bikeKmh * 60 + TRIP.bikeASC;
+      // utilities relative to the car (exp(0) = 1); long walks underflow to 0 smoothly
+      const uw = Math.exp(-beta * (walkT - drive)), ub = Math.exp(-beta * (bikeT - drive));
+      const go = a !== b ? this.zAccO[a] : null, gd = this.zAccD[b];
+      let fT = 0, cS = 0, wS = 0, bS = 0, cov = 0;
+      if (go && go.length && gd.length) for (const o of go) for (const d of gd) {
+        if (o.s === d.s) continue;
+        const ride = T_[o.s * S + d.s];
+        if (!(ride < Infinity)) continue;
+        const f = o.f * d.f;
+        const ut = Math.exp(-beta * ((o.w + d.w) * ww + ride + asc - drive));
+        const sum = 1 + ut + uw + ub, F = T * f * ut / sum;
+        cov += f; fT += F; cS += T * f / sum; wS += T * f * uw / sum; bS += T * f * ub / sum;
+        if (F > 0.002) { stOD[o.s * S + d.s] += F; stOD[d.s * S + o.s] += F; stEntries[o.s] += F; stEntries[d.s] += F; }
+      }
+      // the part of the trips with no station within walking distance at one end chooses between car, walking and cycling
+      const rest = T * Math.max(0, 1 - cov), sum3 = 1 + uw + ub;
+      const C = cS + rest / sum3;
+      total += 2 * T; zTrips[a] += 2 * T; zCar[a] += 2 * C;
+      car += 2 * C; walk += 2 * (wS + rest * uw / sum3); bike += 2 * (bS + rest * ub / sum3);
+      if (C > 15 && dk > 1.2) desire.push({ a, b, trips: 2 * C });
+      transit += 2 * fT; zTransit[a] += 2 * fT;
     };
     for (let a = 0; a < ZONES; a++) {
-      const P = this.zHomes[a] * TRIPS_PER_HOME;
+      const P = this.zHomes[a] * PERSONS_PER_HOME * TRIP.perResident / 2;
       if (P <= 0) continue;
       let sum = 0;
-      for (let b = 0; b < ZONES; b++) { gv[b] = attr[b] > 0 ? attr[b] * Math.exp(-zd(a, b) / TUNE.distDecay) : 0; sum += gv[b]; }
+      for (let b = 0; b < ZONES; b++) { gv[b] = attr[b] > 0 ? attr[b] * Math.exp(-zd(a, b) / TRIP.distDecay) : 0; sum += gv[b]; }
       if (sum <= 0) continue;
-      const asc = TUNE.transitASC + this.zCarLocked[a] * TUNE.carLockASC;
+      const asc = TRIP.transitASC + this.zCarLocked[a] * TUNE.carLockASC;
       for (let b = 0; b < ZONES; b++) {
         if (gv[b] <= 0) continue;
-        const T = P * gv[b] / sum;
-        total += T; zTrips[a] += T;
-        route(a, b, T, asc);
+        route(a, b, P * gv[b] / sum, asc);
       }
     }
-    // landmark visitors: extra trips from everywhere toward each open landmark (all-day, peaks, weekends) plus event-day crowds
+    // landmark visitors (a visitor comes and goes: one round trip) from everywhere toward each open landmark, plus event-day crowds
     for (const o of lmOpen) {
       const day = o.def.pattern === 'weekend' ? 0.85 : o.def.pattern === 'events' ? 0.6 : 1;
       const base = o.def.visitors * day, crowd = o.st.eventDay ? o.def.eventTrips : 0;
       if (base + crowd <= 0) continue;
       const w = new Float64Array(ZONES);
       let ws = 0;
-      for (let a = 0; a < ZONES; a++) { if (this.zHomes[a] <= 0) continue; w[a] = this.zHomes[a] * Math.exp(-zd(a, o.zone) / (TUNE.distDecay * 2.2)); ws += w[a]; }
+      for (let a = 0; a < ZONES; a++) { if (this.zHomes[a] <= 0) continue; w[a] = this.zHomes[a] * Math.exp(-zd(a, o.zone) / (TRIP.distDecay * 2.2)); ws += w[a]; }
       if (ws <= 0) continue;
       const lockAsc = o.st.carPark ? TUNE.carLockASC : 0;
       for (let a = 0; a < ZONES; a++) {
         if (w[a] <= 0) continue;
         const f = w[a] / ws;
-        if (base > 0) { total += base * f; zTrips[a] += base * f; route(a, o.zone, base * f, TUNE.transitASC + this.zCarLocked[a] * TUNE.carLockASC + lockAsc); }
+        if (base > 0) route(a, o.zone, base * f, TRIP.transitASC + this.zCarLocked[a] * TUNE.carLockASC + lockAsc);
         // crowds on an event day cannot all park: driving costs a long walk from far-away parking unless the landmark has its own car park
-        if (crowd > 0) { total += crowd * f; zTrips[a] += crowd * f; route(a, o.zone, crowd * f, TUNE.transitASC - 1 + lockAsc, o.st.carPark ? 0 : 28); }
+        if (crowd > 0) route(a, o.zone, crowd * f, TRIP.transitASC - 1 + lockAsc, o.st.carPark ? 0 : 28);
       }
     }
     for (let s = 0; s < S; s++)
@@ -1513,14 +1585,18 @@ export class Sim {
       l.segLoad = segLoad[li].map(([f, r]) => Math.max(f, r) * PEAK_FACTOR);
       l.peakLoad = l.segLoad.reduce((a, b) => Math.max(a, b), 0);
       l.crowd = l.capacity > 0 ? l.peakLoad / l.capacity : 0;
-      l.rating = clamp(100 - Math.max(0, l.crowd - 0.7) * 130 - Math.max(0, l.headway - 4) * 4, 0, 100);
+      l.rating = lineRating(l.crowd, l.headway);
       rSum += l.rating * Math.max(1, l.riders); rW += Math.max(1, l.riders);
     });
     for (const st of m.stations) { const k = m.sIndex.get(st.id); st.riders = k === undefined ? 0 : stEntries[k]; }
     this.rating = rW > 0 ? rSum / rW : 0;
     this.transitTrips = transit;
     this.totalTrips = total;
-    for (let z = 0; z < ZONES; z++) this.zTransitShare[z] = zTrips[z] > 0 ? zTransit[z] / zTrips[z] : 0;
+    this.modeTrips = { car, transit, walk, bike };
+    for (let z = 0; z < ZONES; z++) {
+      this.zTransitShare[z] = zTransit[z] + zCar[z] > 0 ? zTransit[z] / (zTransit[z] + zCar[z]) : 0;
+      this.zCarShare[z] = zTrips[z] > 0 ? zCar[z] / zTrips[z] : TRIP.carShare0;
+    }
     const agg = new Map<number, number>();
     for (const d of desire) {
       const k = Math.min(d.a, d.b) * ZONES + Math.max(d.a, d.b);
@@ -1544,6 +1620,9 @@ export class Sim {
     return { type: 'init', seed: this.seed, height: this.g.height, water: this.g.water, flags: this.g.flags.slice(), villages: this.g.villages, bay: this.g.bay, rail: this.g.rail, mine: this.g.mine, rondpoints: this.g.rondpoints, city: this.cp, profiles: this.profiles };
   }
 
+  /** the metro's share of motorised trips (metro vs car): what "won from the car" means */
+  motorShare() { const d = this.modeTrips.transit + this.modeTrips.car; return d > 0 ? this.modeTrips.transit / d : 0; }
+
   stats(): Stats {
     let b = 0;
     for (const l of this.lots.lots) if (l.alive && l.type && !isAmenity(l.type) && (l.level > 0 || l.constr)) b++;
@@ -1551,8 +1630,8 @@ export class Sim {
       month: this.month, population: Math.round(this.homes * PERSONS_PER_HOME), homes: this.homes, jobs: this.jobs,
       money: this.money, income: this.income, expenses: this.expenses, build: this.buildSpend,
       resDemand: this.resDemand, comDemand: this.comDemand, indDemand: this.indDemand,
-      congestion: this.congestion, driveSpeed: this.driveSpeed, transitShare: this.totalTrips > 0 ? this.transitTrips / this.totalTrips : 0,
-      transitTrips: this.transitTrips, rating: this.rating, buildings: b,
+      congestion: this.congestion, driveSpeed: this.driveSpeed, transitShare: this.motorShare(),
+      transitTrips: this.transitTrips, rating: this.rating, buildings: b, totalTrips: this.totalTrips, modeTrips: { ...this.modeTrips },
     };
   }
 

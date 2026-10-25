@@ -47,8 +47,10 @@ export interface Stats {
   indDemand: number;
   congestion: number;   // 0..~2 (volume / capacity)
   driveSpeed: number;   // km/h effective
-  transitShare: number; // 0..1
-  transitTrips: number; // per day
+  transitShare: number; // 0..1, the metro's share of motorised trips (metro vs car)
+  transitTrips: number; // metro trips per day (journeys, both directions; a change of line is one trip)
+  totalTrips: number;   // trips per day by all modes
+  modeTrips: { car: number; transit: number; walk: number; bike: number };
   rating: number;
   buildings: number;
 }
