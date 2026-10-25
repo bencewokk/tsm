@@ -41,16 +41,21 @@ const GROUPS: Record<string, string[]> = {
   growth: ['grow', 'resubdivide'],
   roads: ['extendRoads', 'upgradeRoads'],
   events: ['checkEvents', 'finance'],
+  upkeep: ['repairRoads', 'checkGraph', 'projects.tick', 'hazards.tick'],
+  fun: ['computeBoom', 'goals.tick', 'networkMoments'],
 };
+/** Timed when the revision has them (older revisions lack the fun-pass ones), so one bench script can A/B two revisions. */
+const OPTIONAL_PHASES = ['repairRoads', 'checkGraph', 'computeBoom', 'networkMoments'] as const;
 
 type Rec = Record<string, number>;
 
 function wrapper(acc: Rec) {
   const stack: number[] = [];
-  return (obj: Record<string, unknown>, name: string, label: string) => {
-    const fn = obj[name] as (...a: unknown[]) => unknown;
-    if (typeof fn !== 'function') throw new Error(`no method ${label}`);
-    obj[name] = function (this: unknown, ...a: unknown[]) {
+  return (obj: Record<string, unknown> | undefined, name: string, label: string, optional = false) => {
+    const fn = obj?.[name] as (...a: unknown[]) => unknown;
+    if (typeof fn !== 'function') { if (optional) return; throw new Error(`no method ${label}`); }
+    const o = obj!;
+    o[name] = function (this: unknown, ...a: unknown[]) {
       const t0 = performance.now();
       stack.push(0);
       try { return fn.apply(this, a); } finally {
@@ -69,6 +74,11 @@ function instrument(sim: Sim, acc: Rec) {
   wrap(sim.asm as unknown as Record<string, unknown>, 'tick', 'asm.tick');
   wrap(sim.lm as unknown as Record<string, unknown>, 'tick', 'lm.tick');
   wrap(sim.field as unknown as Record<string, unknown>, 'update', 'field.update');
+  for (const p of OPTIONAL_PHASES) wrap(s, p, p, true);
+  const sub = (k: string) => s[k] as Record<string, unknown> | undefined;
+  wrap(sub('projects'), 'tick', 'projects.tick', true);
+  wrap(sub('hazards'), 'tick', 'hazards.tick', true);
+  wrap(sub('goals'), 'tick', 'goals.tick', true);
 }
 
 /** CityView.update steps timed with --render. */
