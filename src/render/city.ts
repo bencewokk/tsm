@@ -4,7 +4,7 @@ import { N, CELL, Flag, BT } from '../sim/constants';
 import type { StateMsg, LotsMsg, RoadsMsg } from '../sim/protocol';
 import type { Village } from '../sim/terrain';
 import { vhash, VS } from './common';
-import { patchBuildingMaterial, patchTreeMaterial } from './look';
+import { patchBuildingMaterial, patchTreeMaterial, patchRoofMaterial } from './look';
 import { Layer, REC, unitGeos } from './layers';
 import { kindOf, SITE, PAL, type Kind } from './forms';
 import { Harbour } from './harbour';
@@ -158,6 +158,7 @@ export class CityView {
     this.glassMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0.25, envMapIntensity: 1, vertexColors: true });
     patchBuildingMaterial(this.glassMat, true, true);
     this.plainMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0, vertexColors: true });
+    patchRoofMaterial(this.plainMat);
     this.ghostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.5, depthWrite: false, emissive: 0x404040, emissiveIntensity: 0.4, vertexColors: true });
     this.lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true });
     this.polyMats = { wall: this.wallMat, glass: this.glassMat, plain: this.plainMat, ghost: this.ghostMat, lamp: this.lampMat };

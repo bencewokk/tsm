@@ -223,3 +223,57 @@ uniform float uTime;
   defs();
   VFX.onChange((n) => { if (n === 'thin' || n === 'cam') defs(); });
 }
+
+/**
+ * Roofs of the flat-roofed buildings are covered by a thin `plain` parapet slab, so the roof detail of the building shader never showed
+ * (a 40 m tower roof read as a blank sheet). This patches the plain material to give top faces well above the base of their building
+ * plant-room patches, gravel and a slightly lighter parapet edge, and pitched roofs fine tile courses. Ground slabs (0..0.4 m above
+ * their own base) are untouched. Behind the `bld` switch with the rest of the building looks.
+ */
+export function patchRoofMaterial(mat: THREE.MeshStandardMaterial) {
+  patched.push(mat);
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute float aH;
+        attribute float aSeed;
+        varying vec3 vRfPos;
+        varying vec3 vRfN;
+        varying float vRfY;
+        varying float vRfSeed;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vRfY = aH * length(modelMatrix[1].xyz);
+        vRfSeed = aSeed;
+        vRfPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vRfN = normalize(mat3(modelMatrix) * objectNormal);`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vRfPos;
+        varying vec3 vRfN;
+        varying float vRfY;
+        varying float vRfSeed;
+        float rfHash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        #ifdef TSM_ROOF
+        {
+          vec3 n = normalize(vRfN);
+          float high = step(5.0, vRfY);
+          float flatR = step(0.85, n.y) * high;
+          vec2 rc = floor(vRfPos.xz / 5.5), ru = fract(vRfPos.xz / 5.5);
+          float rh = rfHash(rc + vec2(vRfSeed * 0.13, 4.1));
+          float unit = step(0.82, rh) * step(0.15, ru.x) * step(ru.x, 0.76) * step(0.2, ru.y) * step(ru.y, 0.72);
+          // equipment pads and membrane patches read darker on the pale roofs; the rest varies a few per cent like weathered gravel
+          diffuseColor.rgb *= 1.0 + flatR * (-unit * 0.14 - 0.06 * step(0.55, rh) * (1.0 - unit) + 0.05 * (rh - 0.5));
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.94, 0.97, 1.03), flatR * unit);
+          // pitched roofs: tile courses that fade out before they would shimmer
+          float pitched = (1.0 - step(0.85, n.y)) * step(0.15, n.y) * high;
+          float tileW = fwidth(vRfY * 0.9);
+          diffuseColor.rgb *= 1.0 - pitched * 0.075 * step(fract(vRfY * 0.9), 0.2) * (1.0 - smoothstep(0.25, 0.7, tileW));
+        }
+        #endif`);
+  };
+  mat.customProgramCacheKey = () => 'tsm-roof' + VFX.key('bld');
+  const defs = () => { mat.defines = { ...(mat.defines ?? {}) }; if (VFX.is('bld')) mat.defines.TSM_ROOF = ''; else delete mat.defines.TSM_ROOF; };
+  defs();
+  VFX.onChange((n) => { if (n === 'bld') defs(); });
+}

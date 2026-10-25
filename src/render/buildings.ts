@@ -294,6 +294,9 @@ function designOffice(c: Ctx) {
   const poly = full ? Q.strip(0, 1, 0, 0.78) : Q.strip(0.08, 0.92, 0.1, 0.75);
   const p2 = (cornerStart(c) && full) ? chamfer(poly, 0, 4) : (cornerEnd(c) && full) ? chamfer(poly, 1, 4) : poly;
   block(c, p2, h, col, { mat: 'glass', roof: 'flat' });
+  // plant rooms on the roof (visual only: these indices are used nowhere else)
+  plant(c, p2, c.g + h, 31);
+  if (r(33) < 0.65) plant(c, p2, c.g + h, 35);
   // stepped crown
   if (r(3) < 0.6) block(c, scalePoly(Q.strip(0.15, 0.85, 0.12, 0.62), 1), 7 + r(5) * 8, col, { mat: 'glass', roof: 'flat' }).valueOf();
 }

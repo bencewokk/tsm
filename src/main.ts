@@ -324,7 +324,7 @@ function paperAndLabels() {
   const plan = hud.tool === 'plan';
   const k = plan ? 0.8 : 0.55 * THREE.MathUtils.smoothstep(dist, 3200, 5600);
   terrain?.setPaper(k * (1 - 0.92 * env.night));
-  labels?.update(dist, plan, env.night, env.camera as THREE.PerspectiveCamera, env.renderer.domElement.clientHeight || 900);
+  labels?.update(dist, plan, env.night, env.camera as THREE.PerspectiveCamera, env.renderer.domElement.clientHeight || 900, !!dg);
   if (life) life.group.visible = dist < 6500 && !plan;
 }
 let lastXray = -1;
