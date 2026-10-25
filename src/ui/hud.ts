@@ -62,7 +62,7 @@ export class Hud {
         <div class="lmlist" data-k="lmlist"></div>
       </div>
       <div class="lines panel" data-k="linesPanel">
-        <div class="h">Metro lines</div>
+        <div class="h">Lines</div>
         <div data-k="lines"><div class="muted small">No lines yet. Open <b>Plan metro</b> (P), click the map to place stations, then click stations in order and press Enter.</div></div>
       </div>
       <div class="toolbar panel">
@@ -106,11 +106,12 @@ export class Hud {
     this.el.lines.addEventListener('click', (ev) => {
       const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-line]');
       if (!b || !this.last) return;
-      const id = Number(b.dataset.line), l = this.last.lines.find((q) => q.id === id);
+      const id = Number(b.dataset.line), l = this.last.lines.find((q) => q.id === id) ?? this.last.buses?.find((q) => q.id === id);
       if (!l) return;
+      if (b.dataset.act === 'lane') { this.send({ type: 'setLane', line: id, lane: Number(b.dataset.lane) }); return; }
       if (b.dataset.act === 'add') this.send({ type: 'setTrains', line: id, trains: l.trains + 1 });
       if (b.dataset.act === 'sub') this.send({ type: 'setTrains', line: id, trains: l.trains - 1 });
-      if (b.dataset.act === 'del' && confirm(`Close line ${id}? Tunnels are written off.`)) this.send({ type: 'deleteLine', line: id });
+      if (b.dataset.act === 'del' && confirm(id >= 100 ? `Withdraw bus line B${id - 100}?` : `Close line ${id}? Tunnels are written off.`)) this.send({ type: 'deleteLine', line: id });
     });
   }
 
@@ -228,11 +229,20 @@ export class Hud {
   private linesSig = '';
 
   private renderLines(s: StateMsg) {
-    const sig = JSON.stringify(s.lines.map((l) => [l.id, l.trains, Math.round(l.riders / 50), Math.round(l.rating), Math.round(l.peakLoad / 50)]));
+    const sig = JSON.stringify([s.lines.map((l) => [l.id, l.trains, Math.round(l.riders / 50), Math.round(l.rating), Math.round(l.peakLoad / 50)]), (s.buses ?? []).map((b) => [b.id, b.trains, b.lane, Math.round(b.riders / 50), Math.round(b.ride)]), s.stats.money > 3e6]);
     if (sig === this.linesSig) return;
     this.linesSig = sig;
+    // round 7 step 4: bus lines below the metro: riders, buses, ride time in traffic, and the lane upgrade
+    const LANE = ['ordinary traffic', 'bus priority', 'busway (tram candidate)'];
+    const buses = (s.buses ?? []).map((b) => {
+      const next = b.lane < 2 ? `<button class="mini" data-line="${b.id}" data-act="lane" data-lane="${b.lane + 1}" title="${b.lane === 0 ? 'Paint bus lanes and give buses the signals: $0.8M a km, the buses leave the queues' : 'Build a kerbed busway: $5M a km, faster, bigger buses; the corridor becomes a tram candidate'}">${b.lane === 0 ? 'priority' : 'busway'}</button>` : '';
+      return `<div class="line bus"><div class="lh"><i class="sw" style="background:${b.color}"></i><b>B${b.id - 100}</b><span class="muted">${b.stations.length} stops · ${b.lengthKm.toFixed(1)} km${b.inherited ? ' · inherited' : ''}</span><span class="spacer"></span><button class="mini" data-line="${b.id}" data-act="del" title="Withdraw the line">✕</button></div>
+        <div class="lg"><span>Riders/day</span><b>${num(b.riders)}</b><span>Ride</span><b>${b.ride.toFixed(0)} min</b>
+          <span>Buses</span><b><button class="mini" data-line="${b.id}" data-act="sub">−</button> ${b.trains} <button class="mini" data-line="${b.id}" data-act="add">+</button></b><span>Headway</span><b>${b.headway.toFixed(0)} min</b>
+          <span>Lane</span><b class="small" style="grid-column: span 3">${LANE[b.lane]} ${next}</b></div></div>`;
+    }).join('');
     if (!s.lines.length) {
-      this.el.lines.innerHTML = `<div class="muted small">No lines yet. Open <b>Plan metro</b> (P), click the map to dig stations, click stations in order, then press <b>Enter</b>.</div>`;
+      this.el.lines.innerHTML = `<div class="muted small">No metro lines yet. Open <b>Plan metro</b> (P), click the map to dig stations, click stations in order, then press <b>Enter</b>.</div>` + buses;
       return;
     }
     this.el.lines.innerHTML = s.lines.map((l) => {
@@ -249,7 +259,7 @@ export class Hud {
           <span>Headway</span><b>${l.headway.toFixed(1)} min</b>
           <span>Capacity</span><b>${num(l.capacity)}/h</b>
         </div></div>`;
-    }).join('');
+    }).join('') + buses;
   }
 
   /** Quality button text, e.g. "Quality: Auto (80%)". */

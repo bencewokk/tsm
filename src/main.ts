@@ -1,3 +1,4 @@
+import { BusView } from './render/buses';
 import { PressureView } from './render/pressure';
 import { StationCard } from './ui/stationCard';
 import { ENV_DEF } from './sim/envelopes';
@@ -56,6 +57,7 @@ let terrain: TerrainView | null = null;
 let city: CityView | null = null;
 let metro: MetroView | null = null;
 let labels: Labels | null = null;
+let busView: BusView | null = null;
 let labelsYear = -1;
 let life: Life | null = null;
 let planner: Planner | null = null;
@@ -125,6 +127,8 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     carBlobs = new CarBlobs((life as unknown as { cars: THREE.InstancedMesh }).cars, () => !!life?.group.visible);
     env.scene.add(carBlobs.mesh);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
+    busView = new BusView((x, z) => terrain!.sample(x, z));
+    env.scene.add(busView.group);
     env.scene.add(metro.group);
     markers = new ProjectMarkers((x, z) => terrain!.sample(x, z));
     env.scene.add(markers.group);
@@ -158,6 +162,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     if (newMonth) lastStateAt = performance.now();
     perf.step('city', () => city?.update(m, CITY_BUDGET));
     markers?.update(m.projects);
+    busView?.update(m.buses ?? [], m.stops ?? []);
     if (linesChanged) { perf.step('metro', () => metro?.update(m)); if (sunShadow) sunShadow.dirty = true; }
     planner?.onState(m);
     perf.step('overlays', () => {
@@ -432,6 +437,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'l' || e.key === 'L') hud.toggle('desire');
   else if (e.key === 'o' || e.key === 'O') hud.toggle('pressure');
   else if (e.key === 'Escape' && card.isOpen && hud.tool !== 'plan') card.close();
+  else if (hud.tool === 'plan' && planner && (e.key === 'b' || e.key === 'B')) { planner.setMode(planner.mode === 'bus' ? 'metro' : 'bus'); refreshPlan(); }
   else if (hud.tool === 'plan' && planner) {
     if (e.key === 'Enter') planner.commit();
     else if (e.key === 'Backspace') planner.undo();
@@ -504,6 +510,7 @@ function drawFrame(now: number) {
   paperAndLabels();
   life?.animate(dt * (state && state.speed > 0 ? 1 : 0.4), now / 1000, env.night);
   ships?.animate(now / 1000);
+  busView?.animate(now / 1000, env.camera.position.distanceTo(env.controls.target));
   ripple?.animate(dt);
   goalMarker?.animate(now / 1000, env.camera.position.distanceTo(env.controls.target));
   xray += (xrayTarget - xray) * Math.min(1, dt * 5);
@@ -637,6 +644,7 @@ async function shot(name: string) {
   paperAndLabels();
   life?.animate(0, performance.now() / 1000, env.night);
   ships?.animate(performance.now() / 1000);
+  busView?.animate(performance.now() / 1000, env.camera.position.distanceTo(env.controls.target));
   env.render();
   const url = env.renderer.domElement.toDataURL('image/png');
   await fetch(`/__shot?name=${encodeURIComponent(name)}`, { method: 'POST', body: url });
