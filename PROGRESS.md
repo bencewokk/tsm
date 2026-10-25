@@ -419,3 +419,27 @@ Browser (seed 187, real clicks): Begin, Plan metro, R ("Regional rail (R switche
 Perf (`npm run bench`, docs/perf/bench-round7-step8.txt): ticks 21-36 ms after warm-up on this shared machine (step 5: 19-31); the three access options and the commuters add about 1 ms to computeRiders.
 Captures: screenshots/r7-s8-regional-m36-187.jpg (oblique with the HUD, R1 in the Lines panel, the newspaper), r7-s8-regional-street-187.jpg (the served railway close up).
 Still weak: the out-of-town commuters are a flat 8% of jobs (no regional population growth, no reverse commuting, no out-of-town shopping or visitors); portals without a regional station within 15 cells carry nobody by rail; regional trains do not share track capacity with freight; the existing railway's sleepers render as large dark dashes in low sun (seen before this step too: the railway mesh in render/city.ts, not changed here); no new railway can be laid where history did not lay one (57 has none).
+
+### Step 9: gateways (done)
+Code: `src/sim/gateways.ts` (new: `GATEWAY_TYPES` data, `GatewaySystem`: gates, site finders, jobs and land value, `info`), wired in `sim.ts` (opened in the monthly tick after the road proposals, jobs added after `aggregate`, land value in `computeLandValue`, travellers and lorries in `computeRiders`, `zIndOf` for the lorries' destinations), protocol `gateways`, `src/render/gateways.ts` (new: abstract models), the City panel rows (`ui/hud.ts`).
+- One shape, four variants (data entries): `Gateway { externalDemand, passengerType, cargoPotential, accessModeNeeds, districtEffects }`.
+
+| gateway | gate | site | travellers a day | type | lorries / 1000 residents | access (walk factor, car minutes) | district |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| intercity station | 30k people, month 36, a railway | the railway nearest the old town (an existing station within 3 cells becomes the hall) | 600 + 3% of population | business | 0 | walk x1.2, car +4 min (short parking) | 900 jobs, land value +0.12 within 6 cells |
+| motorway junction | 40k, month 60, a road portal | 4 cells in from the road portal with the most cars | 800 + 2% | freight | 12 | car -6 min | 1,200 jobs (logistics), -0.04 within 4 |
+| ferry terminal | 25k, month 48, open water within 16 cells of the old town | a shore cell on a street facing open water | 500 + 1.5% | ferry (foot) | 1 | walk x1.1, car +10 min | 300 jobs, +0.06 within 4 |
+| airport | 60k, month 96 | flat open land 30+ cells out: an 11-cell runway off the streets, no plots near, dry, height spread under 6 m, near a road | 1,500 + 3.5% | air | 3 | walk x1.4, car -4 min (taxis) | 2,500 jobs, -0.10 within 7 (noise) |
+
+- At most one gateway opens every 18 months; a headline says what serves it. Travellers go to and from homes and jobs across the city (6 km decay) and choose car or transit (up to two stations within a walk of the gateway, luggage on the walk, the city network, the walk at the end) in the city's logit; their cars and the lorries (2.5 cars each, to the industrial zones) join the street assignment.
+Opened (`scripts/tmp/gw.ts`, the scripted two-line network, decisions "yes"), month 192:
+| seed | intercity | ferry | motorway | airport |
+| --- | --- | --- | --- | --- |
+| 4821 coast / port | m41, 2,867 a day, 24% by transit | m59, 1,633, 30% | m77, 2,311, 0%, 907 lorries | m96, 4,144, 0%, 227 lorries |
+| 187 hills / rail junction | m38, 3,795, 33% | (no water) | m60, 2,930, 0%, 1,278 lorries | m96, 5,228, 0% |
+| 304 coast / planned capital | m37, 3,338, 40% | m55, 1,869, 30% | m73, 2,626, 0% | m96, 4,695, 0% |
+Serving the airport (`scripts/tmp/gwab.ts`, 4821: a metro line from the nearest station to the terminal the month after it opens, against none): 12 months on, air travellers by transit 0% -> 15.4% (627 a day), city metro share 6.2% -> 7.6%, car 47.7% -> 46.7%; at month 144 16.6% of 4,612.
+Calibration with gateways (`npm run calib -- 4821 187 --months=192`): 4821 car 45% / 48%, metro 6.9% / 6.0% at month 96 / 192, busiest station Harbour 4.1k / 3.8k; 187 car 46% / 42%, metro 6.1% / 5.7%; congestion 0.76-1.05 (the gateways' cars and lorries add load: 4821 at month 192 0.95 against 0.94 before).
+Browser (4821, month 110, the page's own city): the four gateways opened at months 43, 61, 79 and 97 (newspaper headlines); the City panel lists "Intercity 3.0k · 18% transit", "Motorway 2.4k · 0% transit", "Ferry 1.7k · 27% transit", "Airport 4.3k · 0% transit", the tooltip says what serves each. First airport capture showed the runway laid across an arterial (the finder checked plots, not streets): fixed, the runway and terminal cells must be off the streets.
+Captures: screenshots/r7-s9-airport-4821.jpg (runway, terminal, apron, tower beside the road north of Saltmarsh), r7-s9-ferry-4821.jpg (pier and moored ferry), r7-s9-intercity-ferry-4821.jpg (the intercity hall on the railway by the river), r7-s9-late-m110-4821.jpg (late oblique with the HUD and the gateway rows).
+Still weak: gateways open by population and month without a decision (no choice of airport site, no rail-link-or-car-park deal); travellers do not change with service quality beyond the mode split (no induced air travel); the lorries only load the streets (no freight terminals or rail freight: step 10); the models are placeholders in card and paint, no animation, and no map label beyond the headline and the panel rows.

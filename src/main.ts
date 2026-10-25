@@ -1,4 +1,5 @@
 import { BusView } from './render/buses';
+import { GatewayView } from './render/gateways';
 import { PressureView } from './render/pressure';
 import { StationCard } from './ui/stationCard';
 import { ENV_DEF } from './sim/envelopes';
@@ -58,6 +59,7 @@ let city: CityView | null = null;
 let metro: MetroView | null = null;
 let labels: Labels | null = null;
 let busView: BusView | null = null;
+let gatewayView: GatewayView | null = null;
 let labelsYear = -1;
 let life: Life | null = null;
 let planner: Planner | null = null;
@@ -130,6 +132,8 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     // buses and transit streets follow the street surface: over water that is the bridge deck (6 m, as the road renderer draws it)
     busView = new BusView((x, z) => { const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL); return cx >= 0 && cz >= 0 && cx < N && cz < N && m.water[cz * N + cx] ? 5.4 : terrain!.sample(x, z); });
     env.scene.add(busView.group);
+    gatewayView = new GatewayView((x, z) => terrain!.sample(x, z));
+    env.scene.add(gatewayView.group);
     env.scene.add(metro.group);
     markers = new ProjectMarkers((x, z) => terrain!.sample(x, z));
     env.scene.add(markers.group);
@@ -166,6 +170,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     markers?.update(m.projects);
     busView?.update(m.buses ?? [], m.stops ?? []);
     if (m.roadPlan) busView?.setRoads(m.roadPlan);
+    if (m.gateways) gatewayView?.update(m.gateways);
     // regional rail lines run on the railway and are drawn by the surface view (round 7 step 8); the metro view draws the metro
     if (linesChanged) { perf.step('metro', () => metro?.update({ ...m, lines: m.lines.filter((l) => l.mode !== 'rail') })); if (sunShadow) sunShadow.dirty = true; }
     busView?.updateRail(m.lines.filter((l) => l.mode === 'rail'), m.stations);

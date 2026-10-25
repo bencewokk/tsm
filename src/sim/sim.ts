@@ -4,6 +4,7 @@ import { PressureSystem } from './pressure';
 import { Traffic, TRAFFIC } from './traffic';
 import { RoadPlanner } from './arterials';
 import { Regional, REGION } from './regional';
+import { GatewaySystem, GATEWAYS, GATEWAY_TYPES } from './gateways';
 import { BUS_STOP_COST, BUS_COST, BUS_MONTH, STOP_UPKEEP, LANE_COST_KM, TRAM_COST, TRAM_MONTH } from './constants';
 import { STATION_COST, TRAIN_COST, START_MONEY, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
@@ -215,6 +216,8 @@ export class Sim {
   roadPlan = new RoadPlanner(this);
   /** round 7 step 8: regional rail and the commuters from the region (regional.ts) */
   regional = new Regional(this);
+  /** round 7 step 9: intercity station, motorway junction, ferry terminal, airport (gateways.ts) */
+  gateways = new GatewaySystem(this);
   /** the station whose plan preview the UI asked for */
   previewStation: number | null = null;
   lastEventMonth = -99;
@@ -551,6 +554,17 @@ export class Sim {
     }
   }
 
+  /** industrial activity of a zone (plot levels of industry), for the gateways' lorries */
+  private zIndCache: Float64Array | null = null;
+  private zIndMonth = -1;
+  zIndOf(z: number) {
+    if (this.zIndMonth !== this.month || !this.zIndCache) {
+      this.zIndCache = new Float64Array(ZONES); this.zIndMonth = this.month;
+      for (let i = 0; i < N * N; i++) if (this.cInd[i]) this.zIndCache[this.zoneOf(i)] += this.cInd[i];
+    }
+    return this.zIndCache[z];
+  }
+
   /** Land value reacts at once when service changes; buildings follow over the next months (lvS lags). */
   refreshTransit() {
     this.computeTransit();
@@ -841,6 +855,7 @@ export class Sim {
     this.computeRiders();
     this.demand.tick();
     this.roadPlan.tick();
+    this.gateways.tick();
     this.computeLandValue();
     for (let i = 0; i < N * N; i++) this.lvS[i] += (this.lv[i] - this.lvS[i]) * TUNE.lvLag;
     this.field.update(this);
@@ -945,6 +960,7 @@ export class Sim {
     for (let i = 0; i < N * N; i++) if (g.road[i]) this.zRoads[this.zoneOf(i)] += CAPW[g.road[i]];
     for (let z = 0; z < ZONES; z++) this.zCarLocked[z] = this.zHomes[z] > 0 ? this.zCarLocked[z] / this.zHomes[z] : 0;
     this.homes = h; this.jobs = j;
+    this.gateways.addJobs();
     const w = j + h * 0.3;
     if (w > 0) this.centre = { x: jx / w, y: jy / w };
     const rd = this.roadDist;
@@ -1306,7 +1322,7 @@ export class Sim {
       const pk = Math.min(0.15, park[i] * TUNE.wPark);
       const nz = Math.min(0.4, ind[i] * TUNE.wInd);
       const dc = Math.hypot(x - cx, y - cy) / (N * 0.5);
-      let v = TUNE.base + TUNE.wCar * car + TUNE.wTransit * this.transitCell[i] + this.stationPrem[i] + water + pk - nz - TUNE.wCentre * dc + TUNE.tramFront * this.tramCell[i];
+      let v = TUNE.base + TUNE.wCar * car + TUNE.wTransit * this.transitCell[i] + this.stationPrem[i] + water + pk - nz - TUNE.wCentre * dc + TUNE.tramFront * this.tramCell[i] + this.gateways.lv[i];
       if (g.flags[i] & Flag.Steep) v -= 0.2;
       if (ENVS.on && this.envs.env[i] === ENV.Protected) v += 0.06;   // a protected old town is worth more (and visited more, see computeRiders)
       if (g.flags[i] & Flag.Flood) v -= 0.25;
@@ -2012,6 +2028,55 @@ export class Sim {
         });
       }
     }
+    // round 7 step 9: travellers through the gateways (to and from homes and jobs across the city) and their lorries
+    if (GATEWAYS.on) for (const gw of this.gateways.list) {
+      const t = GATEWAY_TYPES.find((q) => q.id === gw.id)!, pop = this.homes * PERSONS_PER_HOME;
+      const P = t.externalDemand.base + t.externalDemand.perPop * pop;
+      // stations within a walk of the gateway (luggage makes the walk count more)
+      const acc: { s: number; w: number }[] = [];
+      for (let k = 0; k < S; k++) { const wt = this.walk[k]?.[gw.cell]; if (wt !== undefined && wt < TUNE.walkCap) acc.push({ s: k, w: wt + 1 }); }
+      acc.sort((x, y) => x.w - y.w); acc.length = Math.min(acc.length, 2);
+      let sum = 0;
+      const g = new Float64Array(ZONES);
+      for (let b = 0; b < ZONES; b++) {
+        const a2 = this.zHomes[b] * 0.6 + this.zJobs[b];
+        if (a2 <= 0) continue;
+        const dk = Math.hypot((b % NZ + 0.5) * ZONE - gw.x, (((b / NZ) | 0) + 0.5) * ZONE - gw.y) * CELL / 1000;
+        g[b] = a2 * Math.exp(-dk / GATEWAYS.decay); sum += g[b];
+      }
+      let tr = 0;
+      if (sum > 0) for (let b = 0; b < ZONES; b++) {
+        if (g[b] <= 0) continue;
+        const T = P * g[b] / sum;
+        const drive = this.driveTime[gw.zone * ZONES + b] + t.accessModeNeeds.carMin + TUNE.parkMin * 0.5;
+        let F = 0;
+        if (acc.length) for (const d of this.zAccD[b]) {
+          let bc = Infinity, bt = -1, bs = -1, bw = 0;
+          for (const o of acc) for (let y = 0; y < 3; y++) {
+            const ds = y === 0 ? d.s : y === 1 ? d.s2 : d.s3, dw = y === 0 ? d.w : y === 1 ? d.w2 : d.w3;
+            if (ds < 0) continue;
+            const r = ds === o.s ? 0 : T_[o.s * S + ds];
+            if (!(r < Infinity)) continue;
+            const c = (o.w * t.accessModeNeeds.walkMul + dw) * ww + r;
+            if (c < bc) { bc = c; bt = ds; bs = o.s; bw = o.w + dw; }
+          }
+          if (bt < 0) continue;
+          const ut = Math.exp(-beta * (bc + TRIP.transitASC - drive)), f = T * d.f * ut / (1 + ut);
+          F += f;
+          if (bt !== bs && f > 0.002) { stOD[bs * S + bt] += f; stOD[bt * S + bs] += f; stEntries[bs] += f; stEntries[bt] += f; }
+          const jk = bs * S + bt;
+          if (bt !== bs) { jF += f; jWalk += f * bw; jWait += f * JW[jk]; jRide += f * JR[jk]; jXfer += f * JX[jk]; jCrowd += f * JC[jk]; jCh += f * JN[jk]; }
+        }
+        total += 2 * T; car += 2 * (T - F); transit += 2 * F; tr += F;
+        this.demand.add(gw.zone, b, 0, 2 * (T - F), 3, 0, 2 * F);
+      }
+      // lorries: to the industrial zones, each counted as 2.5 cars on the streets (not trips of residents)
+      const lorries = t.cargoPotential * pop / 1000;
+      let isum = 0;
+      for (let b = 0; b < ZONES; b++) isum += this.zIndOf(b);
+      if (lorries > 0 && isum > 0) for (let b = 0; b < ZONES; b++) { const v = this.zIndOf(b); if (v > 0) this.demand.add(gw.zone, b, 0, 2 * 2.5 * lorries * v / isum, 3, 0, 0); }
+      gw.stats = { trips: P, transit: tr, car: P - tr, cargo: lorries };
+    }
     for (let s = 0; s < S; s++)
       for (let t = 0; t < S; t++) {
         const F = stOD[s * S + t];
@@ -2141,7 +2206,7 @@ export class Sim {
       landmarks: this.lm.info(),
       assemblies: this.asm.infos(),
       projects: this.projects.infos(), notices: this.projects.notices.slice(-5),
-      env: this.envs.env.slice(), plans: this.envs.infos(), pressure: this.demand.info(), roadPlan: this.roadPlan.info(), region: this.regional.info(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
+      env: this.envs.env.slice(), plans: this.envs.infos(), pressure: this.demand.info(), roadPlan: this.roadPlan.info(), region: this.regional.info(), gateways: this.gateways.info(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
       desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
       goals: this.goals.infos(), goalsDone: this.goals.count(), goalsTotal: this.goals.total(), moments: this.moments.slice(-10), unlocks: this.unlocks.slice(),
       log: this.log.slice(-8), speed: this.speed,

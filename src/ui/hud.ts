@@ -57,6 +57,7 @@ export class Hud {
         <div class="row" title="Trips on buses only (a bus that feeds the metro counts as a metro trip)"><span>Bus-only trips / day</span><b data-k="bustrips">-</b></div>
         <div class="row" data-k="tramrow" style="display:none"><span>Tram trips / day</span><b data-k="tramtrips">-</b></div>
         <div class="row" data-k="jrow"><span>Avg journey</span><b data-k="journey">-</b></div>
+        <div data-k="gwrows"></div>
         <div class="row" title="Station area plans pay the city a planning gain on the floors they allow above the old zoning"><span>Value captured</span><b data-k="capture">-</b></div>
         <div class="h lmh">Projects <span class="muted small" data-k="projbudget"></span></div>
         <div class="lmlist" data-k="projlist"></div>
@@ -329,6 +330,13 @@ export class Hud {
     e.bustrips.textContent = num(st.modeTrips.bus);
     e.tramrow.style.display = (s.buses ?? []).some((b) => b.lane === 3) ? '' : 'none';
     e.tramtrips.textContent = num(st.modeTrips.tram ?? 0);
+    // round 7 step 9: the gateways, travellers a day and the share that come by transit; the tooltip says what serves them
+    const gws = s.gateways ?? [];
+    const gsig = JSON.stringify(gws.map((g) => [g.id, Math.round(g.trips / 100), Math.round(g.transit / Math.max(1, g.trips) * 100)]));
+    if (e.gwrows.dataset.sig !== gsig) {
+      e.gwrows.dataset.sig = gsig;
+      e.gwrows.innerHTML = gws.map((g) => `<div class="row" title="${g.name}: ${Math.round(g.trips).toLocaleString('en-US')} travellers a day${g.cargo ? `, ${Math.round(g.cargo)} lorries` : ''}. What serves it: ${g.serve}."><span>${g.type.split(' ')[0]}</span><b>${(g.trips / 1000).toFixed(1)}k · ${Math.round(g.transit / Math.max(1, g.trips) * 100)}% transit</b></div>`).join('');
+    }
     // round 7 step 5: the average door-to-door transit journey, its parts in the tooltip
     const j = st.journey;
     if (j && j.trips > 0) {
