@@ -44,11 +44,14 @@ interface GoalDef {
   track: GoalTrack;
   title: (s: Sim) => string;
   text: (s: Sim) => string;
-  target: number | ((s: Sim) => number);
+  /** a number, or a function of the sim and the goal's baseline (its `cur` when it became the active goal of its track) */
+  target: number | ((s: Sim, base: number) => number);
   unit: GoalInfo['unit'];
   cur: (s: Sim) => number;
   grant: number;           // $ million
   unlock?: 'signals' | 'atc';
+  /** what the relative target is measured against when the goal opens (default: cur) */
+  baseOf?: (s: Sim) => number;
   reward?: string;
   where?: (s: Sim) => { x: number; y: number } | null;
   frame?: (s: Sim) => { x: number; y: number; span: number } | null;
@@ -75,6 +78,31 @@ const towersOnLine = (s: Sim) => {
   return n;
 };
 const share = (s: Sim) => s.motorShare();
+/** households within 7 cells of a settlement centre */
+function settlementHomes(s: Sim, v: { x: number; y: number }) {
+  let h = 0;
+  for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
+    const x = Math.round(v.x) + dx, y = Math.round(v.y) + dy;
+    if (x >= 0 && y >= 0 && x < N && y < N && dx * dx + dy * dy <= 49) h += s.cHomes[y * N + x];
+  }
+  return h;
+}
+/** the most populous settlement (old quarter or village) no open station reaches: the "serve a quarter" goal's place, picked when the goal opens */
+function unserved(s: Sim) {
+  const pick = s.goals.pick.serve_quarter;
+  if (pick !== undefined) return s.g.villages[pick] ?? null;
+  let best = -1, bh = 0;
+  s.g.villages.forEach((v, k) => { if (reached(s, v)) return; const h = settlementHomes(s, v); if (h > bh) { bh = h; best = k; } });
+  return best >= 0 ? s.g.villages[best] : null;
+}
+/** metro trips a day per resident */
+const perRes = (s: Sim) => s.transitTrips / Math.max(1, s.stats().population);
+/**
+ * A relative ridership target: `mul` times the metro trips per resident when the goal opened (at least `add` more per resident), times
+ * today's population. Riders per resident stay flat while the city grows round the same stations (0.09-0.17 on eight seeds from year 2 to 6
+ * with the starter line), so only new stations and lines get there; the target in trips moves with the city.
+ */
+const grow = (mul: number, add: number) => (s: Sim, base: number) => Math.ceil(Math.max(base * mul, base + add) * s.stats().population / 100) * 100;
 
 export const GOALS: GoalDef[] = [
   // ---- network
@@ -89,25 +117,32 @@ export const GOALS: GoalDef[] = [
   },
   { id: 'stations_4', track: 'network', unit: 'n', grant: 10, title: () => 'Open 4 stations', text: () => 'More stops put more homes within a walk of the metro. Extend the line or dig a second one.', target: 4, cur: stationsOpen },
   { id: 'second_line', track: 'network', unit: 'n', grant: 20, title: () => 'Open a second line', text: () => 'A second line reaches new streets and gives riders somewhere to change.', target: 2, cur: (s) => s.metro.lines.length },
+  {
+    id: 'serve_quarter', track: 'network', unit: 'n', grant: 15,
+    title: (s) => `Bring ${unserved(s)?.name ?? 'a new quarter'} onto the metro`,
+    text: (s) => { const v = unserved(s); return v ? `${v.name} has ${Math.round(settlementHomes(s, v) * 2.3).toLocaleString('en-US')} residents and no station within reach. A station in its streets wins their trips from the car.` : 'Every quarter has a station.'; },
+    target: 1, cur: (s) => { const v = unserved(s); return !v || reached(s, v) ? 1 : 0; },
+    where: (s) => unserved(s),
+  },
   { id: 'interchange', track: 'network', unit: 'n', grant: 25, unlock: 'signals', reward: '$25M and signalling: lines run 20% faster', title: () => 'Build an interchange', text: () => 'Make two lines share a station: riders can change there and every trip gets shorter.', target: 2, cur: maxLinesAtStation },
   { id: 'stations_12', track: 'network', unit: 'n', grant: 30, title: () => 'Open 12 stations', text: () => 'A network, not a line.', target: 12, cur: stationsOpen },
   { id: 'three_lines', track: 'network', unit: 'n', grant: 40, title: () => 'Run 3 lines', text: () => 'Three lines make a network people plan their day around.', target: 3, cur: (s) => s.metro.lines.length },
   { id: 'stations_25', track: 'network', unit: 'n', grant: 60, title: () => 'Open 25 stations', text: () => 'The metro reaches most of the city.', target: 25, cur: stationsOpen },
   // ---- ridership (trips a day)
   { id: 'riders_1500', track: 'riders', unit: 'k', grant: 8, title: () => 'Carry 1,500 trips a day', text: () => 'Stations in dense streets and places people want to go carry more. Desire lines (L) show where trips want to go.', target: 1500, cur: (s) => s.transitTrips },
-  { id: 'riders_5k', track: 'riders', unit: 'k', grant: 12, title: () => 'Carry 5,000 trips a day', text: () => 'Fares pay the running costs and then some.', target: 5000, cur: (s) => s.transitTrips },
-  { id: 'riders_12k', track: 'riders', unit: 'k', grant: 20, unlock: 'atc', reward: '$20M and automatic train control: trains hold 25% more', title: () => 'Carry 12,000 trips a day', text: () => 'A busy metro: watch the peak load on each line.', target: 12000, cur: (s) => s.transitTrips },
+  // the middle of the ladder is relative to the riders when the goal opens: a city growing round the same stations does not get there on its
+  // own in a few years, new stations and lines do
+  { id: 'riders_grow', track: 'riders', unit: 'k', grant: 12, title: () => 'Half as many riders again per resident', text: () => 'Riders per resident stay flat while the city grows round the same stations. New stations in busy streets and a second line raise them; the target grows with the city.', target: grow(1.5, 0.04), cur: (s) => s.transitTrips, baseOf: perRes },
+  { id: 'riders_double', track: 'riders', unit: 'k', grant: 20, unlock: 'atc', reward: '$20M and automatic train control: trains hold 25% more', title: () => 'Twice the riders per resident', text: () => 'A network people plan their day around: watch the peak load on each line. The target grows with the city.', target: grow(2, 0.08), cur: (s) => s.transitTrips, baseOf: perRes },
   { id: 'riders_30k', track: 'riders', unit: 'k', grant: 35, title: () => 'Carry 30,000 trips a day', text: () => 'The metro is how the city moves.', target: 30000, cur: (s) => s.transitTrips },
   { id: 'riders_60k', track: 'riders', unit: 'k', grant: 60, title: () => 'Carry 60,000 trips a day', text: () => 'A world-class system.', target: 60000, cur: (s) => s.transitTrips },
-  // ---- city
+  // ---- city (years 3-6: shares of motorised trips and a tower, which need new lines; plain population counts only early and late)
   { id: 'pop_12k', track: 'city', unit: 'k', grant: 5, title: () => 'Reach 12,000 residents', text: () => 'The city grows where land is valuable. Stations make land valuable.', target: 12000, cur: (s) => s.stats().population },
+  { id: 'share_15', track: 'city', unit: 'pct', grant: 15, title: () => 'Win 15% of motorised trips from the car', text: () => 'The rival is the road: faster, more frequent, closer to where people live. One line is not enough.', target: 0.15, cur: share },
   { id: 'tower_60', track: 'city', unit: 'n', grant: 15, title: () => 'Raise a 60 m tower by a station', text: () => 'Towers rise only where jobs, centre and station access overlap: connect the busy centre.', target: 1, cur: towersOnLine },
-  { id: 'share_15', track: 'city', unit: 'pct', grant: 10, title: () => 'Win 15% of trips from the car', text: () => 'The rival is the road: faster, more frequent, closer to where people live.', target: 0.15, cur: share },
-  { id: 'pop_25k', track: 'city', unit: 'k', grant: 10, title: () => 'Reach 25,000 residents', text: () => 'A real town.', target: 25000, cur: (s) => s.stats().population },
+  { id: 'share_30', track: 'city', unit: 'pct', grant: 25, title: () => 'Win 30% of motorised trips from the car', text: () => 'Most of the city can leave the car at home.', target: 0.30, cur: share },
   { id: 'rating_75', track: 'city', unit: 'mo', grant: 15, title: () => 'Keep service rating above 75 for 6 months', text: () => 'Crowded or infrequent trains drag the rating down: add trains or a parallel line.', target: 6, cur: (s) => s.goals.calm },
-  { id: 'share_30', track: 'city', unit: 'pct', grant: 20, title: () => 'Win 30% of trips from the car', text: () => 'Most of the city can leave the car at home.', target: 0.30, cur: share },
-  { id: 'pop_50k', track: 'city', unit: 'k', grant: 20, title: () => 'Reach 50,000 residents', text: () => 'A city.', target: 50000, cur: (s) => s.stats().population },
-  { id: 'share_45', track: 'city', unit: 'pct', grant: 30, title: () => 'Win 45% of trips from the car', text: () => 'The car is the minority choice.', target: 0.45, cur: share },
+  { id: 'share_45', track: 'city', unit: 'pct', grant: 30, title: () => 'Win 45% of motorised trips from the car', text: () => 'The car is the minority choice.', target: 0.45, cur: share },
   { id: 'pop_80k', track: 'city', unit: 'k', grant: 30, title: () => 'Reach 80,000 residents', text: () => 'A metropolis.', target: 80000, cur: (s) => s.stats().population },
   { id: 'pop_120k', track: 'city', unit: 'k', grant: 50, title: () => 'Reach 120,000 residents', text: () => 'A capital.', target: 120000, cur: (s) => s.stats().population },
 ];
@@ -116,10 +151,23 @@ export class GoalSystem {
   done: Record<string, number> = {};
   /** consecutive months with rating >= 75 and at least 2,000 trips a day */
   calm = 0;
+  /** each goal's `cur` when it became its track's active goal (relative targets) */
+  base: Record<string, number> = {};
+  /** a place picked when a goal opened (village index), so the goal does not wander */
+  pick: Record<string, number> = {};
   constructor(private sim: Sim) {}
 
   private def(id: string) { return GOALS.find((g) => g.id === id)!; }
-  private targetOf(g: GoalDef) { return typeof g.target === 'function' ? g.target(this.sim) : g.target; }
+  private targetOf(g: GoalDef) { return typeof g.target === 'function' ? g.target(this.sim, this.base[g.id] ?? (g.baseOf ?? g.cur)(this.sim)) : g.target; }
+  /** remember the baseline and place of goals that just became active */
+  private open() {
+    const s = this.sim;
+    for (const g of this.active()) {
+      if (this.base[g.id] !== undefined) continue;
+      if (g.id === 'serve_quarter') { const v = unserved(s); if (v) this.pick[g.id] = s.g.villages.indexOf(v); }
+      this.base[g.id] = (g.baseOf ?? g.cur)(s);
+    }
+  }
   rewardText(g: GoalDef) { return g.reward ?? `$${g.grant}M grant`; }
 
   /** the first unfinished goal of each track */
@@ -135,6 +183,7 @@ export class GoalSystem {
   tick() {
     const s = this.sim;
     this.calm = s.rating >= 75 && s.transitTrips >= 2000 ? this.calm + 1 : 0;
+    this.open();
     for (const g of this.active()) {
       const t = this.targetOf(g), c = g.cur(s);
       if (c + 1e-9 < t) continue;
@@ -146,6 +195,7 @@ export class GoalSystem {
       s.moment('goal', `Goal reached: ${g.title(s)}`, `${this.rewardText(g)} paid into the city account.`, '#e0a526', w?.x ?? N / 2, w?.y ?? N / 2, true, g.id);
       s.say(`Goal reached: ${g.title(s)} (${this.rewardText(g)})`);
     }
+    this.open();
   }
 
   infos(): GoalInfo[] {

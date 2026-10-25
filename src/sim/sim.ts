@@ -100,6 +100,9 @@ export function lineRating(crowd: number, headway: number) {
   return clamp(100 - c - h, 10, 100);
 }
 
+/** months after the first line opens before the first City hall decision */
+const PACE_FIRST = 6;
+
 export const BOOM = { on: true, months: 30, full: 14, res: 40, com: 46, thresh: 0.12, rank: 0.4, lvBonus: 0.15, upBonus: 0.1, fastAge: 3, zoneOps: 10 };
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -198,6 +201,8 @@ export class Sim {
   moments: Moment[] = [];
   private momentSeq = 0;
   private lines0 = 0;
+  /** month the first line opened (-1: none yet); City hall decisions wait for it */
+  firstLineMonth = -1;
   /** 0..1 per cell: how strongly a young station's walk catchment is being developed this month (see computeBoom) */
   boom = new Float32Array(N * N);
   /** pools only plots in a young station's catchment may spend; refilled each month while a station is in its boom */
@@ -289,6 +294,7 @@ export class Sim {
           for (let i = 0; i < N * N; i++) if (this.walkToStation(i) <= 8) { homes += this.cHomes[i]; jobs += this.cJobs[i]; }
           const first = this.lines0 === 0;
           this.lines0++;
+          if (first) this.firstLineMonth = this.month;
           this.moment('open', `Line ${l.id} opens: ${sts[0].name} to ${sts[sts.length - 1].name}`,
             `${l.stations.length} stations over ${l.lengthKm.toFixed(1)} km. ${Math.round(homes).toLocaleString('en-US')} homes and ${Math.round(jobs).toLocaleString('en-US')} jobs now lie within an 8-minute walk of a station. Land values are already moving${first ? ': watch for cranes round the stations' : ''}.`,
             l.color, hx, hy, true, String(l.id));
@@ -334,6 +340,8 @@ export class Sim {
   // ---------------------------------------------------------------- events
   private checkEvents() {
     if (this.pending) return;
+    // no City hall decision (most of the early ones are a bill) before the first line has run for a while: the player's first money goes on the metro
+    if (this.firstLineMonth < 0 || this.month < this.firstLineMonth + PACE_FIRST) return;
     for (const def of EVENTS) {
       if (this.fired[def.id] !== undefined) continue;
       if (def.landmark) {

@@ -55,5 +55,6 @@ for (const seed of seeds) {
       console.log(`    heights (res+com buildings): <=10m ${hb[0]}, 11-16 ${hb[1]}, 17-24 ${hb[2]}, 25-36 ${hb[3]}, 37-60 ${hb[4]}, >60 ${hb[5]}; towers >36 m next to a detached house (<100 m): ${tallNearDetached}/${tall}`);
     }
   }
+  console.log(`  goals: ${Object.entries(sim.goals.done).sort((x, y) => x[1] - y[1]).map(([id, mo]) => `${id}@m${mo}`).join(", ")}`);
   void CELL; void PERSONS_PER_HOME;
 }

@@ -40,13 +40,15 @@ export const STATION_COST = 5e6;
 export const TUNNEL_KM = 11e6;
 export const WATER_KM = 34e6;          // tunnelling under water costs ~3x
 export const TRAIN_COST = 2e6;         // buying a train
-export const TRAIN_MONTH = 0.05e6;     // running cost per train per month
-export const STATION_UPKEEP = 0.02e6;  // per station per month
-export const TRACK_UPKEEP_KM = 0.015e6; // per km per month
+// running costs (round 7: were 0.05M / 0.02M / 0.015M, so a line paid for itself many times over and money never bound; now a starter
+// line roughly breaks even on fares in its first years and a well-used one makes a modest surplus)
+export const TRAIN_MONTH = 0.12e6;     // running cost per train per month (crew, energy, maintenance)
+export const STATION_UPKEEP = 0.06e6;  // per station per month (staff, escalators, cleaning)
+export const TRACK_UPKEEP_KM = 0.04e6; // per km per month
 export const FARE = 4;                 // flat fare per trip
 export const TRAIN_CAP = 300;          // passengers per (short, automated) train
 export const METRO_SPEED = 36;         // km/h including dwell
-export const START_MONEY = 150e6;
+export const START_MONEY = 100e6;     // round 7: was 150M (line two and three were affordable from day one)
 export const LINE_COLORS = ['#d9534f', '#2f7fc1', '#3a9d5d', '#e0a526', '#8e5bb5', '#e06fa0', '#1fa3a3', '#7a6a58'];
 
 /** Cost to tunnel between two cell positions; fraction under water sampled along the segment. */
