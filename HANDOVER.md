@@ -95,3 +95,6 @@ Stronger macro structure and density discipline, NOT more variation (no new buil
 - Bridge landmark missing; landmark proposals ignore `dominantBuildingTypes`; no rating milestones (unlocks are month/population only).
 - (fixed) Docks `built` count: see PROGRESS.
 - Git on Windows prints LF->CRLF warnings; harmless. `screenshots/*.png` is git-ignored.
+
+## Visual pass branch (worktree-agent-aa7573285fba2d85f, not merged, not pushed)
+Read VISUAL-PASS.md (diagnosis, perf table, fun-pass event mapping, next steps). Switches: `?vfx=0` classic look, `?novfx=name,...`, `?hud=classic` old HUD. Dev: `tsm.fun(kind|'all')` fires sample events through the diegetic layer, `tsm.dg` is the layer, `scripts/visual-bench.js` has `__cap`, `__bench`, `__ab`, `__setup`.
