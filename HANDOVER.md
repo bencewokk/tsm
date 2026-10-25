@@ -9,18 +9,44 @@
 - Perf after the merge (PERF.md "Round 6 merge check"): no consistent headless tick change against 7994ad2 (fun-pass phases 0-1.6 ms a tick); browser GPU p50 at month 120, High, 1500x900: overview 12.9, mid 12.2, street 12.6 ms; the visual pass costs +11-13% in an interleaved A/B (over the 10% budget, the headroom is spent: the next visual item must pay for itself).
 - New URL flags: `?noboom=1` (no station boom), `?vfx=0` (classic look), `?novfx=ground,bld,night,...` (one look off, see `src/render/vfx.ts`), `?hud=classic`. Dev: `tsm.events` (the bus), `tsm.dg` (the layer), `tsm.fun(kind | 'all')` (sample events straight into the layer, synthetic), `tsm.sound`, `tsm.ripple`; `npm run fun` (first-ten-minutes metrics); `scripts/visual-bench.js` (`__cap`, `__bench`, `__ab`).
 
-## Next (in this order)
-1. Money should bind: try a 100M start, with the early goals funding line two (now 135M is left after a 36-42M first line and goals pay $5-60M, so line two and three are affordable from day one).
-2. Hold back early decision dialogs that cost cash until a line exists (the first ones are mostly a bill: -22M / -35M at months 12-14 on 4821 with the first option).
-3. Towers are still slow: about 17 months from a line opening to the first 36 m tower (8 seeds, `npm run fun`).
-4. The year 3-6 goals complete on their own (riders and population grow without a decision); only the network track asks the player to act.
-5. Plain seeds keep 20-50% of catchment plots vacant (421, 252).
-6. Replace the left list with map pins (a project row becomes its hoarding on the map; keep the totals on the table).
-7. Tree LOD (an imposter past about 3 km: thinning hides vertices but does not cut vertex work; trees are the largest GPU line at overview).
-8. Tower roof detail (`towers.ts` styles have bare roofs).
-9. Water sun glint.
-10. Found in the merge check: right after a line opens the slip stack (stations opening, cranes, goal, first riders: 4 at once) covers the top centre of the view and hides coin pops under it; a packed line's rating drops to 0 (seen at 141% load with one train), check that it is meant to be that harsh.
-11. Older items still open: a true funicular line type, terraces / vineyards, ravines, retaining-wall visuals; trust is per quarter (coarse); the dev-only graph check reports one old-core sliver fork on seed 187. No depth of field or other blur.
+## Next phase (round 7, agreed with the user; work directly on `master`, commit after each step, do not push)
+Core principle: the TRANSPORT GAME is at the centre of every decision. City demand creates problems; the player chooses how to solve them. Stronger macro structure and density discipline, not more variation. Measure with numbers and before/after captures of seed 4821 (plus two other origins where relevant), including a late-game oblique over the harbour toward the old town with labels and the lines panel visible. Run `npx tsc --noEmit` and `npm run build` before every commit and `npm run bench` after sim changes (the visual pass is already +11-13% GPU over budget). Status of each step is kept in PROGRESS.md "Round 7".
+
+### Step 1: demand calibration + fixes from the user's late-game screenshot (seed 4821)
+Seen: Line 2 at 125.1k riders/day on 1.8 km / 6 stations, Line 1 77.6k on 2.7 km, one station 44k (far too high); similar-height glass towers over the whole lower half right against detached houses; a grey characterless belt in the middle ring; the coarse sim grid faintly visible on the grass; an "old village" label on the water; project labels as large as district names; stations at 0 riders; hoarding posts scattered like pins; flat terrain.
+- Calibrate the trip model (trips per resident / job per day, mode share, station catchment demand) against real ranges: a busy urban metro station has 10-40k boardings/day in a city of several hundred thousand; a short 6-station line in a ~100k city should be low thousands to ~20k/day. Check whether inflated demand -> land value -> towers causes towers everywhere and fix the cause. Report before/after: riders per line, per station, per km, mode share, population.
+- Packed-line rating must degrade smoothly with crowding (it dropped to 0 at 141% load with one train). [old Next 10b]
+- Money should bind: ~100M start, early goals help fund line two; hold back early decision dialogs that cost cash until a line exists; the year 3-6 goals must not complete on their own. [old Next 1, 2, 4]
+- Hide the sim grid on the ground completely.
+- Labels: never over water (anchor district labels to the settlement's land centroid); project labels become small pins/tags below district names; replace the left project list with map pins [old Next 6]; fix the four slips stacking over the top centre and hiding coin pops after a line opens [old Next 10a].
+- Construction sites: one continuous hoarding fence around the site outline, not scattered posts.
+- Zero-rider stations: find out why (catchment reaches nothing vs just new) and fix any real bug.
+- Middle ring: the grey filler belt becomes mid-rise mixed use with district character (gradient CBD -> dense mixed-use inner -> mid-rise transit districts -> suburbs); calibrate here, the envelopes in Step 2 enforce it.
+- Plain seeds keep 20-50% of catchment plots vacant (421, 252): look at the cause together with the calibration. [old Next 5]
+
+### Step 2: development envelopes (zoning)
+- Default city is low and mid-rise. Each seed's starting envelopes come from its CityProfile and history layers (planned capital: mid-rise boulevards; old port: low with few exceptions).
+- One envelope per district: use, max height, frontage type, setbacks, heritage protection, large plot assembly allowed or not. Default types: historic/protected 2-4 floors (renovation, careful infill); outer residential 2-5; local centre / main street 4-8 mixed use; station growth district 6-15; CBD/landmark core 15+ only on assembled major plots; port/industrial low-rise sheds and yards.
+- A tower needs ALL of: high land value, major station/hub access, strong demand, an assembled large plot, an envelope that allows the height, enough developer/city capital. The density-and-height field becomes subordinate: the envelope is a cap on top of it.
+- Player mechanic, station area plans: the player proposes upzoning a station area, boulevard, waterfront zone or CBD edge; the council decides through the data-driven event system. Costs money (planning process). Approval depends on the quarter's trust and local opposition (old town / wealthy suburb push back, brownfield barely). Rejections can come back with conditions ("only up to 8 floors", "only with a park").
+- Value capture: an upzoned station area pays the player part of the land value gain as income.
+- Protection as a choice: protecting a district (old town) raises tourism / landmark value but lowers capacity.
+- Feedback: upzoning without transit or demand stays empty or fills with car traffic (later feeds road pressure).
+- Plan mode paints the envelopes on the map (map/diagram style) with predicted capacity and ridership preview.
+- Result: an old protected core, modest neighbourhoods, a few deliberately intense centres where the player put transit and upzoned. Towers in few places but faster there (resolves "towers too slow", ~17 months to the first 36 m tower) [old Next 3].
+- Measure: height distribution vs distance from centre and vs station access, before/after, on 4821 plus two other origins; towers per envelope type.
+
+### Steps 3+ (in order if budget allows; otherwise they stay specified here)
+3. Demand pressure field + overlay, split by mode: walking (paths, alleys, footbridges), car/service (road upgrades, connectors), transit opportunity (signal to the player), freight (later). Rolling decaying history over several months so one-off events do not build permanent roads. Candidates found cheaply by route directness (network vs straight-line distance), only a few tested per month. First version: overlay only, no behaviour change.
+4. Buses on roads with zonal congestion: zone-to-zone car trips routed on the road graph, flow summed per segment, travel time from volume/capacity, re-route 2-3 times; no individual cars. The player inherits a poor bus network; buses are the cheap early tool and get slowed by traffic; upgrades ordinary lane -> bus priority -> busway -> tram candidate. The AI does not operate transit. Instanced vehicles with LOD (frame headroom is spent). Bus lines snap to roads in plan mode.
+5. One shared multimodal graph with transfers: journey cost = walk + expected wait + in-vehicle + transfer penalty + crowding.
+6. Trams as upgrades of successful bus corridors: street track, signal priority, strong frontage value effect; snap to streets wide enough.
+7. AI arterials, bridges, bypasses as proposals: arterialPressure = persistent car/service demand + land unlocked + freight/port access + bypass benefit - viable transit alternative - demolition/historic core cost; one coherent corridor following the road hierarchy and the protected organic core; every proposal offers alternatives (reserve for tram, busway, fund bridge + interchange, reject and take the congestion/political cost).
+8. Regional rail and satellite links.
+9. Gateways: airport, intercity station, ferry terminal, motorway entrance as variants of `Gateway { externalDemand, passengerType, cargoPotential, accessModeNeeds, districtEffects }`, abstract (no flight animation).
+10. Freight.
+
+Lower priority leftovers: tree LOD (imposter past ~3 km) [old Next 7], tower roof detail [old Next 8], water sun glint [old Next 9]. Older open items: a true funicular line type, terraces / vineyards, ravines, retaining-wall visuals; trust is per quarter (coarse); the dev-only graph check reports one old-core sliver fork on seed 187. No depth of field or other blur.
 
 ## Scripts, dev flags, where things are
 - Scripts (all `npm run <name> -- args`): `headless` (seed months deal [--line] [--map]), `seeds`, `metrics` ([months] [--line] [--baseline] [seeds]), `terrain` (landform survey), `impact` (terrain gameplay numbers), `routes` (about 50 seeds per landform, must report 0 unbuildable), `towers` (tower timing, no metro vs test line), `zones` (territory shares), `structure` (empty space and squares), `satellites` (`-- 96 [seeds]`). Helpers in `scripts/lib.ts` (`testLine`). `scripts/make_grid.py` builds contact sheets (needs PIL).
