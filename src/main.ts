@@ -11,6 +11,7 @@ import { ProjectMarkers } from './render/markers';
 import { Ships } from './render/ships';
 import { Life } from './render/life';
 import { lookUniforms } from './render/look';
+import { VFX } from './render/vfx';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
 import { Hud, money as fmtMoney } from './ui/hud';
 import { DiegeticLayer } from './ui/diegetic/layer';
@@ -235,19 +236,24 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { held.delete(e.code); shiftDown = e.shiftKey; });
 window.addEventListener('blur', () => { held.clear(); shiftDown = false; });
 /** Move camera and target together over the ground plane, relative to where the camera faces. Speed scales with the camera distance. */
+const panV = { f: 0, r: 0 };
 function panByKeys(dt: number, fast: boolean) {
-  if (!held.size) return;
+  // smoothed input: the camera accelerates into a pan and glides to a stop (instant with ?novfx=cam)
+  const inF = (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
+  const inR = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
+  if (VFX.is('cam')) {
+    const a = 1 - Math.exp(-dt * (inF || inR ? 12 : 6));
+    panV.f += (inF - panV.f) * a; panV.r += (inR - panV.r) * a;
+    if (Math.abs(panV.f) < 0.01 && Math.abs(panV.r) < 0.01) { panV.f = panV.r = 0; return; }
+  } else { panV.f = inF; panV.r = inR; if (!inF && !inR) return; }
   const cam = env.camera.position, tgt = env.controls.target;
   let fx = tgt.x - cam.x, fz = tgt.z - cam.z;
   const fl = Math.hypot(fx, fz);
   if (fl < 1e-3) { fx = 0; fz = -1; } else { fx /= fl; fz /= fl; }
   const rx = -fz, rz = fx; // right of the facing direction
-  const f = (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
-  const r = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
-  if (!f && !r) return;
-  const len = Math.hypot(f, r), dist = cam.distanceTo(tgt);
-  const step = Math.max(150, dist) * 0.8 * (fast ? 2.8 : 1) * dt / len;
-  let dx = (fx * f + rx * r) * step, dz = (fz * f + rz * r) * step;
+  const mag = Math.hypot(panV.f, panV.r), dist = cam.distanceTo(tgt);
+  const step = Math.max(150, dist) * 0.8 * (fast ? 2.8 : 1) * dt * (mag > 1 ? 1 / mag : 1);
+  let dx = (fx * panV.f + rx * panV.r) * step, dz = (fz * panV.f + rz * panV.r) * step;
   const lim = N * CELL;
   dx = Math.max(-tgt.x, Math.min(lim - tgt.x, dx)); dz = Math.max(-tgt.z, Math.min(lim - tgt.z, dz));
   cam.x += dx; cam.z += dz; tgt.x += dx; tgt.z += dz;
@@ -354,6 +360,7 @@ function drawFrame(now: number) {
     if (fly.t >= 1) fly = null;
   }
   panByKeys(dt, shiftDown);
+  env.feel.step(dt);
   env.controls.update();
   const frac = state ? Math.min(1, (now - lastStateAt) / (MS[state.speed] ?? 1500)) : 0;
   if (city?.pending) perf.step('city', () => city!.pump(CITY_BUDGET));

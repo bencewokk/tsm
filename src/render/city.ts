@@ -162,7 +162,7 @@ export class CityView {
     this.lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true });
     this.polyMats = { wall: this.wallMat, glass: this.glassMat, plain: this.plainMat, ghost: this.ghostMat, lamp: this.lampMat };
     this.treeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true });
-    patchTreeMaterial(this.treeMat);
+    patchTreeMaterial(this.treeMat, true);
     this.craneMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
     this.scafMat = new THREE.LineBasicMaterial({ color: 0xb59b5f, transparent: true, opacity: 0.9 });
     const plainInst = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });

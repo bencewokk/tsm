@@ -8,12 +8,15 @@ import { VFX } from './vfx';
 import { skyLight, lookUniforms } from './look';
 import { MAP, VS } from './common';
 import { strataTexture } from './terrain';
+import { CamFeel } from './camfeel';
 
 export class Env {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
+  /** eased wheel zoom about the cursor (camfeel.ts) */
+  feel: CamFeel;
   sun: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
   /** 0 = noon, 0.5 = midnight; advanced by the caller */
@@ -62,6 +65,7 @@ export class Env {
     this.controls.screenSpacePanning = false;
     this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     this.controls.update();
+    this.feel = new CamFeel(this.camera, this.controls, this.renderer.domElement, MAP);
 
     this.scene.background = this.daySky.clone();
     this.scene.fog = new THREE.Fog(this.daySky.getHex(), 9000, 26000);
@@ -118,6 +122,7 @@ export class Env {
       if (Math.abs(this.camera.fov - tf) > 0.01) { this.camera.fov += (tf - this.camera.fov) * 0.2; this.camera.updateProjectionMatrix(); }
     }
     lookUniforms.uTime.value = performance.now() / 1000;
+    lookUniforms.uSway.value = 1 - THREE.MathUtils.smoothstep(this.camera.position.distanceTo(this.controls.target), 900, 2200);
     lookUniforms.uTreeKeep.value = VFX.is('thin') ? 1 - 0.55 * THREE.MathUtils.smoothstep(this.camera.position.distanceTo(this.controls.target), 3000, 6000) : 1;
     lookUniforms.uPx.value = this.composer.renderTarget1.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     if (this.linear) this.composer.render();

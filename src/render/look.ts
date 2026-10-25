@@ -14,6 +14,8 @@ export const lookUniforms = {
   uPx: { value: 900 },
   /** share of tree instances kept (1 near, less at overview): the rest shrink away by a per-instance hash */
   uTreeKeep: { value: 1 },
+  /** strength of the wind sway on tree crowns (1 close up, 0 beyond mid zoom where it would only shimmer) */
+  uSway: { value: 0 },
 };
 
 /** Colour and strength of the ambient + sun light as a tint (1 = full daylight); set by `Env.applyTime`, used to dim unlit layers (the map paper). */
@@ -21,7 +23,7 @@ export const skyLight = new THREE.Color(1, 1, 1);
 
 /** every material patched below, so a switch can recompile them */
 const patched: THREE.Material[] = [];
-VFX.onChange((n) => { if (n === 'bld' || n === 'night' || n === 'thin') for (const m of patched) m.needsUpdate = true; });
+VFX.onChange((n) => { if (n === 'bld' || n === 'night' || n === 'thin' || n === 'cam') for (const m of patched) m.needsUpdate = true; });
 
 /**
  * Architect's-model building shader: matte boxes, a cheap ambient-occlusion darkening near the base, window rows by day and warm lit
@@ -176,23 +178,48 @@ export function patchBuildingMaterial(mat: THREE.MeshStandardMaterial, glass = f
  * shrinks to nothing (degenerate triangles never reach the rasteriser) and the survivors grow a little so the canopy keeps its coverage.
  * At overview the speckle of tens of thousands of crowns turns into a few readable groves.
  */
-export function patchTreeMaterial(mat: THREE.Material) {
+export function patchTreeMaterial(mat: THREE.Material, sway = false) {
   patched.push(mat);
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTreeKeep = lookUniforms.uTreeKeep;
+    shader.uniforms.uSway = lookUniforms.uSway;
+    shader.uniforms.uTime = lookUniforms.uTime;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
 #ifdef TSM_THIN
 uniform float uTreeKeep;
+#endif
+#ifdef TSM_SWAY
+uniform float uSway;
+uniform float uTime;
 #endif`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         #if defined(TSM_THIN) && defined(USE_INSTANCING)
           float tsmR = fract(sin(float(gl_InstanceID) * 12.9898) * 43758.5453);
           transformed *= clamp((uTreeKeep - tsmR) / 0.12, 0.0, 1.0) * (1.0 + (1.0 - uTreeKeep) * 0.5);
+        #endif
+        #if defined(TSM_SWAY) && defined(USE_INSTANCING)
+          // wind: a gust front travels across the map (phase from the instance's world position) and bends each crown from its base;
+          // the world-space push is expressed in the instance's own axes so every tree leans the same way
+          if (uSway > 0.0) {
+            vec3 ax = instanceMatrix[0].xyz, az = instanceMatrix[2].xyz;
+            float sx = length(ax), sz = length(az);
+            vec2 wp = instanceMatrix[3].xz;
+            float ph = uTime * 1.5 + dot(wp, vec2(0.0042, 0.0021)) + fract(sin(float(gl_InstanceID) * 7.31) * 4375.5) * 1.6;
+            float gust = 0.55 + 0.45 * sin(uTime * 0.37 + dot(wp, vec2(0.0011, -0.0007)));
+            vec2 W = vec2(0.9, 0.45) * (sin(ph) * 0.6 + 0.5) * gust * 0.85 + vec2(-0.2, 0.35) * sin(ph * 1.7 + 1.3) * 0.18;
+            float bend = transformed.y * transformed.y * uSway;
+            transformed.x += dot(W, ax.xz) / (sx * sx) * bend;
+            transformed.z += dot(W, az.xz) / (sz * sz) * bend;
+          }
         #endif`);
   };
-  mat.customProgramCacheKey = () => 'tsm-tree' + VFX.key('thin');
-  const defs = () => { mat.defines = { ...(mat.defines ?? {}) }; if (VFX.is('thin')) mat.defines.TSM_THIN = ''; else delete mat.defines.TSM_THIN; };
+  mat.customProgramCacheKey = () => 'tsm-tree' + VFX.key('thin', 'cam') + (sway ? 's' : '');
+  const defs = () => {
+    mat.defines = { ...(mat.defines ?? {}) };
+    if (VFX.is('thin')) mat.defines.TSM_THIN = ''; else delete mat.defines.TSM_THIN;
+    if (sway && VFX.is('cam')) mat.defines.TSM_SWAY = ''; else delete mat.defines.TSM_SWAY;
+  };
   defs();
-  VFX.onChange((n) => { if (n === 'thin') defs(); });
+  VFX.onChange((n) => { if (n === 'thin' || n === 'cam') defs(); });
 }
