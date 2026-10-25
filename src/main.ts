@@ -1,3 +1,4 @@
+import { PressureView } from './render/pressure';
 import { StationCard } from './ui/stationCard';
 import { ENV_DEF } from './sim/envelopes';
 import './style.css';
@@ -62,6 +63,9 @@ let sunShadow: SunShadow | null = null;
 let carBlobs: CarBlobs | null = null;
 let state: StateMsg | null = null;
 const desire = new DesireView();
+const pressureView = new PressureView();
+env.scene.add(pressureView.group);
+pressureView.group.visible = false;
 env.scene.add(desire.group);
 desire.group.visible = false;
 let lastStateAt = performance.now();
@@ -111,7 +115,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     init = m;
     terrain = buildTerrain(m.height, m.water, m.flags);
     { let top = 0; for (let i = 0; i < m.height.length; i++) if (m.height[i] > top) top = m.height[i]; sunShadow = new SunShadow(env.sun, env.renderer, top * VS + 10, top * VS + 320); }
-    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours, terrain.zones, terrain.envelopes, terrain.paper, terrain.skirt);
+    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours, terrain.zones, terrain.envelopes, terrain.pressure, terrain.paper, terrain.skirt);
     city = new CityView(m.water, m.flags, m.villages, (x, z) => terrain!.sample(x, z), m);
     env.scene.add(city.group);
     life = new Life((x, z) => terrain!.sample(x, z), m.water);
@@ -160,6 +164,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
       if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
       if (hud.toggles.zones) terrain?.setZones(m.terr, init!.water);
       if (hud.toggles.desire) desire.update(m.desire);
+      if (hud.toggles.pressure && terrain) { terrain.setPressure(m.pressure.field, init!.water); pressureView.update(m.pressure.cands, (x, z) => terrain!.sample(x, z)); }
       if (hud.tool === 'plan') { terrain?.setCatchment(m.catchment); terrain?.setEnvelopes(m.env, init!.water); }
     });
     card.update(m);
@@ -221,6 +226,10 @@ hud.handlers.onToggle = (name, on) => {
   if (name === 'xray') xrayTarget = on ? 1 : 0;
   if (name === 'night') { nightTarget = on ? 1 : 0; fastDawn = !on; }
   if (name === 'desire') { desire.group.visible = on; if (on && state) desire.update(state.desire); }
+  if (name === 'pressure' && terrain) {
+    terrain.pressure.visible = on; pressureView.group.visible = on;
+    if (on && state && init) { terrain.setPressure(state.pressure.field, init.water); pressureView.update(state.pressure.cands, (x, z) => terrain!.sample(x, z)); }
+  }
 };
 
 quality.setMode(qualityFromUrl(params));
@@ -421,6 +430,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'z' || e.key === 'Z') hud.toggle('zones');
   else if (e.key === 'n' || e.key === 'N') hud.toggle('night');
   else if (e.key === 'l' || e.key === 'L') hud.toggle('desire');
+  else if (e.key === 'o' || e.key === 'O') hud.toggle('pressure');
   else if (e.key === 'Escape' && card.isOpen && hud.tool !== 'plan') card.close();
   else if (hud.tool === 'plan' && planner) {
     if (e.key === 'Enter') planner.commit();

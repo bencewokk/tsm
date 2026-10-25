@@ -141,6 +141,8 @@ export interface StateMsg {
   plans: ReturnType<import('./envelopes').EnvelopeSystem['infos']>;
   planPreview: ReturnType<import('./envelopes').EnvelopeSystem['preview']>;
   capture: number;
+  /** round 7 step 3: demand pressure by mode (walk, car, transit opportunity: 3 bytes a cell, log scale) and missing-link candidates */
+  pressure: { field: Uint8Array; cands: import('./pressure').LinkCandidate[] };
   desire: DesireLine[];
   /** the active goal of each track, newest headline moments (each has a unique seq), unlocked upgrades */
   goals: import('./goals').GoalInfo[];

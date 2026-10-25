@@ -23,7 +23,7 @@ export interface HudHandlers {
 export class Hud {
   root: HTMLElement;
   private el: Record<string, HTMLElement> = {};
-  toggles: Record<string, boolean> = { heat: false, zones: false, xray: false, night: false, desire: false };
+  toggles: Record<string, boolean> = { heat: false, zones: false, xray: false, night: false, desire: false, pressure: false };
   tool = 'view';
   handlers: HudHandlers = {};
 
@@ -81,6 +81,7 @@ export class Hud {
         <button data-toggle="xray" title="X-ray underground (X)">X-ray</button>
         <button data-toggle="night" title="Night (N)">Night</button>
         <button data-toggle="desire" title="Desire lines (L)">Desire lines</button>
+        <button data-toggle="pressure" title="Demand pressure (O): green = walking, orange = car and service traffic, blue = trips a station would win; dashed ribbons = missing links (a path or a road would shorten many trips)">Pressure</button>
         <span class="sep"></span>
         <button data-auto title="Auto speed (4): runs at 3x while nothing needs you, back to 1x for decisions and headlines">Auto</button>
         <button data-sound title="Sound blips on / off">Sound: on</button>

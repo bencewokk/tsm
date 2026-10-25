@@ -1,5 +1,6 @@
 import { N, CELL, ZONE, NZ, ZONES, BT, Flag, Water, isAmenity, HOMES, COM_JOBS, IND_JOBS, BUILD_MONTHS, PERSONS_PER_HOME, WORKERS_PER_HOME } from './constants';
 import { EnvelopeSystem, ENV, ENVS } from './envelopes';
+import { PressureSystem } from './pressure';
 import { STATION_COST, TRAIN_COST, START_MONEY, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
 import { generateTerrain, idx, inb, DIR4, SAT, type Grid } from './terrain';
@@ -198,6 +199,8 @@ export class Sim {
   hazards = new HazardSystem(this);
   /** development envelopes and the station area plans (envelopes.ts) */
   envs = new EnvelopeSystem(this);
+  /** demand pressure by mode, overlay only (pressure.ts) */
+  demand = new PressureSystem(this);
   /** the station whose plan preview the UI asked for */
   previewStation: number | null = null;
   lastEventMonth = -99;
@@ -605,6 +608,7 @@ export class Sim {
     this.computeDriveTimes();
     this.computeTransit();
     this.computeRiders();
+    this.demand.tick();
     this.computeLandValue();
     for (let i = 0; i < N * N; i++) this.lvS[i] += (this.lv[i] - this.lvS[i]) * TUNE.lvLag;
     this.field.update(this);
@@ -1584,6 +1588,7 @@ export class Sim {
     const desire: { a: number; b: number; trips: number }[] = [];
     let total = 0, transit = 0, car = 0, walk = 0, bike = 0;
     const beta = TRIP.beta, ww = TRIP.walkWeight, T_ = m.T;
+    this.demand.reset();
     // attraction of open landmarks pulls ordinary trips toward their zone
     const lmOpen = this.lm.open();
     for (const o of lmOpen) attr[o.zone] += o.def.attr * (o.st.eventDay ? 1.5 : 1);
@@ -1615,6 +1620,7 @@ export class Sim {
       car += 2 * C; walk += 2 * (wS + rest * uw / sum3); bike += 2 * (bS + rest * ub / sum3);
       if (C > 15 && dk > 1.2) desire.push({ a, b, trips: 2 * C });
       transit += 2 * fT; zTransit[a] += 2 * fT;
+      if (a !== b) this.demand.add(a, b, 2 * (wS + rest * uw / sum3), 2 * C, dk, cov);
     };
     for (let a = 0; a < ZONES; a++) {
       const P = this.zHomes[a] * PERSONS_PER_HOME * TRIP.perResident / 2;
@@ -1756,7 +1762,7 @@ export class Sim {
       landmarks: this.lm.info(),
       assemblies: this.asm.infos(),
       projects: this.projects.infos(), notices: this.projects.notices.slice(-5),
-      env: this.envs.env.slice(), plans: this.envs.infos(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
+      env: this.envs.env.slice(), plans: this.envs.infos(), pressure: this.demand.info(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
       desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
       goals: this.goals.infos(), goalsDone: this.goals.count(), goalsTotal: this.goals.total(), moments: this.moments.slice(-10), unlocks: this.unlocks.slice(),
       log: this.log.slice(-8), speed: this.speed,

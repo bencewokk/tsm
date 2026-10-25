@@ -31,6 +31,9 @@ export interface TerrainView {
   /** development envelopes (round 7), painted in plan mode like a zoning map */
   envelopes: THREE.Mesh;
   setEnvelopes(env: Uint8Array, water: Uint8Array): void;
+  /** demand pressure (round 7 step 3): walking green, car orange, transit opportunity blue */
+  pressure: THREE.Mesh;
+  setPressure(field: Uint8Array, water: Uint8Array): void;
 }
 
 export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uint8Array): TerrainView {
@@ -287,6 +290,15 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   envelopes.position.y = 2.2;
   let envSig = 1;
 
+  // demand pressure wash
+  const pdata = new Uint8Array(N * N * 4);
+  const pTex = new THREE.DataTexture(pdata, N, N, THREE.RGBAFormat);
+  pTex.magFilter = THREE.LinearFilter; pTex.minFilter = THREE.LinearFilter; pTex.needsUpdate = true;
+  const pressure = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: pTex, transparent: true, opacity: 0.9, toneMapped: false, depthWrite: false, depthTest: false }));
+  pressure.visible = false;
+  pressure.renderOrder = 9;
+  pressure.position.y = 1.8;
+
   // map paper: a cream sheet with grain, slope hatching, a kilometre grid and a pale wash on the water; its opacity follows the zoom
   const paperMat = new THREE.MeshBasicMaterial({ map: paperTexture(height, wmask), transparent: true, opacity: 0, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   const paper = new THREE.Mesh(geo, paperMat);
@@ -325,7 +337,17 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
       paper.visible = a > 0.01; paperMat.opacity = a; waterMat.color.copy(WHITE).lerp(PAPER_WATER, a * 0.7);
       if (VFX.is('sky')) paperMat.color.copy(skyLight); else paperMat.color.setRGB(1, 1, 1);   // the sheet is unlit: follow the light so it does not glow at dusk
     },   // every frame: no allocations
-    envelopes,
+    envelopes, pressure,
+    setPressure(f: Uint8Array, w: Uint8Array) {
+      for (let i = 0; i < N * N; i++) {
+        // the dominant pressure colours the cell (a blend of all three reads as grey haze), its strength sets the opacity
+        const a = f[i * 3], c = f[i * 3 + 1], t = f[i * 3 + 2], m = Math.max(a, c, t);
+        const col = m === t ? [52, 104, 214] : m === a ? [36, 150, 80] : [222, 112, 34];
+        pdata[i * 4] = col[0]; pdata[i * 4 + 1] = col[1]; pdata[i * 4 + 2] = col[2];
+        pdata[i * 4 + 3] = w[i] || m < 50 ? 0 : Math.min(160, (m - 50) * 0.8);
+      }
+      pTex.needsUpdate = true;
+    },
     setEnvelopes(env: Uint8Array, w: Uint8Array) {
       let sig = 0;
       for (let i = 0; i < N * N; i++) sig = (Math.imul(sig, 31) + env[i]) | 0;
