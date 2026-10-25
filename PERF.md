@@ -208,3 +208,9 @@ Headless: heap 22-28 MB, array buffers 55-110 MB with the render view.
 
 - Drop "shallow depth of field" from the architect's-model look: the blur passes are gone (user decision). The T key is free.
 - `tsm.env.linear = false` (dev) renders straight to the canvas: 3 ms cheaper, but transparent layers then blend after tone mapping and read paler.
+
+## Round 6 merge check (fun pass + visual pass, fbdadd7)
+
+- Headless: `docs/perf/bench-merge.txt` (all three seeds) and `docs/perf/bench-merge-ab.txt` (interleaved runs of 7994ad2 and fbdadd7 with the same bench script). The machine was much busier than in this pass: the same configuration swings up to 2x between runs, so the ticks (15-50 ms, one outlier of 131 ms) are not comparable with the tables above. Interleaved, the merge is faster about as often as it is slower; the fun-pass phases cost 0.0-1.6 ms a tick. The bench now times `repairRoads`, `checkGraph`, `projects.tick`, `hazards.tick` (group "upkeep", 3-20 ms) and `computeBoom`, `goals.tick`, `networkMoments` (group "fun"); before, they were in "other".
+- Browser, seed 4821, month 120, demo line, 1500x900, High, GPU p50: overview 12.9, mid 12.2, street 12.6 ms (Auto stayed at 1.0 except 0.9 once in street). Whole visual pass on vs off in one page: +12% overview, +13% mid, +11% street, slightly over the 10% budget. Diegetic layer 0.03-0.04 ms CPU per frame.
+
