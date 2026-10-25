@@ -39,7 +39,7 @@ export const ENV_DEF: EnvDef[] = [
 export const ENVS = { on: true };
 
 /** what the city pays out of each home or job added inside an approved plan (planning gain / betterment levy), $ */
-export const CAPTURE_PER_UNIT = 10e3;
+export const CAPTURE_PER_UNIT = 6e3;
 
 export type PlanKind = 'station' | 'cbd' | 'protect';
 interface PlanKindDef { kind: PlanKind; title: string; to: number; cost: number; review: number; blurb: string }

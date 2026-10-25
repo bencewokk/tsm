@@ -1,0 +1,173 @@
+
+== seed 4821 (coast / port); start money 100M
+  m3 line 1 (starter) built; money 59M
+  m30 line 2 (dense 6 st) built; money 35M
+  m40 station area plan for Harbour: 40|Station area plan for Harbour submitted to the council ($3.0M, decision in about 3 months)
+  m40 station area plan for Cannery: 40|Station area plan for Cannery submitted to the council ($3.0M, decision in about 3 months)
+  m40 CBD edge plan for Harbour: 40|Harbour: no land within its walk that a plan could change
+  m48: pop 34.2k (households 14.8k, jobs 13.5k), trips/day 102.7k (3.01 per resident), transit 6.3k = 12.3% share, money 93M inc 0.84M/mo exp 1.16M/mo
+    mode split (all trips): car 44%, metro 6.1%, walk 35%, bike 15%; congestion 0.41, drive speed 35 km/h, rating 94; metro boardings per resident 0.201
+    line 1: 3 st 1.6 km, boardings/day 1.6k (993/km), trains 2 hw 5.9 min, peak 90/h of cap 3035/h (3%), rating 93; stations Harbour 2.0k, Market 170, Chapel 746
+    line 2: 6 st 1.9 km, boardings/day 5.2k (2.8k/km), trains 3 hw 5.4 min, peak 177/h of cap 3309/h (5%), rating 95; stations Riverside 561, Market 170, Cannery 1.4k, Harbour 2.0k, Mill Lane 1.4k, Northgate 3
+    stations under 50 riders: Northgate
+    plans: station Harbour approved +park (score 0.54: no strong feelings either way) paid 1.0M; station Cannery approved +park (score 0.54: no strong feelings either way) paid 0.0M
+    by distance from the centre (cells): 0-8 mean 19.1 m, 4 >36 m of 173 | 8-16 mean 20.7 m, 0 >36 m of 63 | 16-24 mean 12.5 m, 0 >36 m of 28 | 24-32 mean 7.7 m, 0 >36 m of 71 | 32- mean 7.5 m, 0 >36 m of 523
+    by walk to a station (min): 0-4 mean 15.5 m, 4 >36 m of 329 | 4-8 mean 10.0 m, 0 >36 m of 202 | 8-12 mean 7.0 m, 0 >36 m of 2 | 12- mean 7.3 m, 0 >36 m of 20
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 150, historic 1 (1) of 271, main 0 (0) of 295, station 3 (2) of 142; value capture this month 0.09M
+    heights (res+com buildings): <=10m 611, 11-16 94, 17-24 106, 25-36 43, 37-60 1, >60 3; towers >36 m next to a detached house (<100 m): 2/4
+  m54 first 36 m+ tower the plan made possible (zoning there allowed under 36 m before) in the Harbour plan, 11 months after approval
+  m96: pop 74.6k (households 32.4k, jobs 33.6k), trips/day 231.2k (3.10 per resident), transit 13.1k = 11.2% share, money 162M inc 1.57M/mo exp 1.16M/mo
+    mode split (all trips): car 45%, metro 5.6%, walk 32%, bike 17%; congestion 0.67, drive speed 28 km/h, rating 94; metro boardings per resident 0.212
+    line 1: 3 st 1.6 km, boardings/day 5.6k (3.4k/km), trains 2 hw 5.9 min, peak 324/h of cap 3035/h (11%), rating 93; stations Harbour 3.4k, Market 305, Chapel 2.7k
+    line 2: 6 st 1.9 km, boardings/day 10.3k (5.4k/km), trains 3 hw 5.4 min, peak 367/h of cap 3309/h (11%), rating 95; stations Riverside 1.6k, Market 305, Cannery 2.0k, Harbour 3.4k, Mill Lane 3.0k, Northgate 16
+    stations under 50 riders: Northgate
+    plans: station Harbour approved +park (score 0.54: no strong feelings either way) paid 34.1M; station Cannery approved +park (score 0.54: no strong feelings either way) paid 0.0M
+    by distance from the centre (cells): 0-8 mean 27.3 m, 16 >36 m of 162 | 8-16 mean 29.4 m, 5 >36 m of 57 | 16-24 mean 12.2 m, 0 >36 m of 30 | 24-32 mean 10.3 m, 0 >36 m of 122 | 32- mean 9.8 m, 0 >36 m of 892
+    by walk to a station (min): 0-4 mean 23.2 m, 15 >36 m of 292 | 4-8 mean 16.9 m, 6 >36 m of 259 | 8-12 mean 8.0 m, 0 >36 m of 135 | 12- mean 7.0 m, 0 >36 m of 97
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 440, historic 1 (1) of 253, main 0 (0) of 434, station 20 (3) of 135, industrial 0 (0) of 1; value capture this month 0.00M
+    heights (res+com buildings): <=10m 730, 11-16 239, 17-24 152, 25-36 121, 37-60 17, >60 4; towers >36 m next to a detached house (<100 m): 0/21
+  m144: pop 82.9k (households 36.0k, jobs 36.9k), trips/day 307.1k (3.71 per resident), transit 12.4k = 9.2% share, money 40M inc 1.49M/mo exp 1.16M/mo
+    mode split (all trips): car 40%, metro 4.0%, walk 35%, bike 20%; congestion 0.55, drive speed 31 km/h, rating 94; metro boardings per resident 0.184
+    line 1: 3 st 1.6 km, boardings/day 5.8k (3.6k/km), trains 2 hw 5.9 min, peak 341/h of cap 3035/h (11%), rating 93; stations Harbour 3.3k, Market 293, Chapel 2.8k
+    line 2: 6 st 1.9 km, boardings/day 9.4k (5.0k/km), trains 3 hw 5.4 min, peak 317/h of cap 3309/h (10%), rating 95; stations Riverside 1.6k, Market 293, Cannery 1.8k, Harbour 3.3k, Mill Lane 2.6k, Northgate 13
+    stations under 50 riders: Northgate
+    plans: station Harbour approved +park (score 0.54: no strong feelings either way) paid 42.7M; station Cannery approved +park (score 0.54: no strong feelings either way) paid 0.0M
+    by distance from the centre (cells): 0-8 mean 27.9 m, 14 >36 m of 143 | 8-16 mean 29.8 m, 5 >36 m of 55 | 16-24 mean 12.2 m, 0 >36 m of 33 | 24-32 mean 11.8 m, 0 >36 m of 127 | 32- mean 10.6 m, 0 >36 m of 871
+    by walk to a station (min): 0-4 mean 23.4 m, 13 >36 m of 284 | 4-8 mean 18.2 m, 6 >36 m of 254 | 8-12 mean 8.7 m, 0 >36 m of 173 | 12- mean 7.4 m, 0 >36 m of 67
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 383, historic 1 (1) of 230, main 0 (0) of 389, station 18 (3) of 130, industrial 0 (0) of 97; value capture this month 0.00M
+    heights (res+com buildings): <=10m 618, 11-16 318, 17-24 150, 25-36 124, 37-60 15, >60 4; towers >36 m next to a detached house (<100 m): 0/19
+  m192: pop 83.0k (households 36.1k, jobs 37.3k), trips/day 267.3k (3.22 per resident), transit 12.9k = 9.5% share, money 55M inc 1.55M/mo exp 1.16M/mo
+    mode split (all trips): car 46%, metro 4.8%, walk 32%, bike 18%; congestion 0.61, drive speed 30 km/h, rating 94; metro boardings per resident 0.190
+    line 1: 3 st 1.6 km, boardings/day 6.4k (3.9k/km), trains 2 hw 5.9 min, peak 374/h of cap 3035/h (12%), rating 93; stations Harbour 3.6k, Market 281, Chapel 3.1k
+    line 2: 6 st 1.9 km, boardings/day 9.4k (5.0k/km), trains 3 hw 5.4 min, peak 311/h of cap 3309/h (9%), rating 95; stations Riverside 1.4k, Market 281, Cannery 1.9k, Harbour 3.6k, Mill Lane 2.6k, Northgate 13
+    stations under 50 riders: Northgate
+    plans: station Harbour approved +park (score 0.54: no strong feelings either way) paid 45.3M; station Cannery approved +park (score 0.54: no strong feelings either way) paid 0.0M
+    by distance from the centre (cells): 0-8 mean 28.0 m, 15 >36 m of 142 | 8-16 mean 30.2 m, 5 >36 m of 52 | 16-24 mean 12.2 m, 0 >36 m of 32 | 24-32 mean 12.1 m, 0 >36 m of 115 | 32- mean 10.8 m, 0 >36 m of 857
+    by walk to a station (min): 0-4 mean 23.5 m, 14 >36 m of 280 | 4-8 mean 18.4 m, 6 >36 m of 251 | 8-12 mean 8.5 m, 0 >36 m of 181 | 12- mean 8.0 m, 0 >36 m of 71
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 339, historic 1 (1) of 227, main 0 (0) of 373, station 19 (3) of 129, industrial 0 (0) of 130; value capture this month 0.00M
+    heights (res+com buildings): <=10m 576, 11-16 329, 17-24 151, 25-36 122, 37-60 16, >60 4; towers >36 m next to a detached house (<100 m): 0/20
+  m240: pop 84.3k (households 36.7k, jobs 38.5k), trips/day 336.4k (3.99 per resident), transit 14.5k = 9.9% share, money 54M inc 1.75M/mo exp 1.16M/mo
+    mode split (all trips): car 39%, metro 4.3%, walk 36%, bike 21%; congestion 0.58, drive speed 31 km/h, rating 94; metro boardings per resident 0.213
+    line 1: 3 st 1.6 km, boardings/day 7.1k (4.3k/km), trains 2 hw 5.9 min, peak 414/h of cap 3035/h (14%), rating 93; stations Harbour 3.9k, Market 299, Chapel 3.5k
+    line 2: 6 st 1.9 km, boardings/day 10.9k (5.8k/km), trains 3 hw 5.4 min, peak 333/h of cap 3309/h (10%), rating 95; stations Riverside 1.5k, Market 299, Cannery 2.6k, Harbour 3.9k, Mill Lane 2.8k, Northgate 12
+    stations under 50 riders: Northgate
+    plans: station Harbour approved +park (score 0.54: no strong feelings either way) paid 49.4M; station Cannery approved +park (score 0.54: no strong feelings either way) paid 0.0M
+    by distance from the centre (cells): 0-8 mean 29.0 m, 15 >36 m of 134 | 8-16 mean 30.3 m, 5 >36 m of 53 | 16-24 mean 12.2 m, 0 >36 m of 33 | 24-32 mean 12.1 m, 0 >36 m of 125 | 32- mean 10.8 m, 0 >36 m of 869
+    by walk to a station (min): 0-4 mean 23.8 m, 14 >36 m of 273 | 4-8 mean 18.5 m, 6 >36 m of 251 | 8-12 mean 8.7 m, 0 >36 m of 186 | 12- mean 7.9 m, 0 >36 m of 81
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 340, historic 1 (1) of 220, main 0 (0) of 383, station 19 (3) of 130, industrial 0 (0) of 141; value capture this month 0.00M
+    heights (res+com buildings): <=10m 589, 11-16 332, 17-24 150, 25-36 123, 37-60 16, >60 4; towers >36 m next to a detached house (<100 m): 0/20
+  goals: first_line@m4, riders_1500@m14, pop_12k@m19, stations_4@m31, second_line@m32
+
+== seed 187 (hills / rail-junction); start money 100M
+  m3 line 1 (starter) built; money 62M
+  m30 line 2 (dense 6 st) built; money 44M
+  m40 station area plan for Harbour: 40|Station area plan for Harbour submitted to the council ($3.0M, decision in about 3 months)
+  m40 station area plan for Northgate: 40|Station area plan for Northgate submitted to the council ($3.0M, decision in about 3 months)
+  m40 CBD edge plan for Harbour: 40|Harbour: no land within its walk that a plan could change
+  m48: pop 42.4k (households 18.5k, jobs 16.2k), trips/day 132.5k (3.12 per resident), transit 5.6k = 7.7% share, money 106M inc 0.91M/mo exp 1.22M/mo
+    mode split (all trips): car 51%, metro 4.3%, walk 30%, bike 15%; congestion 0.31, drive speed 39 km/h, rating 94; metro boardings per resident 0.159
+    line 1: 3 st 1.5 km, boardings/day 3.2k (2.1k/km), trains 2 hw 5.7 min, peak 169/h of cap 3141/h (5%), rating 94; stations Harbour 1.7k, Market 615, Chapel 1.2k
+    line 2: 6 st 1.9 km, boardings/day 3.5k (1.9k/km), trains 3 hw 5.4 min, peak 126/h of cap 3331/h (4%), rating 95; stations Riverside 0, Cannery 421, Mill Lane 818, Harbour 1.7k, Northgate 951, Quay 0
+    stations under 50 riders: Riverside, Quay
+    plans: station Harbour approved +park (score 0.38: house owners in the suburb object) paid 0.6M; station Northgate refused (score 0.21: house owners in the suburb object) paid 0.0M
+    by distance from the centre (cells): 0-8 mean 17.5 m, 14 >36 m of 179 | 8-16 mean 11.1 m, 0 >36 m of 190 | 16-24 mean 9.6 m, 0 >36 m of 140 | 24-32 mean 8.0 m, 0 >36 m of 248 | 32- mean 7.2 m, 0 >36 m of 407
+    by walk to a station (min): 0-4 mean 13.3 m, 13 >36 m of 362 | 4-8 mean 10.0 m, 1 >36 m of 346 | 8-12 mean 7.9 m, 0 >36 m of 15 | 12- mean 7.0 m, 0 >36 m of 74
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 219, historic 2 (0) of 245, main 0 (0) of 535, station 12 (4) of 165; value capture this month 0.23M
+    heights (res+com buildings): <=10m 948, 11-16 57, 17-24 114, 25-36 31, 37-60 11, >60 3; towers >36 m next to a detached house (<100 m): 12/14
+  m54 first 36 m+ tower the plan made possible (zoning there allowed under 36 m before) in the Harbour plan, 11 months after approval
+  m96: pop 98.7k (households 42.9k, jobs 43.9k), trips/day 296.0k (3.00 per resident), transit 12.6k = 8.7% share, money 171M inc 1.51M/mo exp 1.22M/mo
+    mode split (all trips): car 45%, metro 4.3%, walk 33%, bike 18%; congestion 0.53, drive speed 32 km/h, rating 94; metro boardings per resident 0.161
+    line 1: 3 st 1.5 km, boardings/day 8.4k (5.6k/km), trains 2 hw 5.7 min, peak 414/h of cap 3141/h (13%), rating 94; stations Harbour 2.9k, Market 1.7k, Chapel 3.3k
+    line 2: 6 st 1.9 km, boardings/day 7.5k (4.0k/km), trains 3 hw 5.4 min, peak 301/h of cap 3331/h (9%), rating 95; stations Riverside 0, Cannery 1.3k, Mill Lane 1.8k, Harbour 2.9k, Northgate 1.5k, Quay 0
+    stations under 50 riders: Riverside, Quay
+    plans: station Harbour approved +park (score 0.38: house owners in the suburb object) paid 46.2M; station Northgate refused (score 0.21: house owners in the suburb object) paid 0.0M
+    by distance from the centre (cells): 0-8 mean 26.8 m, 19 >36 m of 167 | 8-16 mean 18.8 m, 11 >36 m of 175 | 16-24 mean 15.6 m, 0 >36 m of 206 | 24-32 mean 11.5 m, 0 >36 m of 346 | 32- mean 8.0 m, 0 >36 m of 691
+    by walk to a station (min): 0-4 mean 23.4 m, 25 >36 m of 317 | 4-8 mean 16.4 m, 5 >36 m of 414 | 8-12 mean 8.8 m, 0 >36 m of 135 | 12- mean 7.2 m, 0 >36 m of 75
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 446, historic 2 (0) of 237, main 0 (0) of 738, station 28 (4) of 163, industrial 0 (0) of 1; value capture this month 0.00M
+    heights (res+com buildings): <=10m 944, 11-16 212, 17-24 281, 25-36 118, 37-60 27, >60 3; towers >36 m next to a detached house (<100 m): 2/30
+  m144: pop 129.1k (households 56.1k, jobs 54.7k), trips/day 391.6k (3.03 per resident), transit 15.1k = 8.0% share, money 71M inc 1.81M/mo exp 1.22M/mo
+    mode split (all trips): car 45%, metro 3.9%, walk 34%, bike 18%; congestion 0.62, drive speed 29 km/h, rating 94; metro boardings per resident 0.152
+    line 1: 3 st 1.5 km, boardings/day 10.6k (7.0k/km), trains 2 hw 5.7 min, peak 520/h of cap 3141/h (17%), rating 94; stations Harbour 3.2k, Market 1.9k, Chapel 4.3k
+    line 2: 6 st 1.9 km, boardings/day 9.1k (4.9k/km), trains 3 hw 5.4 min, peak 378/h of cap 3331/h (11%), rating 95; stations Riverside 127, Cannery 1.4k, Mill Lane 2.4k, Harbour 3.2k, Northgate 1.6k, Quay 18
+    stations under 50 riders: Quay
+    plans: station Harbour approved +park (score 0.38: house owners in the suburb object) paid 62.9M; station Northgate refused (score 0.21: house owners in the suburb object) paid 0.0M
+    by distance from the centre (cells): 0-8 mean 28.9 m, 25 >36 m of 165 | 8-16 mean 19.5 m, 14 >36 m of 186 | 16-24 mean 17.3 m, 0 >36 m of 236 | 24-32 mean 13.3 m, 0 >36 m of 394 | 32- mean 8.5 m, 0 >36 m of 687
+    by walk to a station (min): 0-4 mean 24.4 m, 33 >36 m of 329 | 4-8 mean 18.9 m, 6 >36 m of 463 | 8-12 mean 9.8 m, 0 >36 m of 182 | 12- mean 8.3 m, 0 >36 m of 119
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 452, historic 2 (0) of 230, main 0 (0) of 716, station 35 (4) of 160, cbd 2 (1) of 3, industrial 0 (0) of 107; value capture this month 0.00M
+    heights (res+com buildings): <=10m 810, 11-16 348, 17-24 329, 25-36 142, 37-60 35, >60 4; towers >36 m next to a detached house (<100 m): 0/39
+  m192: pop 130.2k (households 56.6k, jobs 61.1k), trips/day 421.7k (3.24 per resident), transit 17.2k = 8.8% share, money 54M inc 2.06M/mo exp 1.22M/mo
+    mode split (all trips): car 42%, metro 4.1%, walk 35%, bike 19%; congestion 0.62, drive speed 29 km/h, rating 94; metro boardings per resident 0.172
+    line 1: 3 st 1.5 km, boardings/day 12.0k (7.9k/km), trains 2 hw 5.7 min, peak 597/h of cap 3141/h (19%), rating 94; stations Harbour 3.5k, Market 2.1k, Chapel 5.0k
+    line 2: 6 st 1.9 km, boardings/day 10.5k (5.6k/km), trains 3 hw 5.4 min, peak 438/h of cap 3331/h (13%), rating 95; stations Riverside 837, Cannery 1.6k, Mill Lane 2.4k, Harbour 3.5k, Northgate 1.7k, Quay 16
+    stations under 50 riders: Quay
+    plans: station Harbour approved +park (score 0.38: house owners in the suburb object) paid 63.1M; station Northgate refused (score 0.21: house owners in the suburb object) paid 0.0M
+    by distance from the centre (cells): 0-8 mean 29.3 m, 25 >36 m of 154 | 8-16 mean 21.1 m, 14 >36 m of 177 | 16-24 mean 16.9 m, 0 >36 m of 295 | 24-32 mean 13.7 m, 0 >36 m of 384 | 32- mean 8.7 m, 0 >36 m of 634
+    by walk to a station (min): 0-4 mean 23.7 m, 31 >36 m of 359 | 4-8 mean 19.6 m, 8 >36 m of 461 | 8-12 mean 9.9 m, 0 >36 m of 173 | 12- mean 8.5 m, 0 >36 m of 119
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 439, historic 2 (0) of 220, main 0 (0) of 712, station 36 (5) of 148, cbd 1 (0) of 1, industrial 0 (0) of 124; value capture this month 0.00M
+    heights (res+com buildings): <=10m 739, 11-16 372, 17-24 348, 25-36 146, 37-60 35, >60 4; towers >36 m next to a detached house (<100 m): 0/39
+  m240: pop 128.9k (households 56.1k, jobs 62.3k), trips/day 452.3k (3.51 per resident), transit 18.4k = 8.9% share, money 50M inc 3.89M/mo exp 1.22M/mo
+    mode split (all trips): car 42%, metro 4.1%, walk 35%, bike 19%; congestion 0.60, drive speed 29 km/h, rating 94; metro boardings per resident 0.190
+    line 1: 3 st 1.5 km, boardings/day 12.4k (8.2k/km), trains 2 hw 5.7 min, peak 614/h of cap 3141/h (20%), rating 94; stations Harbour 3.4k, Market 2.2k, Chapel 5.1k
+    line 2: 6 st 1.9 km, boardings/day 12.1k (6.5k/km), trains 3 hw 5.4 min, peak 469/h of cap 3331/h (14%), rating 95; stations Riverside 829, Cannery 1.6k, Mill Lane 2.7k, Harbour 3.4k, Northgate 2.0k, Quay 572
+    plans: station Harbour approved +park (score 0.38: house owners in the suburb object) paid 67.8M; station Northgate refused (score 0.21: house owners in the suburb object) paid 0.0M
+    by distance from the centre (cells): 0-8 mean 29.0 m, 22 >36 m of 149 | 8-16 mean 21.8 m, 16 >36 m of 171 | 16-24 mean 16.6 m, 0 >36 m of 307 | 24-32 mean 13.7 m, 0 >36 m of 391 | 32- mean 8.6 m, 0 >36 m of 590
+    by walk to a station (min): 0-4 mean 23.8 m, 32 >36 m of 352 | 4-8 mean 19.2 m, 6 >36 m of 461 | 8-12 mean 10.2 m, 0 >36 m of 169 | 12- mean 8.6 m, 0 >36 m of 126
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 439, historic 2 (0) of 217, main 0 (0) of 687, station 35 (4) of 143, cbd 1 (0) of 1, industrial 0 (0) of 121; value capture this month 1.68M
+    heights (res+com buildings): <=10m 707, 11-16 378, 17-24 339, 25-36 146, 37-60 35, >60 3; towers >36 m next to a detached house (<100 m): 0/38
+  goals: first_line@m4, pop_12k@m13, riders_1500@m20, stations_4@m31, second_line@m32
+
+== seed 304 (coast / planned-capital); start money 100M
+  m3 line 1 (starter) built; money 58M
+  m30 line 2 (dense 6 st) built; money 85M
+  m40 station area plan for Mill Lane: 40|Station area plan for Mill Lane submitted to the council ($3.0M, decision in about 3 months)
+  m40 station area plan for Harbour: 40|Station area plan for Harbour submitted to the council ($3.0M, decision in about 3 months)
+  m40 CBD edge plan for Harbour: 40|Harbour: no land within its walk that a plan could change
+  m48: pop 42.5k (households 18.5k, jobs 13.8k), trips/day 125.4k (2.95 per resident), transit 5.4k = 8.7% share, money 120M inc 0.81M/mo exp 1.16M/mo
+    mode split (all trips): car 45%, metro 4.3%, walk 35%, bike 15%; congestion 0.33, drive speed 38 km/h, rating 94; metro boardings per resident 0.138
+    line 1: 3 st 1.6 km, boardings/day 902 (550/km), trains 2 hw 5.9 min, peak 54/h of cap 3033/h (2%), rating 93; stations Harbour 1.6k, Market 0, Chapel 451
+    line 2: 6 st 1.9 km, boardings/day 4.9k (2.6k/km), trains 3 hw 5.4 min, peak 219/h of cap 3320/h (7%), rating 95; stations Riverside 234, Market 0, Cannery 1.1k, Harbour 1.6k, Mill Lane 1.7k, Northgate 331
+    stations under 50 riders: Market
+    plans: station Mill Lane approved +park (score 0.55: no strong feelings either way) paid 0.2M; station Harbour approved +park (score 0.56: no strong feelings either way) paid 0.2M
+    by distance from the centre (cells): 0-8 mean 18.4 m, 12 >36 m of 134 | 8-16 mean 15.0 m, 5 >36 m of 169 | 16-24 mean 7.3 m, 0 >36 m of 79 | 24-32 mean 7.0 m, 0 >36 m of 176 | 32- mean 7.0 m, 0 >36 m of 539
+    by walk to a station (min): 0-4 mean 13.0 m, 12 >36 m of 347 | 4-8 mean 11.4 m, 5 >36 m of 186 | 8-12 mean 7.9 m, 0 >36 m of 16 | 12- mean 7.0 m, 0 >36 m of 134
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 181, historic 0 (0) of 276, main 0 (0) of 410, station 17 (3) of 228, industrial 0 (0) of 2; value capture this month 0.15M
+    heights (res+com buildings): <=10m 933, 11-16 28, 17-24 87, 25-36 32, 37-60 14, >60 3; towers >36 m next to a detached house (<100 m): 7/17
+  m57 first 36 m+ tower the plan made possible (zoning there allowed under 36 m before) in the Mill Lane plan, 14 months after approval
+  m64 first 36 m+ tower the plan made possible (zoning there allowed under 36 m before) in the Harbour plan, 20 months after approval
+  m96: pop 77.2k (households 33.6k, jobs 39.7k), trips/day 222.5k (2.88 per resident), transit 13.5k = 13.3% share, money 205M inc 2.42M/mo exp 1.16M/mo
+    mode split (all trips): car 39%, metro 6.1%, walk 37%, bike 17%; congestion 0.43, drive speed 35 km/h, rating 95; metro boardings per resident 0.189
+    line 1: 3 st 1.6 km, boardings/day 1.7k (1.0k/km), trains 2 hw 5.9 min, peak 99/h of cap 3033/h (3%), rating 93; stations Harbour 2.9k, Market 235, Chapel 822
+    line 2: 6 st 1.9 km, boardings/day 12.8k (6.8k/km), trains 3 hw 5.4 min, peak 485/h of cap 3320/h (15%), rating 95; stations Riverside 1.6k, Market 235, Cannery 2.9k, Harbour 2.9k, Mill Lane 3.1k, Northgate 1.9k
+    plans: station Mill Lane approved +park (score 0.55: no strong feelings either way) paid 46.7M; station Harbour approved +park (score 0.56: no strong feelings either way) paid 15.5M
+    by distance from the centre (cells): 0-8 mean 27.6 m, 21 >36 m of 121 | 8-16 mean 21.9 m, 18 >36 m of 235 | 16-24 mean 14.8 m, 2 >36 m of 174 | 24-32 mean 8.6 m, 0 >36 m of 206 | 32- mean 7.1 m, 0 >36 m of 623
+    by walk to a station (min): 0-4 mean 21.6 m, 33 >36 m of 339 | 4-8 mean 16.4 m, 8 >36 m of 275 | 8-12 mean 10.4 m, 0 >36 m of 57 | 12- mean 7.1 m, 0 >36 m of 172
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 263, historic 0 (0) of 279, main 0 (0) of 591, station 41 (5) of 196, cbd 0 (0) of 1, industrial 0 (0) of 29; value capture this month 0.80M
+    heights (res+com buildings): <=10m 874, 11-16 157, 17-24 178, 25-36 109, 37-60 36, >60 5; towers >36 m next to a detached house (<100 m): 0/41
+  m144: pop 111.2k (households 48.4k, jobs 52.6k), trips/day 325.5k (2.93 per resident), transit 19.4k = 12.6% share, money 78M inc 2.80M/mo exp 1.16M/mo
+    mode split (all trips): car 41%, metro 5.9%, walk 35%, bike 18%; congestion 0.49, drive speed 33 km/h, rating 95; metro boardings per resident 0.190
+    line 1: 3 st 1.6 km, boardings/day 2.8k (1.7k/km), trains 2 hw 5.9 min, peak 160/h of cap 3033/h (5%), rating 93; stations Harbour 3.6k, Market 428, Chapel 1.3k
+    line 2: 6 st 1.9 km, boardings/day 18.4k (9.8k/km), trains 3 hw 5.4 min, peak 655/h of cap 3320/h (20%), rating 95; stations Riverside 3.1k, Market 428, Cannery 4.4k, Harbour 3.6k, Mill Lane 4.0k, Northgate 2.6k
+    plans: station Mill Lane approved +park (score 0.55: no strong feelings either way) paid 62.4M; station Harbour approved +park (score 0.56: no strong feelings either way) paid 22.3M
+    by distance from the centre (cells): 0-8 mean 30.7 m, 29 >36 m of 117 | 8-16 mean 23.4 m, 23 >36 m of 257 | 16-24 mean 17.2 m, 3 >36 m of 211 | 24-32 mean 9.7 m, 0 >36 m of 264 | 32- mean 7.2 m, 0 >36 m of 1136
+    by walk to a station (min): 0-4 mean 24.2 m, 46 >36 m of 362 | 4-8 mean 17.7 m, 9 >36 m of 323 | 8-12 mean 11.6 m, 0 >36 m of 59 | 12- mean 8.1 m, 0 >36 m of 127
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 362, historic 0 (0) of 284, main 1 (0) of 1034, station 52 (5) of 202, cbd 2 (2) of 6, industrial 0 (0) of 97; value capture this month 0.48M
+    heights (res+com buildings): <=10m 1346, 11-16 236, 17-24 214, 25-36 134, 37-60 48, >60 7; towers >36 m next to a detached house (<100 m): 0/55
+  m192: pop 108.8k (households 47.3k, jobs 51.3k), trips/day 327.6k (3.01 per resident), transit 18.4k = 11.5% share, money 66M inc 2.21M/mo exp 1.16M/mo
+    mode split (all trips): car 43%, metro 5.6%, walk 34%, bike 17%; congestion 0.48, drive speed 33 km/h, rating 95; metro boardings per resident 0.185
+    line 1: 3 st 1.6 km, boardings/day 2.7k (1.7k/km), trains 2 hw 5.9 min, peak 155/h of cap 3033/h (5%), rating 93; stations Harbour 3.5k, Market 443, Chapel 1.3k
+    line 2: 6 st 1.9 km, boardings/day 17.4k (9.2k/km), trains 3 hw 5.4 min, peak 634/h of cap 3320/h (19%), rating 95; stations Riverside 3.0k, Market 443, Cannery 3.7k, Harbour 3.5k, Mill Lane 3.9k, Northgate 2.5k
+    plans: station Mill Lane approved +park (score 0.55: no strong feelings either way) paid 64.2M; station Harbour approved +park (score 0.56: no strong feelings either way) paid 24.0M
+    by distance from the centre (cells): 0-8 mean 30.8 m, 27 >36 m of 104 | 8-16 mean 23.9 m, 25 >36 m of 251 | 16-24 mean 17.9 m, 3 >36 m of 193 | 24-32 mean 9.6 m, 0 >36 m of 276 | 32- mean 7.2 m, 0 >36 m of 1084
+    by walk to a station (min): 0-4 mean 24.2 m, 45 >36 m of 343 | 4-8 mean 17.9 m, 10 >36 m of 314 | 8-12 mean 11.7 m, 0 >36 m of 69 | 12- mean 8.2 m, 0 >36 m of 104
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 323, historic 0 (0) of 276, main 1 (0) of 981, station 53 (5) of 195, cbd 1 (1) of 4, industrial 0 (0) of 129; value capture this month 0.00M
+    heights (res+com buildings): <=10m 1290, 11-16 226, 17-24 211, 25-36 126, 37-60 49, >60 6; towers >36 m next to a detached house (<100 m): 0/55
+  m240: pop 102.8k (households 44.7k, jobs 53.3k), trips/day 405.7k (3.95 per resident), transit 19.9k = 10.2% share, money 89M inc 2.39M/mo exp 1.16M/mo
+    mode split (all trips): car 43%, metro 4.9%, walk 34%, bike 18%; congestion 0.45, drive speed 34 km/h, rating 95; metro boardings per resident 0.212
+    line 1: 3 st 1.6 km, boardings/day 2.8k (1.7k/km), trains 2 hw 5.9 min, peak 167/h of cap 3033/h (5%), rating 93; stations Harbour 3.8k, Market 115, Chapel 1.4k
+    line 2: 6 st 1.9 km, boardings/day 19.0k (10.1k/km), trains 3 hw 5.4 min, peak 676/h of cap 3320/h (20%), rating 95; stations Riverside 3.2k, Market 115, Cannery 4.5k, Harbour 3.8k, Mill Lane 4.2k, Northgate 2.8k
+    plans: station Mill Lane approved +park (score 0.55: no strong feelings either way) paid 64.2M; station Harbour approved +park (score 0.56: no strong feelings either way) paid 24.3M
+    by distance from the centre (cells): 0-8 mean 29.9 m, 20 >36 m of 96 | 8-16 mean 24.1 m, 25 >36 m of 255 | 16-24 mean 17.7 m, 3 >36 m of 219 | 24-32 mean 9.4 m, 0 >36 m of 295 | 32- mean 7.2 m, 0 >36 m of 981
+    by walk to a station (min): 0-4 mean 23.9 m, 39 >36 m of 350 | 4-8 mean 17.7 m, 9 >36 m of 321 | 8-12 mean 11.4 m, 0 >36 m of 81 | 12- mean 8.1 m, 0 >36 m of 120
+    towers >36 m (>=60 m) per envelope: outer 0 (0) of 244, historic 0 (0) of 274, main 1 (0) of 924, station 46 (4) of 194, cbd 1 (1) of 4, industrial 0 (0) of 206; value capture this month 0.00M
+    heights (res+com buildings): <=10m 1215, 11-16 221, 17-24 235, 25-36 127, 37-60 43, >60 5; towers >36 m next to a detached house (<100 m): 0/48
+  goals: first_line@m4, pop_12k@m14, stations_4@m31, riders_1500@m31, second_line@m32, riders_grow@m54

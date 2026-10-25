@@ -44,7 +44,7 @@ for (const seed of seeds) {
     if (ENVS.on) for (const p of sim.envs.plans) {
       if (p.state !== 'approved' || firstTower.has(p.id)) continue;
       const set = new Set(p.cells);
-      if (sim.lots.lots.some((l) => l.alive && set.has(l.cell) && l.level === 3 && !l.constr && l.hgt >= 36 && l.built >= p.decided)) { firstTower.set(p.id, sim.month - p.decided); console.log(`  m${sim.month} first 36 m+ tower in the ${p.name} plan, ${sim.month - p.decided} months after approval`); }
+      if (sim.lots.lots.some((l) => l.alive && set.has(l.cell) && l.level === 3 && !l.constr && l.hgt >= 36 && l.built >= p.decided && ENV_DEF[sim.envs.prior[l.cell]].maxH > 0 && ENV_DEF[sim.envs.prior[l.cell]].maxH < 36)) { firstTower.set(p.id, sim.month - p.decided); console.log(`  m${sim.month} first 36 m+ tower the plan made possible (zoning there allowed under 36 m before) in the ${p.name} plan, ${sim.month - p.decided} months after approval`); }
     }
     while (sim.pending) { const ev = sim.eventInfo()!; const want = ev.id.startsWith('plan_') ? 1 : 0; sim.apply({ type: 'choose', event: ev.id, choice: ev.choices[want].ok === false ? Math.max(0, ev.choices.findIndex((c) => c.ok !== false)) : want }); }
     if (sim.month % every === 0 || sim.month === months) {
