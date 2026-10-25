@@ -16,7 +16,7 @@ export interface InitMsg {
   profiles: import('./profiles').DistrictProfile[];
 }
 
-export interface StationInfo { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; depth: number; opened: number }
+export interface StationInfo { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; depth: number; opened: number; reach?: number; walkHomes?: number; ownHomes?: number }
 export interface LineInfo {
   id: number;
   color: string;

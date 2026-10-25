@@ -11,8 +11,9 @@ export interface TagSpec {
   badge?: string;
   /** line / type colour (pin head, badge, left edge) */
   color: string;
-  /** 0 = tag, 1 = flag (project: tilted card, folded corner, progress bar), 2 = cost slip (tracing paper), 3 = site hoarding (painted board) */
-  look: 0 | 1 | 2 | 3;
+  /** 0 = tag, 1 = flag (project: tilted card, folded corner, progress bar), 2 = cost slip (tracing paper), 3 = site hoarding (painted board),
+   *  4 = site pin (round 7: a small label for projects and building sites, well below district and station names in the hierarchy) */
+  look: 0 | 1 | 2 | 3 | 4;
   /** progress 0..1 for flags */
   pct?: number;
   /** red / green accent on a cost slip */
@@ -74,9 +75,29 @@ function renderHoarding(t: TagSpec, s: number, night: boolean): Bitmap {
   return { c: m, w: w + M * 2, h: h + M * 2 };
 }
 
+/** A site pin's label: one line of small sans text on a slip of paper with the project colour as a dot, a thin progress line under it. */
+function renderSitePin(t: TagSpec, s: number, night: boolean): Bitmap {
+  const m = document.createElement('canvas');
+  const g0 = m.getContext('2d')!;
+  const text = t.sub ? `${t.title} · ${t.sub}` : t.title;
+  g0.font = `600 9.5px ${SANS}`;
+  const tw = g0.measureText(text).width;
+  const w = Math.ceil(tw + 20), h = 15, M = 2;
+  m.width = Math.ceil((w + M * 2) * s); m.height = Math.ceil((h + M * 2) * s);
+  const g = m.getContext('2d')!;
+  g.scale(s, s); g.translate(M, M);
+  g.fillStyle = 'rgba(30,22,10,0.18)'; rr(g, 1, 1.5, w, h, 2); g.fill();
+  g.fillStyle = night ? 'rgba(216,207,182,0.92)' : 'rgba(247,242,228,0.92)'; rr(g, 0, 0, w, h, 2); g.fill();
+  g.fillStyle = t.color; g.beginPath(); g.arc(7, h / 2, 3, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#3d362c'; g.font = `600 9.5px ${SANS}`; g.textBaseline = 'middle'; g.fillText(text, 13, h / 2 + 0.5);
+  if (t.pct !== undefined && t.pct > 0) { g.fillStyle = t.color; g.fillRect(13, h - 2, (w - 17) * Math.max(0, Math.min(1, t.pct)), 1.2); }
+  return { c: m, w: w + M * 2, h: h + M * 2 };
+}
+
 /** Render a tag at `s` device pixels per CSS pixel. The bitmap includes a 3 px margin for the paper's shadow. */
 export function renderTag(t: TagSpec, s: number, night: boolean): Bitmap {
   if (t.look === 3 && !t.mini) return renderHoarding(t, s, night);
+  if (t.look === 4) return renderSitePin(t, s, night);
   const m = document.createElement('canvas');
   const g0 = m.getContext('2d')!;
   const tf = t.mini ? 10.5 : t.look === 2 ? 16 : 12.5, sf = 9.5, bf = 10.5;

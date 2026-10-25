@@ -53,6 +53,7 @@ let terrain: TerrainView | null = null;
 let city: CityView | null = null;
 let metro: MetroView | null = null;
 let labels: Labels | null = null;
+let labelsYear = -1;
 let life: Life | null = null;
 let planner: Planner | null = null;
 let sunShadow: SunShadow | null = null;
@@ -143,9 +144,10 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     emitter.onState(prevState, m);
     emitClock();
     if (!labels && init && terrain) {
-      labels = new Labels(init.villages, init.city.site, m.docks.centre, (x, z) => terrain!.sample(x, z));
+      labels = new Labels(init.villages, init.city.site, m.docks.centre, (x, z) => terrain!.sample(x, z), init.water);
       env.addText(labels.group);
-    }
+      labels.anchor(m.lots); labelsYear = Math.floor(m.stats.month / 12);
+    } else if (labels && Math.floor(m.stats.month / 12) !== labelsYear) { labels.anchor(m.lots); labelsYear = Math.floor(m.stats.month / 12); }
     perf.step('life', () => { life?.setRoads(m.roads); if (newMonth) life?.setCity(m.stats.homes, m.stations, stationLoads(m)); });
     if (newMonth) lastStateAt = performance.now();
     perf.step('city', () => city?.update(m, CITY_BUDGET));
@@ -307,6 +309,12 @@ canvas.addEventListener('pointerup', (e) => {
   if (!down || e.button !== 0) return;
   const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
   down = null;
+  // view mode: a click on a map pin (project, building site, landmark, station) flies there
+  if (moved <= 6 && hud.tool !== 'plan' && dg) {
+    const r = canvas.getBoundingClientRect();
+    const h = dg.hit(e.clientX - r.left, e.clientY - r.top);
+    if (h) { env.focus(h.pos.x, h.pos.z, 800); return; }
+  }
   if (moved > 6 || hud.tool !== 'plan' || !state || !planner) return;
   const c = pickCell(e);
   if (c) planner.click(state, c.x, c.y);

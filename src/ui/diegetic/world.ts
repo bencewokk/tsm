@@ -14,6 +14,14 @@ export function stationLoads(s: StateMsg): Map<number, number> {
   return out;
 }
 
+/** why a station on a line carries (almost) nobody: what its walk catchment reaches */
+function quiet(st: StateMsg['stations'][number], month: number) {
+  if ((st.reach ?? 99) < 20) return 'no street within reach';
+  if ((st.walkHomes ?? 0) > 150 && (st.ownHomes ?? 0) < 40) return 'a nearer station takes its streets';
+  if ((st.walkHomes ?? 0) < 150) return st.opened >= 0 && month - st.opened < 24 ? 'new: empty land, waiting for growth' : 'empty land round it';
+  return 'few trips to anywhere on the line';
+}
+
 /**
  * Turn a state message into the objects pinned on the model: a tag on every station (name, ridership, line), a flag at every running
  * development project, the docks brief at the docks, a tag on each landmark. Called once per state message; the layer pools by id and
@@ -33,7 +41,7 @@ export function syncWorld(ui: DiegeticLayer, s: StateMsg, ground: (x: number, z:
     const packed = lines?.some((lid) => (ui.lineLoad.get(lid) ?? 0) > 1);
     ui.tag(id, P(st.x, st.y, 1), {
       title: st.name,
-      sub: lines ? `Line ${lines.join(' + ')}${packed ? '  ·  packed' : ''}` : 'dug, not on a line yet',
+      sub: lines ? `Line ${lines.join(' + ')}${packed ? '  ·  packed' : ''}${st.riders < 50 ? `  ·  ${quiet(st, s.stats.month)}` : ''}` : 'dug, not on a line yet',
       badge: lines ? abbr(st.riders) : '',
       color: packed ? '#c0503a' : colOf.get(st.id) ?? '#8a8f94',
       look: 0,
@@ -46,7 +54,10 @@ export function syncWorld(ui: DiegeticLayer, s: StateMsg, ground: (x: number, z:
   for (const p of s.projects) {
     if (p.status !== 'proposed' && p.status !== 'assembling' && p.status !== 'building') continue;
     const id = `pr:${p.id}`; keep.add(id);
-    ui.pin(id, P(p.x, p.y, 1), { title: p.name, sub: p.status === 'proposed' ? 'decision at City hall' : `${p.phase}${p.pct ? `  ${Math.round(p.pct * 100)}%` : ''}`, color: p.color, look: p.status === 'proposed' ? 1 : 3, pct: p.status === 'proposed' ? 0 : p.pct }, { priority: 40, far: 4200, full: 4200 });
+    // round 7: a small site pin (a dot far away, one short line close in), never as loud as a district or a station; a decision waiting
+    // at City hall keeps the flag
+    if (p.status === 'proposed') ui.pin(id, P(p.x, p.y, 1), { title: p.name, sub: 'decision at City hall', color: p.color, look: 1, pct: 0 }, { priority: 40, far: 5200, full: 5200 });
+    else ui.pin(id, P(p.x, p.y, 1), { title: p.name, sub: `${p.phase}${p.pct ? ` ${Math.round(p.pct * 100)}%` : ''}`, color: p.color, look: 4, pct: p.pct }, { priority: 6, far: 6000, full: 1500, stick: 16 });
   }
   ui.sweep('pr:', keep);
   keep.clear();
@@ -62,13 +73,13 @@ export function syncWorld(ui: DiegeticLayer, s: StateMsg, ground: (x: number, z:
   keep.clear();
   for (const l of s.landmarks) {
     const id = `lm:${l.id}`; keep.add(id);
-    if (l.state === 'building') ui.pin(id, P(l.x, l.y, 1), { title: l.name, sub: `building  ${Math.round(l.pct * 100)}%`, color: '#8a6db0', look: 1, pct: l.pct }, { priority: 35, far: 3800, full: 3800 });
+    if (l.state === 'building') ui.pin(id, P(l.x, l.y, 1), { title: l.name, sub: `building ${Math.round(l.pct * 100)}%`, color: '#8a6db0', look: 4, pct: l.pct }, { priority: 7, far: 6000, full: 1800, stick: 16 });
     else ui.tag(id, P(l.x, l.y, 1), { title: l.name, sub: l.served ? 'served' : l.carPark ? 'car park only' : 'no station', color: l.served ? '#4f8fb8' : '#a8a095', look: 0 }, { priority: 4, far: 2400, full: 2400 });
   }
   for (const a of s.assemblies) {
     if (a.kind === 'project') continue;
     const id = `as:${a.id}`; keep.add(id);
-    ui.pin(id, P(a.x, a.y, 1), { title: a.label, sub: a.phase === 0 ? `buying plots ${a.acquired}/${a.total}` : 'site works', color: '#c0803a', look: 1, pct: a.pct }, { priority: 30, far: 3200, full: 3200 });
+    ui.pin(id, P(a.x, a.y, 1), { title: a.label.replace(/^Residential tower/, 'Tower').replace(/^Office tower/, 'Offices'), sub: a.phase === 0 ? `buying ${a.acquired}/${a.total}` : '', color: '#c0803a', look: 4, pct: a.pct }, { priority: 5, far: 5000, full: 1300, stick: 14 });
   }
   ui.sweep('lm:', new Set([...keep].filter((k) => k.startsWith('lm:'))));
   ui.sweep('as:', new Set([...keep].filter((k) => k.startsWith('as:'))));

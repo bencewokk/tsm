@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { CELL } from '../sim/constants';
+import { CELL, N } from '../sim/constants';
 import type { Village } from '../sim/terrain';
+import type { LotsMsg } from '../sim/protocol';
 
 const CAUSE_TEXT: Record<string, string> = { hist: 'old village', rail: 'railway town', factory: 'factory town', commuter: 'garden suburb' };
 
@@ -10,24 +11,74 @@ const CAUSE_TEXT: Record<string, string> = { hist: 'old village', rail: 'railway
  */
 export class Labels {
   group = new THREE.Group();
-  private sprites: { s: THREE.Sprite; big: boolean; base: THREE.Vector3 }[] = [];
+  private sprites: { s: THREE.Sprite; big: boolean; base: THREE.Vector3; cx: number; cy: number; lift: number }[] = [];
+  private water: Uint8Array | null = null;
+  private sample: (x: number, z: number) => number;
   /** dev switch (`tsm.labels.avoid = false`) for before / after captures */
   avoid = true;
   private v = new THREE.Vector3();
   private up = new THREE.Vector3();
 
-  constructor(villages: Village[], site: string, docks: { x: number; y: number } | null, sample: (x: number, z: number) => number) {
+  constructor(villages: Village[], site: string, docks: { x: number; y: number } | null, sample: (x: number, z: number) => number, water?: Uint8Array) {
+    this.sample = sample;
+    this.water = water ?? null;
+    // round 7: the tags stand lower (they were lifted 260-420 m, so in an oblique view they floated over whatever lay behind the
+    // settlement, often the water) and are anchored on the settlement's built land, see anchor()
     const add = (title: string, sub: string, x: number, y: number, big: boolean, lift: number) => {
       const s = this.make(title, sub, big);
-      s.position.set((x + 0.5) * CELL, sample((x + 0.5) * CELL, (y + 0.5) * CELL) + lift, (y + 0.5) * CELL);
       this.group.add(s);
-      this.sprites.push({ s, big, base: s.position.clone() });
+      const e = { s, big, base: new THREE.Vector3(), cx: x, cy: y, lift };
+      this.sprites.push(e);
+      this.place(e, x, y);
     };
     for (const v of villages) {
       const sub = v.kind === 'origin' ? 'old town' : v.kind === 'planned' ? 'planned quarter' : v.kind === 'garden' ? 'garden suburb' : v.cause ? CAUSE_TEXT[v.cause] ?? '' : '';
-      add(v.name, sub, v.x, v.y, v.kind === 'origin', v.kind === 'origin' ? 420 : 260);
+      add(v.name, sub, v.x, v.y, v.kind === 'origin', v.kind === 'origin' ? 150 : 110);
     }
-    if (docks) add(site === 'harbour' ? 'The Docks' : site === 'railyard' ? 'The Rail Yards' : 'The Pit', 'old industry', docks.x - 2, docks.y + 3, false, 130);
+    if (docks) add(site === 'harbour' ? 'The Docks' : site === 'railyard' ? 'The Rail Yards' : 'The Pit', 'old industry', docks.x, docks.y, false, 80);
+  }
+
+  /** water cells under a label's footprint (its width and depth on the ground, cell units) centred at x, y */
+  private wetUnder(x: number, y: number, big: boolean) {
+    const W = this.water;
+    if (!W) return 0;
+    const hw = (big ? 600 : 470) / CELL / 2, hd = 2.2;
+    let n = 0;
+    for (let dy = -hd; dy <= hd; dy += 1) for (let dx = -hw; dx <= hw; dx += 1) {
+      const cx = Math.floor(x + dx), cy = Math.floor(y + dy);
+      if (cx < 0 || cy < 0 || cx >= N || cy >= N || W[cy * N + cx]) n++;
+    }
+    return n;
+  }
+
+  /** put a label at the dry spot nearest (x, y) whose footprint has the least water (none if there is such a spot within 8 cells) */
+  private place(e: Labels['sprites'][number], x: number, y: number) {
+    let bx = x, by = y, best = this.wetUnder(x, y, e.big) * 100;
+    if (best > 0) for (let r = 1; r <= 8; r++) for (let k = 0; k < 8 * r; k++) {
+      const a = (k / (8 * r)) * Math.PI * 2, px = x + Math.cos(a) * r, py = y + Math.sin(a) * r;
+      const score = this.wetUnder(px, py, e.big) * 100 + r;
+      if (score < best) { best = score; bx = px; by = py; }
+    }
+    e.base.set((bx + 0.5) * CELL, this.sample((bx + 0.5) * CELL, (by + 0.5) * CELL) + e.lift, (by + 0.5) * CELL);
+    e.s.position.copy(e.base);
+  }
+
+  /**
+   * Anchor each label to the centroid of its settlement's built plots (within 9 cells of the original centre, the docks label within 6),
+   * then move it to the nearest spot with no water under it. Called when the city changes (main.ts, once a year).
+   */
+  anchor(L: LotsMsg) {
+    for (const e of this.sprites) {
+      const R = e.lift === 80 ? 6 : 9;
+      let sx = 0, sy = 0, n = 0;
+      for (let k = 0; k < L.n; k++) {
+        if (!L.type[k] || L.level[k] <= 0) continue;
+        const dx = L.x[k] - e.cx, dy = L.y[k] - e.cy;
+        if (dx * dx + dy * dy > R * R) continue;
+        sx += L.x[k]; sy += L.y[k]; n++;
+      }
+      if (n >= 4) this.place(e, sx / n - 0.5, sy / n - 0.5); else this.place(e, e.cx, e.cy);
+    }
   }
 
   private make(title: string, sub: string, big: boolean): THREE.Sprite {

@@ -285,6 +285,23 @@ function designShop(c: Ctx) {
   }
 }
 
+/**
+ * Mixed-use mid-rise (round 7): the middle ring's commercial level 2 outside the business district. It used to be a 22-38 m grey glass office
+ * slab everywhere, a belt of characterless boxes; now it is a perimeter block in the district's own colours with shops on the ground floor.
+ */
+function designMixed(c: Ctx) {
+  designApart(c);
+  const { Q, r } = c;
+  const n = Q.W > 22 ? 2 : 1;
+  const cs = cuts(c, n, 0.3);
+  const v0 = c.dens === 0 ? 0.2 - 0.9 / Q.D : 0, v1 = c.dens === 0 ? 0.2 : 0.9 / Q.D;
+  for (let i = 0; i < n; i++) {
+    const a = c.dens === 0 ? Math.max(0.1, cs[i]) : cs[i], b = c.dens === 0 ? Math.min(0.9, cs[i + 1]) : cs[i + 1];
+    c.mb.prism('glass', Q.strip(a + 0.006, b - 0.006, v0, v1), c.g, c.g + 3.6, 0x8aa0ae, 0x8aa0ae);
+    if (c.dens > 0) awning(c, a, b, 3.7, 1.6, pick(c.pal.accent, r(70 + i)));
+  }
+}
+
 function designOffice(c: Ctx) {
   const { Q, r } = c;
   pad(c, GROUND.office, 0.1, 0.3);
@@ -321,10 +338,10 @@ function designInd(c: Ctx) {
   } else block(c, shed, 0.01, col, { roof: 'flat', roofColor: pick(PAL.indRoof, r(6)) });
   // loading doors
   c.mb.prism('plain', Q.strip(0.16, 0.84, 0.065, 0.075), c.g, c.g + 4.6, 0x54595c, 0x54595c);
-  // chimney
-  if (c.level >= 2 || r(7) < 0.55) {
+  // chimney: only on a few works (round 7: one on most sheds, 26-40 m tall and thin, read as a field of red pins over the industrial belt)
+  if (r(7) < (c.level >= 2 ? 0.16 : 0.08)) {
     const p = Q.at(0.9, 0.55);
-    c.mb.prism('plain', circle(p[0], p[1], 1.9, 10), c.g - 1, c.g + 26 + r(8) * 14, pick(PAL.brick, r(9)), 0xe8e4dc);
+    c.mb.prism('plain', circle(p[0], p[1], 2.6, 10), c.g - 1, c.g + 18 + r(8) * 8, pick(PAL.brick, r(9)), 0xe8e4dc);
   }
   // yard: tanks or stock behind the shed
   const yv = t1 + 0.18;
@@ -673,7 +690,8 @@ export function designLot(c: Ctx) {
     case 'tower': designTowerKind(c, false); break;
     case 'cbd': designTowerKind(c, true); break;
     case 'shop': designShop(c); break;
-    case 'office': designOffice(c); break;
+    // offices stay glass slabs only in the business district (or where the field allows a tall one); elsewhere commerce is mixed use
+    case 'office': if (c.prof.id === 'downtown' || c.hgt >= 30) designOffice(c); else designMixed(c); break;
     case 'ind': designInd(c); break;
     case 'port': designPort(c); break;
     case 'dockNew': designDockNew(c); break;

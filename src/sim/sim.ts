@@ -870,7 +870,7 @@ export class Sim {
     {
       // cell level: nearest station by walk, summed per zone into access groups (homes for trip origins, jobs + 0.3 homes for destinations)
       const oW = new Float64Array(ZONES * S), oT = new Float64Array(ZONES * S), dW = new Float64Array(ZONES * S), dT = new Float64Array(ZONES * S);
-      const zO = new Float64Array(ZONES), zD = new Float64Array(ZONES);
+      const zO = new Float64Array(ZONES), zD = new Float64Array(ZONES), own = new Float64Array(S);
       for (let i = 0; i < N * N; i++) {
         const h = this.cHomes[i], d = this.cJobs[i] + 0.3 * h;
         if (!h && !d) continue;
@@ -880,6 +880,15 @@ export class Sim {
         for (let k = 0; k < S; k++) { const t = this.walk[k][i]; if (t < bt) { bt = t; bk = k; } }
         if (bk < 0) continue;
         oW[z * S + bk] += h; oT[z * S + bk] += h * bt; dW[z * S + bk] += d; dT[z * S + bk] += d * bt;
+        own[bk] += h;
+      }
+      // what each station reaches (shown on a quiet station's tag: no street nearby, a nearer station takes its streets, or empty land)
+      for (let k = 0; k < S; k++) {
+        let reach = 0, wh = 0;
+        const f = this.walk[k];
+        for (let i = 0; i < N * N; i++) if (f[i] <= 8) { reach++; wh += this.cHomes[i]; }
+        const st = used[k];
+        st.reach = reach; st.walkHomes = Math.round(wh); st.ownHomes = Math.round(own[k]);
       }
       for (let z = 0; z < ZONES; z++) for (let k = 0; k < S; k++) {
         if (oW[z * S + k] > 0) this.zAccO[z].push({ s: k, w: oT[z * S + k] / oW[z * S + k] + 1, f: oW[z * S + k] / zO[z] });

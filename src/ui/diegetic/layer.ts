@@ -57,6 +57,7 @@ export class DiegeticLayer {
   private night = 0;
   private v = new THREE.Vector3();
   private placed: Rect[] = [];
+  private placedIds: string[] = [];
   /** per-line load (0..) from crowding events, read by the world sync */
   lineLoad = new Map<number, number>();
   /** table objects: newspaper, clipboard, dial plate */
@@ -104,7 +105,15 @@ export class DiegeticLayer {
     return it;
   }
   tag(id: string, pos: World3, spec: TagSpec, opts?: TagOpts) { return this.upsert(id, pos, spec, opts, false); }
-  pin(id: string, pos: World3, spec: TagSpec, opts?: TagOpts) { return this.upsert(id, pos, { ...spec, look: spec.look === 3 ? 3 : 1 }, opts, true); }
+  pin(id: string, pos: World3, spec: TagSpec, opts?: TagOpts) { return this.upsert(id, pos, { ...spec, look: spec.look === 3 || spec.look === 4 ? spec.look : 1 }, opts, true); }
+  /** the item drawn under a screen point (CSS px), for clicks on the map pins; null when none */
+  hit(px: number, py: number): { id: string; pos: World3 } | null {
+    for (let k = this.placedIds.length - 1; k >= 0; k--) {
+      const r = this.placed[k];
+      if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) { const it = this.items.get(this.placedIds[k]); if (it) return { id: it.id, pos: it.pos }; }
+    }
+    return null;
+  }
   untag(id: string) { this.items.delete(id); }
   /** drop every item whose id starts with `prefix` and is not in `keep` */
   sweep(prefix: string, keep: Set<string>) { for (const id of this.items.keys()) if (id.startsWith(prefix) && !keep.has(id)) this.items.delete(id); }
@@ -139,8 +148,8 @@ export class DiegeticLayer {
     switch (e.kind) {
       case 'fare': this.float(this.at(e.x, e.y, 6), `+${fmtMoney(e.amount)}`, '#c58b00'); break;
       case 'stationOpened':
+        // the ribbon front page of the line says it; a slip per station stacked four deep over the view and hid the coin pops (round 7)
         if (e.stationId !== undefined) this.pulse(`st:${e.stationId}`, performance.now());
-        this.slip(`${e.name} station opens`, 'Ribbon cut. Riders will follow the new walking routes.', e.color, false);
         break;
       case 'lineOpened': this.desk.newspaper(e.moment.title, e.moment.text, e.color, true); break;
       case 'moment': {
@@ -194,7 +203,7 @@ export class DiegeticLayer {
     const p = document.createElement('span'); p.textContent = text;
     d.append(h, p);
     this.slips.prepend(d);
-    while (this.slips.children.length > 4) this.slips.lastElementChild!.remove();
+    while (this.slips.children.length > 2) this.slips.lastElementChild!.remove();
     setTimeout(() => d.classList.add('out'), big ? 9000 : 6500);
     setTimeout(() => d.remove(), big ? 9700 : 7200);
   }
@@ -225,8 +234,9 @@ export class DiegeticLayer {
       if (this.v.z > 1 || this.v.z < -1) return;
       const sx = (this.v.x * 0.5 + 0.5) * cw, sy = (-this.v.y * 0.5 + 0.5) * ch;
       if (sx < -80 || sx > cw + 80 || sy < -40 || sy > ch + 120) return;
-      const mini = dist > it.o.full && !it.flag && it.id !== 'cost';
-      if (mini && !it.spec.badge) return;
+      const pinDot = it.spec.look === 4;
+      const mini = dist > it.o.full && (!it.flag || pinDot) && it.id !== 'cost';
+      if (mini && !it.spec.badge && !pinDot) return;
       vis.push({ it, sx, sy, dist, mini });
     };
     for (const it of this.items.values()) consider(it);
@@ -235,8 +245,23 @@ export class DiegeticLayer {
     // priority first, then near to far; place greedily without overlap (the cost slip always shows)
     vis.sort((a, b) => b.it.o.priority - a.it.o.priority || a.dist - b.dist);
     this.placed.length = 0;
+    this.placedIds.length = 0;
     let drawn = 0;
     for (const e of vis) {
+      if (e.mini && e.it.spec.look === 4) {
+        // a site pin far away: only the coloured pin head on a short stick
+        const r = { x: e.sx - 5, y: e.sy - 14, w: 10, h: 16 };
+        let hit = false;
+        for (const p of this.placed) if (r.x < p.x + p.w && r.x + r.w > p.x && r.y < p.y + p.h && r.y + r.h > p.y) { hit = true; break; }
+        if (hit) continue;
+        this.placed.push(r); this.placedIds.push(e.it.id); drawn++;
+        g.globalAlpha = Math.min(1, (e.it.o.far - e.dist) / 900);
+        g.strokeStyle = this.night > 0.5 ? '#9aa0a8' : '#55504a'; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(e.sx, e.sy); g.lineTo(e.sx, e.sy - 9); g.stroke();
+        g.fillStyle = e.it.spec.color; g.strokeStyle = 'rgba(30,20,10,0.6)'; g.lineWidth = 0.8;
+        g.beginPath(); g.arc(e.sx, e.sy - 10, 3.4, 0, Math.PI * 2); g.fill(); g.stroke();
+        continue;
+      }
       const b = this.bmp(e.it, e.mini);
       const stick = e.mini ? 10 : e.it.o.stick;
       const fade = (e.it.id === 'cost' ? 1 : Math.min(1, (e.it.o.far - e.dist) / 900)) * (e.it.until !== undefined ? Math.max(0, Math.min(1, (e.it.until + 800 - now) / 800)) : 1);
@@ -247,7 +272,7 @@ export class DiegeticLayer {
         for (const p of this.placed) if (r.x < p.x + p.w && r.x + r.w > p.x && r.y < p.y + p.h && r.y + r.h > p.y) { hit = true; break; }
         if (hit) continue;
       }
-      this.placed.push(r);
+      this.placed.push(r); this.placedIds.push(e.it.id);
       drawn++;
       g.globalAlpha = fade;
       // ground shadow, stick and pin head

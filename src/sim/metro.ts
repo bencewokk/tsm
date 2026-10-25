@@ -1,7 +1,9 @@
 import { N, CELL, METRO_SPEED, TRAIN_CAP, LINE_COLORS } from './constants';
 import { quoteLine, type Terr, type LineQuote } from './relief';
 
-export interface Station { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; /** metres below ground level of the platforms (deep stations cost more and add access time) */ depth: number; /** month the station first came into service (-1 while it is only dug) */ opened: number }
+export interface Station { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; /** metres below ground level of the platforms (deep stations cost more and add access time) */ depth: number; /** month the station first came into service (-1 while it is only dug) */ opened: number;
+  /** round 7, why a station is quiet: cells within an 8-minute walk, homes within it, and homes for which it is the nearest station */
+  reach?: number; walkHomes?: number; ownHomes?: number }
 export interface Line {
   id: number;
   color: string;

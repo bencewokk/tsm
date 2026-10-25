@@ -28,12 +28,6 @@ const MATS: Mat[] = ['wall', 'glass', 'plain', 'lamp'];
 const HOARD = [0x3f6f8f, 0x4c7f6a, 0x8a5f4c];
 const CONCRETE = 0xb4b0a6, CORE = 0xa29e94, GROUND = 0xcdc0a4, RUBBLE = 0xb4ab9b;
 
-const key = (a: Pt, b: Pt) => {
-  const r = (v: number) => Math.round(v * 2);
-  const p = `${r(a[0])},${r(a[1])}`, q = `${r(b[0])},${r(b[1])}`;
-  return p < q ? `${p}|${q}` : `${q}|${p}`;
-};
-
 export function siteSig(a: AssemblyInfo, L: LotsMsg, idx: Map<number, number>): number {
   let h = a.id * 7919 + a.phase * 104729;
   const m = (v: number) => { h = Math.imul(h ^ v, 16777619); };
@@ -59,27 +53,19 @@ export function buildSite(host: SiteHost, a: AssemblyInfo, s: StateMsg, idx: Map
   const U = new Quad(P(0), P(1), P(2), P(3));
   const cx = U.centre()[0], cz = U.centre()[1], gU = host.ground(cx, cz);
 
-  // ---- hoardings round the acquired plots; edges shared with another acquired plot of the site stay open
-  if (a.phase <= 4 && a.phase >= 0) {
-    const acquired = members.filter((k) => L.astate[k] >= 1);
-    const count = new Map<string, number>();
-    for (const k of acquired) { const p = polyOf(k); for (let i = 0; i < 4; i++) { const e = key(p[i], p[(i + 1) % 4]); count.set(e, (count.get(e) ?? 0) + 1); } }
-    for (const k of acquired) {
-      const p = polyOf(k), g = host.ground(L.x[k] * CELL, L.y[k] * CELL);
-      for (let i = 0; i < 4; i++) {
-        const A = p[i], B = p[(i + 1) % 4];
-        if ((count.get(key(A, B)) ?? 0) > 1) continue;
-        const dx = B[0] - A[0], dz = B[1] - A[1], len = Math.hypot(dx, dz) || 1, nx = -dz / len * 0.22, nz = dx / len * 0.22;
-        const seg: Pt[] = [[A[0] + nx, A[1] + nz], [B[0] + nx, B[1] + nz], [B[0] - nx, B[1] - nz], [A[0] - nx, A[1] - nz]];
-        mb.prism('plain', seg, g - 0.6, g + 2.5, hoardCol, hoardCol);
-        mb.prism('plain', seg.map((q) => [q[0] + (q[0] - (A[0] + B[0]) / 2) * 0.0, q[1]] as Pt), g + 2.5, g + 2.75, 0xe9e5da, 0xe9e5da);
-        // posts every ~10 m
-        const n = Math.max(1, Math.floor(len / 10));
-        for (let j = 0; j <= n; j++) {
-          const t = j / n, px = A[0] + dx * t, pz = A[1] + dz * t;
-          mb.prism('plain', [[px - 0.4, pz - 0.4], [px + 0.4, pz - 0.4], [px + 0.4, pz + 0.4], [px - 0.4, pz + 0.4]], g - 0.6, g + 3.0, 0xd9d4c6, 0xd9d4c6);
-        }
-      }
+  // ---- one continuous hoarding round the site outline once every plot is bought (round 7: was a fence round each plot with a post every
+  // 10 m, which from above read as scattered pins); it stays up until the building is finished
+  if (a.phase >= 1 && a.phase <= 6 && a.kind !== 'docks') {
+    const ring = U.poly(-0.6);
+    const g = gU;
+    for (let i = 0; i < ring.length; i++) {
+      const A = ring[i], B = ring[(i + 1) % ring.length];
+      const dx = B[0] - A[0], dz = B[1] - A[1], len = Math.hypot(dx, dz) || 1, nx = -dz / len * 0.2, nz = dx / len * 0.2;
+      // run each panel a little past the corner so the ring closes without a gap
+      const ex = dx / len * 0.2, ez = dz / len * 0.2;
+      const seg: Pt[] = [[A[0] - ex + nx, A[1] - ez + nz], [B[0] + ex + nx, B[1] + ez + nz], [B[0] + ex - nx, B[1] + ez - nz], [A[0] - ex - nx, A[1] - ez - nz]];
+      mb.prism('plain', seg, g - 1.2, g + 2.4, hoardCol, hoardCol);
+      mb.prism('plain', seg, g + 2.4, g + 2.6, 0xe9e5da, 0xe9e5da);
     }
   }
 

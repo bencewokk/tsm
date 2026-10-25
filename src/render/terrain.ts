@@ -163,16 +163,16 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
           float gr = clamp(vTsmGrass, 0.0, 1.0);
           float ca = 0.9, sa = 0.43;
           vec2 p = vec2(q.x * ca - q.y * sa, q.x * sa + q.y * ca) / 210.0;
-          vec2 w = fwidth(p) * 1.4;   // derivatives outside the branch below
           if (gr > 0.02) {
-          vec2 id = floor(p);
-          vec2 f = fract(p);
-          float fh = tsmH2(id);
-          vec3 ftint = mix(vec3(0.93, 0.98, 0.9), vec3(1.07, 1.05, 0.88), fh);
-          float hedge = 1.0 - smoothstep(0.0, 1.0, min(min(f.x, 1.0 - f.x) / max(w.x, 1e-4), min(f.y, 1.0 - f.y) / max(w.y, 1e-4)));
-          float fieldMask = gr * step(0.42, tsmH2(id + 3.7));   // not every parcel is a field: some stay meadow
-          diffuseColor.rgb *= mix(vec3(1.0), ftint, fieldMask * 0.8);
-          diffuseColor.rgb *= 1.0 - hedge * fieldMask * 0.16 * (1.0 - smoothstep(2200.0, 6500.0, length(vTsmXZ - cameraPosition.xz)) * 0.5);
+          // round 7: no parcel edges or hedgerow lines any more (their regular 210 m squares read as the sim grid on the grass);
+          // soft value noise gives the same patchwork of tints with no straight edge anywhere
+          vec2 id = floor(p), f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          float n = mix(mix(tsmH2(id), tsmH2(id + vec2(1.0, 0.0)), u.x), mix(tsmH2(id + vec2(0.0, 1.0)), tsmH2(id + vec2(1.0, 1.0)), u.x), u.y);
+          float m = mix(mix(tsmH2(id + 3.7), tsmH2(id + vec2(4.7, 3.7)), u.x), mix(tsmH2(id + vec2(3.7, 4.7)), tsmH2(id + vec2(4.7, 4.7)), u.x), u.y);
+          vec3 ftint = mix(vec3(0.94, 0.98, 0.91), vec3(1.06, 1.04, 0.9), n);
+          float fieldMask = gr * smoothstep(0.35, 0.6, m);
+          diffuseColor.rgb *= mix(vec3(1.0), ftint, fieldMask * 0.7);
           }
         }
         #endif
@@ -418,9 +418,7 @@ function paperTexture(height: Float32Array, wmask: Uint8Array): THREE.CanvasText
     img.data[o] = r; img.data[o + 1] = gg; img.data[o + 2] = b; img.data[o + 3] = 255;
   }
   g.putImageData(img, 0, 0);
-  // 1 km grid (20 cells)
-  g.strokeStyle = 'rgba(120,130,140,0.22)'; g.lineWidth = 1;
-  for (let k = 0; k <= N; k += 20) { g.beginPath(); g.moveTo(k * 8, 0); g.lineTo(k * 8, S); g.stroke(); g.beginPath(); g.moveTo(0, k * 8); g.lineTo(S, k * 8); g.stroke(); }
+  // (round 7: the 1 km grid is gone: the user does not want any grid on the ground)
   // hatching on slopes (strokes perpendicular to the fall line, closer together where it is steeper)
   g.strokeStyle = 'rgba(110,86,60,0.3)'; g.lineWidth = 1;
   for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) {
