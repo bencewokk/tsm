@@ -1,6 +1,7 @@
 import { N, CELL, ZONE, NZ, ZONES, BT, Flag, Water, isAmenity, HOMES, COM_JOBS, IND_JOBS, BUILD_MONTHS, PERSONS_PER_HOME, WORKERS_PER_HOME } from './constants';
 import { EnvelopeSystem, ENV, ENVS } from './envelopes';
 import { PressureSystem } from './pressure';
+import { Traffic, TRAFFIC } from './traffic';
 import { STATION_COST, TRAIN_COST, START_MONEY, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
 import { generateTerrain, idx, inb, DIR4, SAT, type Grid } from './terrain';
@@ -201,6 +202,8 @@ export class Sim {
   envs = new EnvelopeSystem(this);
   /** demand pressure by mode, overlay only (pressure.ts) */
   demand = new PressureSystem(this);
+  /** zonal road congestion on the street graph (traffic.ts) */
+  traffic = new Traffic(this);
   /** the station whose plan preview the UI asked for */
   previewStation: number | null = null;
   lastEventMonth = -99;
@@ -792,6 +795,15 @@ export class Sim {
         const sp = (zs[a] + zs[b] + zs[PM[a * ZONES + b]] + ds) / 4;
         dt[a * ZONES + b] = (PD[a * ZONES + b] / 1000) / sp * 60 + TUNE.accessMin;
       }
+    }
+    // round 7 step 4a: car trips assigned to the street graph; where both zones have a street node the routed time replaces the formula
+    if (TRAFFIC.on && this.roads.nx.length) {
+      this.traffic.run();
+      const T2 = this.traffic.dt, EF = this.effort;
+      for (let k = 0; k < ZONES * ZONES; k++) if (T2[k] < Infinity) dt[k] = T2[k] * EF[k] + TUNE.accessMin;
+      const st = this.traffic.stats;
+      if (st.vehKm > 0) { this.congestion = st.meanVC; this.driveSpeed = st.meanSpeed; }
+      for (let z = 0; z < ZONES; z++) this.zSpeed[z] = TUNE.freeSpeed / (1 + TUNE.bprA * Math.pow(this.zCong[z], TUNE.bprB));
     }
     const J = this.jobs || 1;
     for (let a = 0; a < ZONES; a++) {

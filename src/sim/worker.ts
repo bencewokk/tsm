@@ -7,6 +7,7 @@ import { SQ } from './squares';
 import { ART, REPAIR } from './roads';
 import { Sim, BOOM } from './sim';
 import { ENVS } from './envelopes';
+import { TRAFFIC } from './traffic';
 import { GRAPHCHECK } from './graphcheck';
 import type { Command, StateMsg, WorkerOut } from './protocol';
 
@@ -51,14 +52,15 @@ function step() {
 }
 
 self.onmessage = (ev: MessageEvent) => {
-  const m = ev.data as Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean; noboom?: boolean; noenv?: boolean } | { type: 'quote'; id: number; stations: number[] };
+  const m = ev.data as Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean; noboom?: boolean; noenv?: boolean; notraffic?: boolean } | { type: 'quote'; id: number; stations: number[] };
   try {
     if (m.type === 'start') {
       if (m.nohier) { HIER.on = false; ART.valley = 0; ART.climb = 0; ART.steep = 6; }   // dev: the unstructured road growth, for before / after captures
       if (m.noterr) TERR.on = false;
       if (m.norepair) REPAIR.on = false;
       if (m.noboom) BOOM.on = false;
-      if (m.noenv) ENVS.on = false;   // dev: no development envelopes (round 7 step 2 before / after)   // dev: no station boom, for before / after captures
+      if (m.noenv) ENVS.on = false;
+      if (m.notraffic) TRAFFIC.on = false;   // dev: the old zone formula for drive times (round 7 step 4a before / after)   // dev: no development envelopes (round 7 step 2 before / after)   // dev: no station boom, for before / after captures
       if (import.meta.env.DEV) GRAPHCHECK.on = true;   // road graph validation after generation and every growth tick (dev builds only)
       if (m.nosat) SAT.on = false;
       if (m.nores) { RES.on = false; SQ.on = false; }

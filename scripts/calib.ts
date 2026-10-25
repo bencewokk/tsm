@@ -8,6 +8,7 @@
 // offers conditions. Each checkpoint prints the height mix by distance from the centre and by walk to a station, and towers per envelope.
 import { Sim } from '../src/sim/sim';
 import { ENVS, ENV_DEF, ENV } from '../src/sim/envelopes';
+import { TRAFFIC } from '../src/sim/traffic';
 import { N, BT, CELL, PERSONS_PER_HOME, TRAIN_COST } from '../src/sim/constants';
 
 declare const process: { argv: string[] };
@@ -15,6 +16,7 @@ const args = process.argv.slice(2);
 const opt = (k: string, d: number) => { const a = args.find((x) => x.startsWith(`--${k}=`)); return a ? Number(a.split('=')[1]) : d; };
 const months = opt('months', 240), every = opt('every', 60), l2month = opt('l2', 30), nLines = opt('lines', 2), plansAt = opt('plans', -1);
 if (args.includes('--noenv')) ENVS.on = false;
+if (args.includes('--notraffic')) TRAFFIC.on = false;
 let seeds = args.filter((a) => !a.startsWith('--')).map(Number).filter((n) => n > 0);
 if (!seeds.length) seeds = [4821];
 

@@ -45,7 +45,7 @@ if (params.get('perf') === '1') perf.show();
 // render quality (?quality=auto|high|performance, HUD button): the 3D scene's resolution scale
 const quality = new Quality((s) => env.setScale(s));
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
-const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean; noboom?: boolean; noenv?: boolean }) => worker.postMessage(c);
+const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean; noboom?: boolean; noenv?: boolean; notraffic?: boolean }) => worker.postMessage(c);
 
 let init: InitMsg | null = null;
 let markers: ProjectMarkers | null = null;
@@ -175,7 +175,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     console.error('[sim]', m.message);
   }
 };
-send({ type: 'start', seed, noboom: params.get('noboom') === '1', noenv: params.get('noenv') === '1', terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1', nores: params.get('nores') === '1', nosat: params.get('nosat') === '1', norepair: params.get('norepair') === '1' });
+send({ type: 'start', seed, noboom: params.get('noboom') === '1', noenv: params.get('noenv') === '1', notraffic: params.get('notraffic') === '1', terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1', nores: params.get('nores') === '1', nosat: params.get('nosat') === '1', norepair: params.get('norepair') === '1' });
 
 // ------------------------------------------------------------------ station card and the zoning legend (round 7 envelopes)
 const card = new StationCard(document.body, (c) => send(c));
