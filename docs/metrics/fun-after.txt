@@ -1,0 +1,137 @@
+
+== seed 4821 (coast / port): start money  150M; starter line 3 st 1.6 km costs   41M; demo chain 15 st 7.7 km costs  233M
+  month | money inc/mo exp/mo | trips/day | pop (ctl) | catch homes+jobs (ctl) rising(ctl) tall bld vacant/lots | events spent
+     4 |  129M  0.14  0.18 |   1154 |   5810 (5810) |   5213 (5223)  13(21) 0 351 359/723 | 0    0M
+     6 |  129M  0.14  0.18 |   1136 |   5697 (6599) |   5176 (5460)  25(20) 0 347 353/725 | 0    0M
+    12 |  137M  0.31  0.18 |   2599 |   9704 (8593) |   7699 (5814)  23(14) 0 369 331/723 | 1    0M
+    18 |  178M  0.38  0.18 |   3198 |  13464 (10030) |   8611 (4633)  20(12) 0 345 361/726 | 2  -35M
+    24 |  139M  0.41  0.18 |   3438 |  14734 (11334) |   9389 (3990)  33(14) 0 339 349/721 | 3    3M
+    30 |  154M  0.79  0.18 |   6543 |  22400 (11406) |  15379 (5157)  21(8) 4 390 326/737 | 3    3M
+    36 |  166M  0.91  0.18 |   7613 |  26121 (11985) |  18173 (5545)  19(15) 5 423 277/719 | 4   -5M
+    42 |  237M  1.16  0.18 |   9672 |  33934 (14736) |  21859 (7676)   2(15) 9 440 276/718 | 6  -21M
+    48 |  238M  1.17  0.18 |   9722 |  33463 (17544) |  22530 (9592)  30(14) 9 462 224/716 | 7  -16M
+    54 |  284M  1.48  0.18 |  12367 |  37775 (19739) |  30794 (11066)   7(0) 16 500 214/721 | 10  -35M
+    60 |  292M  1.27  0.18 |  10623 |  33017 (20199) |  29977 (11698)  14(11) 13 489 209/712 | 10  -35M
+  after opening (month 3): first extra construction round the stations +3 mo; catchment homes+jobs 10% over control +6 mo; first extra 36 m+ tower +22 mo
+  goals reached in 60 months: 9 (first_line@m4, riders_1500@m8, pop_12k@m16, riders_5k@m27, tower_60@m37, share_15@m38, pop_25k@m39, rating_75@m40, riders_12k@m54); headline moments (incl. goals): 17; open-line to first grant 1 mo
+  decisions (events) in 60 months: 10; first at m9
+
+== seed 187 (hills / rail-junction): start money  150M; starter line 3 st 1.5 km costs   38M; demo chain 24 st 12.7 km costs  497M (NOT BUILDABLE)
+  month | money inc/mo exp/mo | trips/day | pop (ctl) | catch homes+jobs (ctl) rising(ctl) tall bld vacant/lots | events spent
+     4 |  132M  0.14  0.18 |   1154 |   8680 (8680) |   5026 (5026)  26(25) 0 388 491/905 | 0    0M
+     6 |  132M  0.16  0.18 |   1302 |   9124 (9462) |   5164 (5307)  40(25) 0 422 453/915 | 0    0M
+    12 |  164M  0.26  0.18 |   2163 |  12222 (10907) |   7525 (6113)  12(17) 0 497 406/915 | 2  -23M
+    18 |  200M  0.28  0.18 |   2320 |  13517 (12146) |   7562 (5096)  25(14) 0 471 405/901 | 3  -58M
+    24 |  200M  0.62  0.18 |   5169 |  20300 (12908) |  11665 (5075)  29(12) 4 500 361/890 | 4  -20M
+    30 |  241M  0.58  0.18 |   4859 |  24511 (13664) |  15163 (6096)  25(17) 4 535 329/889 | 6  -58M
+    36 |  290M  0.96  0.18 |   7964 |  34344 (14283) |  20219 (7365)   0(23) 9 563 316/879 | 7  -79M
+    42 |  327M  0.95  0.18 |   7921 |  34114 (17188) |  20732 (9796)  29(13) 9 529 303/861 | 9 -112M
+    48 |  349M  1.19  0.18 |   9947 |  41874 (19792) |  28420 (11441)   3(6) 16 609 254/866 | 11 -129M
+    54 |  345M  1.22  0.18 |  10133 |  41775 (20764) |  29225 (12370)  28(21) 16 575 253/856 | 12 -119M
+    60 |  373M  1.57  0.18 |  13078 |  47396 (23032) |  33998 (13705)  27(17) 20 585 232/844 | 13 -119M
+  after opening (month 3): first extra construction round the stations +2 mo; catchment homes+jobs 10% over control +7 mo; first extra 36 m+ tower +17 mo
+  goals reached in 60 months: 9 (first_line@m4, riders_1500@m8, pop_12k@m12, tower_60@m23, riders_5k@m24, share_15@m24, pop_25k@m31, rating_75@m32, riders_12k@m58); headline moments (incl. goals): 17; open-line to first grant 1 mo
+  decisions (events) in 60 months: 13; first at m7
+
+== seed 304 (coast / planned-capital): start money  150M; starter line 3 st 1.6 km costs   42M; demo chain 17 st 8.8 km costs  239M
+  month | money inc/mo exp/mo | trips/day | pop (ctl) | catch homes+jobs (ctl) rising(ctl) tall bld vacant/lots | events spent
+     4 |  128M  0.05  0.18 |    384 |   8432 (8432) |   6415 (6415)  11(15) 0 298 166/475 | 0    0M
+     6 |  127M  0.05  0.18 |    387 |   8363 (8825) |   6546 (6426)  18(10) 0 303 152/473 | 0    0M
+    12 |  132M  0.07  0.18 |    547 |  12073 (10799) |   8540 (7235)   9(10) 0 329 140/478 | 0    0M
+    18 |  166M  0.11  0.18 |    914 |  13027 (13404) |   7077 (5996)  12(4) 1 313 147/472 | 2  -35M
+    24 |  128M  0.17  0.18 |   1376 |  17068 (13908) |   8271 (4846)  23(5) 3 281 159/463 | 3    3M
+    30 |  166M  0.33  0.18 |   2769 |  24571 (14138) |  13386 (5204)  22(6) 6 318 120/460 | 5  -27M
+    36 |  168M  0.53  0.18 |   4440 |  32533 (15431) |  19631 (5544)  20(8) 12 352 76/448 | 5  -27M
+    42 |  222M  0.62  0.18 |   5173 |  36756 (17972) |  22784 (7508)   6(12) 14 373 83/462 | 6  -52M
+    48 |  233M  0.75  0.18 |   6247 |  39307 (20721) |  24943 (9194)   6(11) 16 384 69/459 | 7  -60M
+    54 |  173M  0.93  0.18 |   7713 |  42886 (22407) |  27829 (10643)   4(2) 18 385 72/461 | 9    4M
+    60 |  203M  0.95  0.18 |   7938 |  43794 (23426) |  30708 (11314)  12(11) 19 407 46/465 | 10  -21M
+  after opening (month 3): first extra construction round the stations +2 mo; catchment homes+jobs 10% over control +7 mo; first extra 36 m+ tower +15 mo
+  goals reached in 60 months: 5 (first_line@m4, pop_12k@m12, riders_1500@m25, riders_5k@m41, tower_60@m41); headline moments (incl. goals): 11; open-line to first grant 1 mo
+  decisions (events) in 60 months: 10; first at m13
+
+== seed 57 (river / market-town): start money  150M; starter line 3 st 1.4 km costs   41M; demo chain 10 st 4.6 km costs  129M
+  month | money inc/mo exp/mo | trips/day | pop (ctl) | catch homes+jobs (ctl) rising(ctl) tall bld vacant/lots | events spent
+     4 |  132M  0.10  0.18 |    856 |   5081 (5081) |   3754 (3785)  23(13) 0 240 234/497 | 0    0M
+     6 |  132M  0.10  0.18 |    830 |   5009 (5295) |   3902 (3876)  27(20) 0 257 213/497 | 0    0M
+    12 |  140M  0.27  0.18 |   2279 |   7558 (7618) |   5729 (4924)  26(14) 0 301 153/480 | 1    0M
+    18 |  181M  0.28  0.18 |   2362 |  13786 (9568) |   7632 (4593)  18(11) 3 336 128/482 | 2  -35M
+    24 |  181M  0.38  0.18 |   3150 |  15435 (10182) |   8403 (4243)  30(9) 3 318 127/475 | 3  -35M
+    30 |  195M  0.66  0.18 |   5536 |  20994 (10934) |  14145 (4855)  24(17) 8 366 96/486 | 3  -35M
+    36 |  151M  0.90  0.18 |   7480 |  25215 (11753) |  18034 (6510)   6(14) 11 404 65/475 | 5   13M
+    42 |  226M  1.06  0.18 |   8821 |  29208 (13982) |  20068 (7998)   3(12) 14 401 110/514 | 6  -13M
+    48 |  232M  1.13  0.18 |   9433 |  30072 (16249) |  21173 (9398)  35(7) 15 405 65/505 | 6  -13M
+    54 |  208M  1.40  0.18 |  11660 |  34277 (17590) |  26685 (10308)  10(4) 19 468 26/504 | 8   18M
+    60 |  215M  1.36  0.18 |  11299 |  34033 (18317) |  28140 (10898)  11(11) 20 467 20/498 | 8   18M
+  after opening (month 3): first extra construction round the stations +1 mo; catchment homes+jobs 10% over control +6 mo; first extra 36 m+ tower +13 mo
+  goals reached in 60 months: 8 (first_line@m4, riders_1500@m9, pop_12k@m17, riders_5k@m30, tower_60@m39, share_15@m40, pop_25k@m41, rating_75@m42); headline moments (incl. goals): 16; open-line to first grant 1 mo
+  decisions (events) in 60 months: 8; first at m9
+
+== seed 83 (coast / mining): start money  150M; starter line 3 st 1.5 km costs   82M; demo chain 18 st 9.2 km costs  312M (NOT BUILDABLE)
+  month | money inc/mo exp/mo | trips/day | pop (ctl) | catch homes+jobs (ctl) rising(ctl) tall bld vacant/lots | events spent
+     4 |   84M  0.08  0.18 |    668 |   5398 (5398) |   1833 (1833)  36(10) 0 239 270/545 | 0    0M
+     6 |   84M  0.09  0.18 |    789 |   6100 (5971) |   2053 (1944)  27(11) 0 281 231/539 | 0    0M
+    12 |   92M  0.13  0.18 |   1085 |   8181 (7519) |   4062 (2502)  25(8) 0 344 169/538 | 1    0M
+    18 |  127M  0.17  0.18 |   1418 |  10019 (8894) |   5166 (2899)  21(8) 0 339 156/516 | 2  -35M
+    24 |  120M  0.21  0.18 |   1780 |  12057 (10467) |   7201 (3569)  25(17) 0 349 132/506 | 3  -26M
+    30 |  151M  0.42  0.18 |   3512 |  15392 (12112) |  10896 (4838)   8(15) 4 367 127/502 | 4  -56M
+    36 |  177M  0.42  0.18 |   3479 |  17816 (13549) |  12694 (5683)   8(12) 6 358 116/482 | 6  -86M
+    42 |  204M  0.45  0.18 |   3718 |  19267 (14612) |  12792 (6247)   8(10) 8 339 128/475 | 7 -111M
+    48 |  206M  0.60  0.18 |   4992 |  21799 (16512) |  15447 (6710)  26(7) 10 376 65/467 | 7 -111M
+    54 |  197M  0.53  0.18 |   4422 |  25896 (19021) |  18550 (7327)  10(12) 12 405 51/466 | 8  -73M
+    60 |  144M  0.50  0.18 |   4179 |  26080 (20553) |  19716 (8099)  15(11) 13 396 55/466 | 9  -18M
+  after opening (month 3): first extra construction round the stations +1 mo; catchment homes+jobs 10% over control +4 mo; first extra 36 m+ tower +22 mo
+  goals reached in 60 months: 5 (first_line@m4, riders_1500@m8, pop_12k@m24, riders_5k@m49, tower_60@m51); headline moments (incl. goals): 12; open-line to first grant 1 mo
+  decisions (events) in 60 months: 9; first at m7
+
+== seed 421 (plain / mining): start money  150M; starter line 3 st 1.5 km costs   39M; demo chain 23 st 11.6 km costs  294M
+  month | money inc/mo exp/mo | trips/day | pop (ctl) | catch homes+jobs (ctl) rising(ctl) tall bld vacant/lots | events spent
+     4 |  130M  0.09  0.18 |    751 |   9393 (9393) |   2931 (2931)   9(15) 0 351 551/911 | 0    0M
+     6 |  130M  0.09  0.18 |    721 |   9350 (9803) |   2821 (2972)  23(14) 0 331 549/903 | 0    0M
+    12 |  133M  0.18  0.18 |   1484 |  11505 (9991) |   5179 (3564)  18(18) 0 341 538/897 | 1    0M
+    18 |  173M  0.23  0.18 |   1920 |  13078 (11058) |   6747 (4036)  13(10) 0 337 546/896 | 3  -35M
+    24 |  189M  0.40  0.18 |   3344 |  17876 (12758) |  10315 (5000)  22(15) 3 334 532/888 | 3  -35M
+    30 |  183M  0.51  0.18 |   4219 |  20656 (13807) |  12372 (6205)  19(14) 3 352 518/889 | 5  -27M
+    36 |  232M  0.66  0.18 |   5481 |  23805 (15835) |  15556 (7515)   7(18) 6 400 506/913 | 6  -51M
+    42 |  285M  0.82  0.18 |   6819 |  26639 (17218) |  16897 (9218)   6(21) 9 399 509/914 | 7  -76M
+    48 |  291M  0.78  0.18 |   6498 |  27846 (19858) |  18386 (10701)  24(15) 10 379 498/901 | 9  -79M
+    54 |  304M  1.12  0.18 |   9333 |  35146 (21779) |  24049 (11708)   9(15) 14 438 434/881 | 10  -87M
+    60 |  310M  1.17  0.18 |   9726 |  33339 (24511) |  25589 (13125)  20(20) 15 434 412/866 | 10  -87M
+  after opening (month 3): first extra construction round the stations +2 mo; catchment homes+jobs 10% over control +4 mo; first extra 36 m+ tower +20 mo
+  goals reached in 60 months: 8 (first_line@m4, riders_1500@m11, pop_12k@m14, tower_60@m24, share_15@m33, riders_5k@m36, pop_25k@m37, rating_75@m38); headline moments (incl. goals): 15; open-line to first grant 1 mo
+  decisions (events) in 60 months: 10; first at m7
+
+== seed 369 (hills / port): start money  150M; starter line 3 st 1.2 km costs   42M; demo chain 12 st 5.6 km costs  224M (NOT BUILDABLE)
+  month | money inc/mo exp/mo | trips/day | pop (ctl) | catch homes+jobs (ctl) rising(ctl) tall bld vacant/lots | events spent
+     4 |  128M  0.11  0.18 |    914 |   6948 (6948) |   5120 (5120)  10(14) 0 333 146/489 | 0    0M
+     6 |  128M  0.16  0.18 |   1312 |   6969 (7657) |   5109 (5264)  20(16) 0 331 146/497 | 1    0M
+    12 |  136M  0.15  0.18 |   1263 |  10242 (9800) |   7242 (5919)  15(9) 0 352 138/505 | 1    0M
+    18 |  177M  0.24  0.18 |   1968 |  13071 (11698) |   7707 (5188)  27(11) 1 343 120/490 | 2  -35M
+    24 |  135M  0.44  0.18 |   3698 |  17968 (12128) |  10655 (4930)  31(18) 4 349 110/490 | 3    3M
+    30 |  149M  0.60  0.18 |   5022 |  25307 (12820) |  15588 (6045)  26(5) 9 393 75/494 | 4    3M
+    36 |  123M  0.72  0.18 |   6037 |  28037 (13310) |  17730 (6731)   3(12) 8 416 72/491 | 5   29M
+    42 |   88M  0.77  0.18 |   6413 |  29504 (15674) |  19139 (8796)   7(12) 10 415 63/485 | 7   63M
+    48 |   79M  0.78  0.18 |   6480 |  35593 (17475) |  21982 (9942)  18(9) 14 403 68/489 | 10   90M
+    54 |   83M  0.71  0.18 |   5890 |  36432 (20327) |  24300 (10810)  19(5) 16 413 53/485 | 11   90M
+    60 |   86M  0.76  0.18 |   6328 |  38546 (21494) |  27450 (11790)  22(19) 21 403 50/475 | 11   90M
+  after opening (month 3): first extra construction round the stations +2 mo; catchment homes+jobs 10% over control +6 mo; first extra 36 m+ tower +15 mo
+  goals reached in 60 months: 5 (first_line@m4, riders_1500@m9, pop_12k@m18, riders_5k@m29, tower_60@m45); headline moments (incl. goals): 13; open-line to first grant 1 mo
+  decisions (events) in 60 months: 11; first at m5
+
+== seed 252 (plain / market-town): start money  150M; starter line 3 st 1.5 km costs   36M; demo chain 18 st 9.1 km costs  216M
+  month | money inc/mo exp/mo | trips/day | pop (ctl) | catch homes+jobs (ctl) rising(ctl) tall bld vacant/lots | events spent
+     4 |  134M  0.10  0.18 |    806 |   8786 (8786) |   6854 (6850)  13(8) 0 357 346/716 | 0    0M
+     6 |  134M  0.09  0.18 |    788 |   8860 (9048) |   6890 (6857)  21(13) 0 361 338/720 | 0    0M
+    12 |  139M  0.15  0.18 |   1259 |  12160 (11801) |   8806 (7682)   9(2) 0 385 328/722 | 1    0M
+    18 |  177M  0.23  0.18 |   1901 |  13885 (13213) |   8512 (6517)  18(8) 1 353 343/714 | 2  -35M
+    24 |  159M  0.42  0.18 |   3541 |  19012 (14283) |   9876 (5733)  29(7) 4 328 359/716 | 3  -21M
+    30 |  223M  0.56  0.18 |   4628 |  26206 (15451) |  15964 (6232)  21(10) 6 393 305/719 | 6  -83M
+    36 |  242M  0.75  0.18 |   6209 |  35218 (17613) |  20817 (6732)  12(17) 9 425 300/737 | 7  -73M
+    42 |  281M  0.86  0.18 |   7183 |  38661 (21034) |  22512 (8660)   8(12) 10 446 271/725 | 9 -107M
+    48 |  286M  1.16  0.18 |   9656 |  44397 (23851) |  25676 (10860)   3(10) 14 442 276/721 | 9 -107M
+    54 |  263M  1.26  0.18 |  10463 |  47210 (25512) |  26660 (12097)   9(13) 16 438 262/709 | 10  -69M
+    60 |  294M  1.36  0.18 |  11360 |  49710 (27248) |  29517 (14149)  13(14) 17 478 214/705 | 10  -69M
+  after opening (month 3): first extra construction round the stations +1 mo; catchment homes+jobs 10% over control +6 mo; first extra 36 m+ tower +15 mo
+  goals reached in 60 months: 8 (first_line@m4, pop_12k@m12, riders_1500@m16, riders_5k@m32, tower_60@m32, share_15@m54, pop_25k@m55, rating_75@m56); headline moments (incl. goals): 16; open-line to first grant 1 mo
+  decisions (events) in 60 months: 10; first at m9
+done

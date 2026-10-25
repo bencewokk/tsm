@@ -23,7 +23,8 @@
     "suburb": "tsx scripts/suburb.ts",
     "hazards": "tsx scripts/hazards.ts",
     "bench": "node --expose-gc --import tsx scripts/bench.ts",
-    "parity": "tsx scripts/parity.ts"
+    "parity": "tsx scripts/parity.ts",
+    "fun": "tsx scripts/fun.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

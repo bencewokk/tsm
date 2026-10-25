@@ -1,10 +1,11 @@
 // Tower timing: `npm run towers -- [seed ...]`
 // With no metro the city must stay low / mid-rise; a good line opened at month 24 must give visible 60 m+ towers near its best stations by months 48-60.
-import { Sim } from '../src/sim/sim';
+import { Sim, BOOM } from '../src/sim/sim';
 import { N } from '../src/sim/constants';
 import { testLine } from './lib';
 
 declare const process: { argv: string[] };
+if (process.argv.includes('--noboom')) BOOM.on = false;
 const seeds = process.argv.slice(2).map(Number).filter((n) => n > 0);
 if (!seeds.length) seeds.push(4821, 187, 304, 57);
 const marks = [36, 48, 60, 72, 96];

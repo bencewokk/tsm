@@ -16,6 +16,8 @@ export interface HudHandlers {
   onTool?: (tool: string) => void;
   onToggle?: (name: string, on: boolean) => void;
   onQuality?: () => void;
+  onSound?: () => boolean;
+  onAuto?: (on: boolean) => void;
 }
 
 export class Hud {
@@ -36,11 +38,13 @@ export class Hud {
         <div class="stat"><span class="k">Money</span><span class="v" data-k="money">-</span></div>
         <div class="stat"><span class="k">Income / mo</span><span class="v pos" data-k="inc">-</span></div>
         <div class="stat"><span class="k">Expenses / mo</span><span class="v neg" data-k="exp">-</span></div>
-        <div class="stat"><span class="k">Transit share</span><span class="v" data-k="share">-</span></div>
+        <div class="stat" title="Share of all trips made by metro; the rest go by car. Goals reward beating the car."><span class="k">Metro vs car</span><span class="v" data-k="share">-</span><span class="mbar"><i data-k="sharebar"></i></span></div>
         <div class="stat"><span class="k">Rating</span><span class="v" data-k="rating">-</span></div>
       </div>
       <div class="side panel">
-        <div class="h">City</div>
+        <div class="h">Goals <span class="muted small" data-k="goalcount"></span></div>
+        <div class="goals" data-k="goals"></div>
+        <div class="h lmh">City</div>
         <div class="bars">
           <div class="bar"><span>R</span><i data-k="dR"></i></div>
           <div class="bar"><span>C</span><i data-k="dC"></i></div>
@@ -79,11 +83,16 @@ export class Hud {
         <button data-toggle="night" title="Night (N)">Night</button>
         <button data-toggle="desire" title="Desire lines (L)">Desire lines</button>
         <span class="sep"></span>
+        <button data-auto title="Auto speed (4): runs at 3x while nothing needs you, back to 1x for decisions and headlines">Auto</button>
+        <button data-sound title="Sound blips on / off">Sound: on</button>
         <button data-quality title="Render quality: Auto lowers the 3D resolution while the frame is over budget; High = full, Performance = 67%">Quality: Auto</button>
       </div>
       <div class="hint panel" data-k="hint"></div>
       <div class="ticker" data-k="ticker"></div>
       <div class="docks panel" data-k="docks"></div>
+      <div class="toasts" data-k="toasts"></div>
+      <div class="headline-wrap" data-k="headline"></div>
+      <div class="floaters" data-k="floaters"></div>
       <div class="modal-wrap" data-k="modal"></div>
       <div class="modal-wrap" data-k="intro"></div>`;
     parent.appendChild(this.root);
@@ -93,6 +102,9 @@ export class Hud {
     this.root.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((b) => b.addEventListener('click', () => this.setTool(b.dataset.tool!)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-toggle]').forEach((b) => b.addEventListener('click', () => this.toggle(b.dataset.toggle!)));
     this.root.querySelector<HTMLButtonElement>('[data-quality]')?.addEventListener('click', () => this.handlers.onQuality?.());
+    const soundBtn = this.root.querySelector<HTMLButtonElement>('[data-sound]')!;
+    soundBtn.addEventListener('click', () => this.setSound(this.handlers.onSound?.() ?? false));
+    this.root.querySelector<HTMLButtonElement>('[data-auto]')?.addEventListener('click', (e) => { const b = e.currentTarget as HTMLButtonElement; b.classList.toggle('on'); this.handlers.onAuto?.(b.classList.contains('on')); });
     this.el.hint.style.display = 'none';
     this.el.lines.addEventListener('click', (ev) => {
       const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-line]');
@@ -106,7 +118,10 @@ export class Hud {
   }
 
   /** Start card: the city's story from its profile; the clock starts when the player begins. */
+  /** the start card is up: keys do nothing yet */
+  introOpen = false;
   showIntro(cp: CityProfile, seed: number, onBegin: () => void) {
+    this.introOpen = true;
     const wrap = this.el.intro;
     const chip = (k: string, v: string) => `<span class="chip"><i>${k}</i> ${v}</span>`;
     const lvl = (v: number) => (v > 0.7 ? 'high' : v < 0.3 ? 'low' : 'medium');
@@ -116,9 +131,10 @@ export class Hud {
       <h2>${cp.story.split('. ')[0]}.</h2>
       <p>${cp.story.split('. ').slice(1).join('. ')}</p>
       <div class="chips">${chip('terrain', cp.terrain)}${chip('origin', cp.origin.replace('-', ' '))}${chip('old industry', cp.site === 'harbour' ? 'docks' : cp.site === 'railyard' ? 'rail yards' : 'mine')}${chip('style', cp.tradition)}${chip('planning', lvl(cp.planningStrength))}${chip('wealth', lvl(cp.wealth))}</div>
-      <div class="choices"><button class="choice" data-begin><b>Begin</b><span>Build the metro, grow the city.</span></button></div>
+      <div class="firstgoal" data-introgoal></div>
+      <div class="choices"><button class="choice" data-begin><b>Begin</b><span>Build the metro, grow the city. Time stands still while you plan a line (P).</span></button></div>
     </div>`;
-    wrap.querySelector<HTMLButtonElement>('[data-begin]')!.addEventListener('click', () => { wrap.innerHTML = ''; wrap.style.display = 'none'; onBegin(); });
+    wrap.querySelector<HTMLButtonElement>('[data-begin]')!.addEventListener('click', () => { wrap.innerHTML = ''; wrap.style.display = 'none'; this.introOpen = false; onBegin(); });
   }
 
   private last: StateMsg | null = null;
@@ -260,6 +276,12 @@ export class Hud {
     el.className = v >= 0 ? 'up' : 'down';
   }
 
+
+  setSound(on: boolean) {
+    const b = this.root.querySelector<HTMLButtonElement>('[data-sound]');
+    if (b) { b.textContent = `Sound: ${on ? 'on' : 'off'}`; b.classList.toggle('on', on); }
+  }
+
   update(s: StateMsg) {
     this.last = s;
     this.renderLines(s);
@@ -275,6 +297,7 @@ export class Hud {
     e.inc.textContent = money(st.income);
     e.exp.textContent = money(st.expenses);
     e.share.textContent = `${(st.transitShare * 100).toFixed(1)}%`;
+    e.sharebar.style.width = `${Math.min(100, st.transitShare * 100).toFixed(1)}%`;
     e.rating.textContent = s.lines.length ? `${Math.round(st.rating)}` : '-';
     e.homes.textContent = num(st.homes);
     e.jobs.textContent = num(st.jobs);

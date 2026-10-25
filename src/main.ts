@@ -12,6 +12,12 @@ import { Life } from './render/life';
 import { lookUniforms } from './render/look';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
 import { Hud } from './ui/hud';
+import { Sound, bindSound } from './ui/sound';
+import { gameEvents } from './ui/gameEvents';
+import { FeedbackEmitter } from './ui/feedbackEmitter';
+import { FeedbackDom } from './ui/feedback';
+import { Ripple } from './render/ripple';
+import { GoalMarker } from './render/goalmarker';
 import { Planner } from './ui/planner';
 import { CELL, N, STATION_COST, TRAIN_COST, METRO_SPEED } from './sim/constants';
 import { quoteLine } from './sim/relief';
@@ -31,7 +37,7 @@ if (params.get('perf') === '1') perf.show();
 // render quality (?quality=auto|high|performance, HUD button): the 3D scene's resolution scale
 const quality = new Quality((s) => env.setScale(s));
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
-const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean }) => worker.postMessage(c);
+const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean; noboom?: boolean }) => worker.postMessage(c);
 
 let init: InitMsg | null = null;
 let markers: ProjectMarkers | null = null;
@@ -51,7 +57,32 @@ const desire = new DesireView();
 env.scene.add(desire.group);
 desire.group.visible = false;
 let lastStateAt = performance.now();
-const hud = new Hud(document.body, send, seed);
+const sound = new Sound();
+/** what the player's speed buttons / keys asked for last while planning (plan mode pauses the clock, leaving it resumes this speed) */
+let planResume = 0;
+let planning = false;
+/** the clock stays stopped after Begin until the first line opens (or the player starts it): nothing happens to a city the player has not touched yet */
+let clockHeld = false;
+const userSend = (c: Command) => { if (c.type === 'speed' && c.speed > 0) { clockHeld = false; if (planning) planResume = c.speed; } send(c); };
+const hud = new Hud(document.body, userSend, seed);
+hud.setSound(sound.enabled);
+bindSound(sound);
+/** gameplay feedback: events come from one emitter; the DOM presenter, sound and the world layer below only subscribe */
+const emitter = new FeedbackEmitter();
+const feedback = new FeedbackDom(hud.root, { focus: (x, y) => flyFocus(x, y, Math.max(1800, Math.min(3500, env.camera.position.distanceTo(env.controls.target)))), project: (x, y, lift) => project(x, y, lift) });
+let lastClock = '';
+/** announce the clock mode when it changes */
+function emitClock() {
+  const mode = clockHeld ? 'held' : planning ? 'planning' : !state || state.speed === 0 ? 'paused' : 'running';
+  const k = `${mode}|${state?.speed ?? 0}|${autoSpeed}`;
+  if (k === lastClock) return;
+  lastClock = k;
+  gameEvents.emit({ kind: 'clock', mode, speed: state?.speed ?? 0, auto: autoSpeed });
+}
+let ripple: Ripple | null = null;
+let goalMarker: GoalMarker | null = null;
+let autoSpeed = false;
+for (const ev of ['pointerdown', 'keydown'] as const) window.addEventListener(ev, () => sound.unlock(), { capture: true });
 
 worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   const m = ev.data;
@@ -72,12 +103,16 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     env.scene.add(metro.group);
     markers = new ProjectMarkers((x, z) => terrain!.sample(x, z));
     env.scene.add(markers.group);
+    ripple = new Ripple(terrain.catchment.geometry);
+    env.scene.add(ripple.mesh);
+    goalMarker = new GoalMarker((x, z) => terrain!.sample(x, z));
+    env.scene.add(goalMarker.group);
     planner = new Planner(send, { height: m.height, water: m.water });
     const vx = m.villages.reduce((a, v) => a + v.x, 0) / m.villages.length;
     const vy = m.villages.reduce((a, v) => a + v.y, 0) / m.villages.length;
     env.focus((vx + 0.5) * CELL, (vy + 0.5) * CELL, 3600);
     send({ type: 'speed', speed: 0 });
-    hud.showIntro(m.city, seed, () => send({ type: 'speed', speed: 1 }));
+    hud.showIntro(m.city, seed, () => { sound.unlock(); clockHeld = true; refreshPlan(); emitClock(); feedback.pulsePlan(true); });
   } else if (m.type === 'state') {
     if (m.graph) { graphReport = m.graph; for (const l of m.graph.log) (m.graph.defects ? console.warn : console.info)(l); }
     perf.size(m);
@@ -85,7 +120,10 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     const newMonth = !state || state.stats.month !== m.stats.month;
     const sig = (s: StateMsg) => JSON.stringify([s.lines.map((l) => [l.id, l.stations, l.trains]), s.stations.map((st) => (st.riders < 1200 ? 0 : st.riders < 5000 ? 1 : 2))]);
     const linesChanged = !state || sig(state) !== sig(m);
+    const prevState = state;
     state = m;
+    emitter.onState(prevState, m);
+    emitClock();
     if (!labels && init && terrain) {
       labels = new Labels(init.villages, init.city.site, m.docks.centre, (x, z) => terrain!.sample(x, z));
       env.addText(labels.group);
@@ -108,16 +146,21 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     console.error('[sim]', m.message);
   }
 };
-send({ type: 'start', seed, terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1', nores: params.get('nores') === '1', nosat: params.get('nosat') === '1', norepair: params.get('norepair') === '1' });
+send({ type: 'start', seed, noboom: params.get('noboom') === '1', terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1', nores: params.get('nores') === '1', nosat: params.get('nosat') === '1', norepair: params.get('norepair') === '1' });
 
 // ------------------------------------------------------------------ tools
 let savedView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
 hud.handlers.onTool = (t) => {
   const c = env.controls;
+  if (t === 'plan' && !planning) { planning = true; planResume = state && state.speed > 0 ? state.speed : 0; if (planResume > 0) send({ type: 'speed', speed: 0 }); }
+  if (t !== 'plan' && planning) { planning = false; if (planResume > 0 && state && state.speed === 0 && !state.event) send({ type: 'speed', speed: planResume }); }
   if (t === 'plan') {
     savedView = { pos: env.camera.position.clone(), target: c.target.clone() };
-    const dist = Math.max(2500, env.camera.position.distanceTo(c.target));
-    flyTo(new THREE.Vector3(c.target.x, dist, c.target.z + 1), c.target.clone());
+    // with no line yet, frame both ends of the first goal so the target village is on screen
+    const fr = state && !state.lines.length ? state.goals.find((g) => g.frame)?.frame : undefined;
+    const dist = fr ? Math.max(2500, fr.span * CELL * 2.1) : Math.max(2500, env.camera.position.distanceTo(c.target));
+    const tgt = fr ? new THREE.Vector3((fr.x + 0.5) * CELL, 0, (fr.y + 0.5) * CELL) : c.target.clone();
+    flyTo(new THREE.Vector3(tgt.x, dist, tgt.z + 1), tgt);
     c.enableRotate = false;
     c.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: -1 as unknown as THREE.MOUSE, RIGHT: THREE.MOUSE.PAN };
     c.screenSpacePanning = true;
@@ -134,6 +177,8 @@ hud.handlers.onTool = (t) => {
     planner?.cancel();
     metro?.setCursor(null);
   }
+  emitClock();
+  feedback.pulsePlan(!!state && !state.lines.length);
   refreshPlan();
 };
 hud.handlers.onToggle = (name, on) => {
@@ -152,6 +197,53 @@ hud.setQuality(qualityLabel());
 let gpuSeq = 0;
 
 hud.onFocusLandmark = (x, y) => { env.focus((x + 0.5) * CELL, (y + 0.5) * CELL, 800); };
+/** Fly the camera to a place, keeping the viewing direction (the saved overview direction while planning). */
+function flyFocus(x: number, y: number, dist: number) {
+  const target = new THREE.Vector3((x + 0.5) * CELL, 0, (y + 0.5) * CELL);
+  const dir = (hud.tool === 'plan' && savedView ? savedView.pos.clone().sub(savedView.target) : env.camera.position.clone().sub(env.controls.target)).normalize();
+  flyTo(target.clone().addScaledVector(dir, dist), target);
+}
+hud.handlers.onSound = () => { sound.set(!sound.enabled); return sound.enabled; };
+hud.handlers.onAuto = (on) => { autoSpeed = on; emitClock(); };
+/** world layer: what the events do to the 3D scene and the camera (placeholder; a visual layer can replace it) */
+gameEvents.on('stationOpened', (e) => {
+  // ripple over the streets the line just brought within an 8-minute walk (one sweep per batch of stations)
+  if (ripple && !ripple.active) ripple.start(e.catchmentAfter, e.catchmentBefore, e.color);
+});
+gameEvents.on('objectives', (e) => {
+  const gt = e.goals.find((g) => g.x !== undefined && g.y !== undefined);
+  goalMarker?.set(gt ? { x: gt.x!, y: gt.y! } : null);
+  feedback.pulsePlan(!e.hasLines);
+});
+/** control: the ribbon-cutting leaves plan mode, starts a held clock and flies out over the new line */
+gameEvents.on('lineOpened', (e) => {
+  const m = e.moment;
+  if (clockHeld) { clockHeld = false; send({ type: 'speed', speed: 1 }); }
+  if (hud.tool === 'plan') hud.setTool('view');
+  const sv = savedView;
+  const target = new THREE.Vector3((m.x + 0.5) * CELL, 0, (m.y + 0.5) * CELL);
+  const dir = (sv ? sv.pos.clone().sub(sv.target) : env.camera.position.clone().sub(env.controls.target)).normalize();
+  flyTo(target.clone().addScaledVector(dir, 2800), target);
+  emitClock();
+});
+
+const projV = new THREE.Vector3();
+function project(x: number, y: number, lift: number) {
+  projV.set(x * CELL, (terrain ? terrain.sample(x * CELL, y * CELL) : 0) + lift, y * CELL).project(env.camera);
+  if (projV.z > 1) return null;
+  const r = env.renderer.domElement.getBoundingClientRect();
+  return { x: r.left + (projV.x + 1) / 2 * r.width, y: r.top + (1 - projV.y) / 2 * r.height };
+}
+let lastAutoCheck = 0;
+window.setInterval(() => autoSpeedTick(performance.now()), 600);
+function autoSpeedTick(now: number) {
+  if (!autoSpeed || !state || planning || state.speed === 0 || now - lastAutoCheck < 600) return;
+  lastAutoCheck = now;
+  // quiet = no decision waiting and no headline in the last 9 seconds
+  const quiet = !state.event && now - feedback.lastBigAt > 9000;
+  const want = quiet ? 3 : 1;
+  if (state.speed !== want) send({ type: 'speed', speed: want });
+}
 hud.onFocusDocks = () => {
   if (!state) return;
   const c = state.docks.centre;
@@ -167,9 +259,10 @@ function flyTo(pos: THREE.Vector3, target: THREE.Vector3) {
 
 function refreshPlan() {
   if (!state || !planner || !metro) return;
-  if (hud.tool !== 'plan') { hud.hint(null); metro.draft([], null, '#000'); return; }
+  if (hud.tool !== 'plan') { hud.hint(clockHeld ? '<b>The clock is stopped</b> until your first line opens. Press <b>P</b> to plan it (or press <b>1</b> to start time).' : null); metro.draft([], null, '#000'); return; }
   metro.draft(planner.points(state), planner.hover, planner.color(state), planner.profile(state, true));
   hud.hint(planner.hint(state));
+  gameEvents.emit(planner.costInfo(state));
 }
 
 // ------------------------------------------------------------------ picking
@@ -264,11 +357,12 @@ canvas.addEventListener('pointerup', endSpin);
 canvas.addEventListener('pointercancel', endSpin);
 
 window.addEventListener('keydown', (e) => {
-  if (typing(e.target)) return;
-  if (e.code === 'Space') { send({ type: 'speed', speed: state && state.speed > 0 ? 0 : 1 }); e.preventDefault(); }
-  else if (e.key === '1') send({ type: 'speed', speed: 1 });
-  else if (e.key === '2') send({ type: 'speed', speed: 3 });
-  else if (e.key === '3') send({ type: 'speed', speed: 10 });
+  if (typing(e.target) || hud.introOpen) return;
+  if (e.code === 'Space') { userSend({ type: 'speed', speed: state && state.speed > 0 ? 0 : 1 }); e.preventDefault(); }
+  else if (e.key === '1') userSend({ type: 'speed', speed: 1 });
+  else if (e.key === '2') userSend({ type: 'speed', speed: 3 });
+  else if (e.key === '3') userSend({ type: 'speed', speed: 10 });
+  else if (e.key === '4') document.querySelector<HTMLButtonElement>('[data-auto]')?.click();
   else if (e.key === 'p' || e.key === 'P') hud.setTool(hud.tool === 'plan' ? 'view' : 'plan');
   else if (e.key === 'v' || e.key === 'V') hud.setTool('view');
   else if (e.key === 'h' || e.key === 'H') hud.toggle('heat');
@@ -347,6 +441,9 @@ function drawFrame(now: number) {
   paperAndLabels();
   life?.animate(dt * (state && state.speed > 0 ? 1 : 0.4), now / 1000, env.night);
   ships?.animate(now / 1000);
+  ripple?.animate(dt);
+  goalMarker?.animate(now / 1000, env.camera.position.distanceTo(env.controls.target));
+  feedback.tick(now);
   xray += (xrayTarget - xray) * Math.min(1, dt * 5);
   if (Math.abs(xray - xrayTarget) < 0.002) xray = xrayTarget;
   applyXray(xray);
@@ -388,6 +485,7 @@ function cellToScreen(x: number, y: number) {
 }
 /** Dev helper: run the sim to a month in small batches, picking `deal` for the docks event and the first option otherwise. */
 async function ff(target: number, deal = 0, picks: Record<string, number> = {}) {
+  clockHeld = false; refreshPlan();
   // MessageChannel yields are not throttled in a hidden pane, unlike timers
   const sl = (_ms: number) => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(0); c.port2.postMessage(0); });
   send({ type: 'speed', speed: 0 });
@@ -491,7 +589,7 @@ async function shotUI(name: string) {
   const clone = document.body.cloneNode(true) as HTMLElement;
   clone.querySelectorAll('canvas, script').forEach((e) => e.remove());
   const html = new XMLSerializer().serializeToString(clone).replace(/^<body[^>]*>/, '').replace(/<\/body>$/, '');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')}</style>${html}</div></foreignObject></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')} *{animation:none !important;transition:none !important}</style>${html}</div></foreignObject></svg>`;
   const img = new Image();
   await new Promise((r, j) => { img.onload = r; img.onerror = j; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
   g.drawImage(img, 0, 0);
@@ -500,6 +598,7 @@ async function shotUI(name: string) {
 }
 /** Dev helper: point the camera at a cell position from an azimuth / polar angle. */
 function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
+  fly = null;
   const tx = x * CELL, tz = y * CELL;
   env.controls.target.set(tx, 0, tz);
   env.camera.position.set(tx + Math.sin(az) * Math.sin(pol) * dist, Math.cos(pol) * dist, tz + Math.cos(az) * Math.sin(pol) * dist);
@@ -507,4 +606,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; }, get sunShadow() { return sunShadow; }, quality, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };
+(window as unknown as { tsm: unknown }).tsm = { events: gameEvents, get ripple() { return ripple; }, sound, env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; }, get sunShadow() { return sunShadow; }, quality, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };

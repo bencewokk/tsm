@@ -304,7 +304,8 @@ export class AssemblySystem {
             } else pending++;
             continue;
           }
-          const p = c === 0 ? 0.95 : c <= 1 ? 0.8 : c <= 3 ? 0.6 : 0.45;
+          // sellers near a young station's boom are keener
+          const p = Math.min(0.98, (c === 0 ? 0.95 : c <= 1 ? 0.8 : c <= 3 ? 0.6 : 0.45) + (sim.boom[l.cell] > 0.3 ? 0.2 : 0));
           if (hash01(l.id * 31 + a.id * 977, sim.month) < p) l.astate = 1;
           else {
             a.fails[l.id] = (a.fails[l.id] ?? 0) + 1;
