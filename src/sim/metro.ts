@@ -1,6 +1,21 @@
 import { N, CELL, METRO_SPEED, TRAIN_CAP, LINE_COLORS } from './constants';
 import { quoteLine, type Terr, type LineQuote } from './relief';
 
+/**
+ * Round 7 step 5: one transit graph for every mode (metro lines and bus lines over shared stations and stops). A journey costs
+ * walk (at each end, from the trip model) + expected wait + in-vehicle time + transfer penalties + crowding. A change of vehicle at the
+ * same station costs `xferSame`; a change to a different stop or station up to `xferCells` away walks there along the street (x1.3 at
+ * 75 m a minute) and adds `xferWalk`. The expected wait is half the headway up to 12 minutes; past that people time their arrival, so
+ * only a quarter of the extra counts. Crowding scales a packed line's in-vehicle time and wait (`crowdMul`).
+ */
+export const JOURNEY = {
+  xferSame: 4,
+  xferCells: 3.2,
+  xferWalk: 5,
+  walkMPerMin: 75,
+  waitOf(h: number) { return h <= 12 ? h / 2 : 6 + (h - 12) / 4; },
+};
+
 export interface Station { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; /** metres below ground level of the platforms (deep stations cost more and add access time) */ depth: number; /** month the station first came into service (-1 while it is only dug) */ opened: number;
   /** round 7, why a station is quiet: cells within an 8-minute walk, homes within it, and homes for which it is the nearest station */
   reach?: number; walkHomes?: number; ownHomes?: number;
@@ -62,9 +77,15 @@ export class Metro {
   nodes: Node[] = [];
   nodesAt: number[][] = [];            // matrix index -> node ids
   T = new Float64Array(0);             // S x S transit time (min), Infinity if unreachable
+  /** per station index: the stations / stops a walking transfer reaches, with its minutes (walk + penalty) */
+  xferNear: { k: number; t: number }[][] = [];
   prev: Int32Array[] = [];             // per source: predecessor node for each node
   dist: Float64Array[] = [];           // per source: cost to each node
   bestNode: Int32Array[] = [];         // per source: best arrival node at each target station index
+  /** per station pair (S x S), the best journey's parts in minutes: wait, in-vehicle, transfer penalties (incl. the walk between
+   *  stops), crowding (the extra from packed lines); the number of changes; and the modes used (bit 1 metro, bit 2 bus) */
+  jWait = new Float32Array(0); jRide = new Float32Array(0); jXfer = new Float32Array(0); jCrowd = new Float32Array(0);
+  jChanges = new Uint8Array(0); jModes = new Uint8Array(0);
 
   station(id: number) { return this.stations.find((s) => s.id === id) ?? (id >= 10000 ? this.stops.find((s) => s.id === id) : undefined); }
   line(id: number) { return this.lines.find((l) => l.id === id) ?? this.buses.find((l) => l.id === id); }
@@ -187,12 +208,23 @@ export class Metro {
     this.nodes.forEach((n, k) => (nodeOf[n.line][n.pos] = k));
     this.T = new Float64Array(S * S).fill(Infinity);
     this.prev = []; this.dist = []; this.bestNode = [];
+    this.jWait = new Float32Array(S * S); this.jRide = new Float32Array(S * S); this.jXfer = new Float32Array(S * S); this.jCrowd = new Float32Array(S * S);
+    this.jChanges = new Uint8Array(S * S); this.jModes = new Uint8Array(S * S);
     const crowdMul = this.net.map((l) => 1 + Math.min(1.2, Math.max(0, l.crowd - 0.75) * 1.5));
+    const wait = this.net.map((l) => JOURNEY.waitOf(l.headway));
+    // walking transfers: other stations / stops within xferCells, with the minutes to walk there
+    const near: { k: number; t: number }[][] = used.map(() => []);
+    for (let a = 0; a < S; a++) for (let b = 0; b < S; b++) {
+      if (a === b) continue;
+      const d = Math.hypot(used[a].x - used[b].x, used[a].y - used[b].y);
+      if (d <= JOURNEY.xferCells) near[a].push({ k: b, t: d * CELL * 1.3 / JOURNEY.walkMPerMin + JOURNEY.xferWalk });
+    }
+    this.xferNear = near;
     for (let s = 0; s < S; s++) {
       const dist = new Float64Array(M).fill(Infinity);
       const prev = new Int32Array(M).fill(-1);
       const done = new Uint8Array(M);
-      for (const n of this.nodesAt[s]) dist[n] = this.net[this.nodes[n].line].headway / 2 * crowdMul[this.nodes[n].line];
+      for (const n of this.nodesAt[s]) dist[n] = wait[this.nodes[n].line] * crowdMul[this.nodes[n].line];
       for (;;) {
         let u = -1, best = Infinity;
         for (let k = 0; k < M; k++) if (!done[k] && dist[k] < best) { best = dist[k]; u = k; }
@@ -203,7 +235,9 @@ export class Metro {
         if (nu.pos + 1 < l.stations.length) relax(nodeOf[nu.line][nu.pos + 1], best + l.segTime[nu.pos] * crowdMul[nu.line]);
         if (nu.pos > 0) relax(nodeOf[nu.line][nu.pos - 1], best + l.segTime[nu.pos - 1] * crowdMul[nu.line]);
         for (const v of this.nodesAt[nu.st]) if (v !== u && this.nodes[v].line !== nu.line)
-          relax(v, best + 4 + this.net[this.nodes[v].line].headway / 2 * crowdMul[this.nodes[v].line]);
+          relax(v, best + JOURNEY.xferSame + wait[this.nodes[v].line] * crowdMul[this.nodes[v].line]);
+        for (const w of near[nu.st]) for (const v of this.nodesAt[w.k]) if (this.nodes[v].line !== nu.line)
+          relax(v, best + w.t + wait[this.nodes[v].line] * crowdMul[this.nodes[v].line]);
       }
       const bn = new Int32Array(S).fill(-1);
       for (let t = 0; t < S; t++) {
@@ -211,6 +245,26 @@ export class Metro {
         let b = Infinity;
         for (const n of this.nodesAt[t]) if (dist[n] < b) { b = dist[n]; bn[t] = n; }
         this.T[s * S + t] = b;
+        // the journey's parts, walking the best path back from the arrival node
+        let n = bn[t], g = 0, jw = 0, jr = 0, jx = 0, jc = 0, ch = 0, md = 0;
+        while (n >= 0 && g++ < 500) {
+          const p = prev[n], cur = this.nodes[n], li = cur.line, L = this.net[li], cm = crowdMul[li];
+          if (p >= 0 && this.nodes[p].line === li) {
+            const tt = L.segTime[Math.min(this.nodes[p].pos, cur.pos)];
+            jr += tt; jc += tt * (cm - 1);
+          } else {
+            // boarding li (the first one, or a change from the line at p)
+            jw += wait[li]; jc += wait[li] * (cm - 1); md |= L.mode === 'bus' ? 2 : 1;
+            if (p >= 0) {
+              ch++;
+              const ps = this.nodes[p].st;
+              jx += ps === cur.st ? JOURNEY.xferSame : (near[ps].find((q) => q.k === cur.st)?.t ?? JOURNEY.xferSame);
+            }
+          }
+          n = p;
+        }
+        const k = s * S + t;
+        this.jWait[k] = jw; this.jRide[k] = jr; this.jXfer[k] = jx; this.jCrowd[k] = jc; this.jChanges[k] = ch; this.jModes[k] = md;
       }
       this.prev.push(prev); this.dist.push(dist); this.bestNode.push(bn);
     }

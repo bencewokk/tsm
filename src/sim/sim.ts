@@ -1726,6 +1726,9 @@ export class Sim {
   /** transit = trips that use the metro (alone or with a bus); bus = trips by bus only (round 7 step 4b) */
   modeTrips = { car: 0, transit: 0, walk: 0, bike: 0, bus: 0 };
   busTrips = 0;
+  /** round 7 step 5: the average transit journey (minutes per trip: walk both ends, wait, in-vehicle, transfers, crowding), changes
+   *  per trip, and the share of transit trips that combine a bus and the metro (feeder trips; they count as metro trips) */
+  journey = { walk: 0, wait: 0, ride: 0, xfer: 0, crowd: 0, changes: 0, feeder: 0, trips: 0 };
   /**
    * Trips and mode choice (calibrated in round 7 against real ranges; numbers in PROGRESS "Round 7, step 1").
    * Every resident makes TRIP.perResident trips a day by all modes (both directions); half of them are home-based trips out, distributed by
@@ -1746,7 +1749,8 @@ export class Sim {
     const gv = new Float64Array(ZONES);
     const desire: { a: number; b: number; trips: number }[] = [];
     let total = 0, transit = 0, car = 0, walk = 0, bike = 0, bus = 0;
-    const WM = this.walkMetro;
+    const JW = m.jWait, JR = m.jRide, JX = m.jXfer, JC = m.jCrowd, JN = m.jChanges, JM = m.jModes;
+    let jWalk = 0, jWait = 0, jRide = 0, jXfer = 0, jCrowd = 0, jCh = 0, jFeed = 0, jF = 0;
     const beta = TRIP.beta, ww = TRIP.walkWeight, T_ = m.T;
     this.demand.reset();
     // attraction of open landmarks pulls ordinary trips toward their zone
@@ -1765,7 +1769,7 @@ export class Sim {
       let fT = 0, fB = 0, cS = 0, wS = 0, bS = 0, cov = 0;
       if (go && go.length && gd.length) for (const o of go) for (const d of gd) {
         // the better access pair: the metro station or the bus stop at each end (s2 is the group's bus stop next to its metro station)
-        let bs = -1, bt2 = -1, bc = Infinity;
+        let bs = -1, bt2 = -1, bc = Infinity, bw = 0;
         for (let x = 0; x < 2; x++) {
           const os = x ? o.s2 : o.s, ow = x ? o.w2 : o.w;
           if (os < 0) continue;
@@ -1775,14 +1779,17 @@ export class Sim {
             const r = T_[os * S + ds];
             if (!(r < Infinity)) continue;
             const c = (ow + dw) * ww + r;
-            if (c < bc) { bc = c; bs = os; bt2 = ds; }
+            if (c < bc) { bc = c; bs = os; bt2 = ds; bw = ow + dw; }
           }
         }
         if (bs < 0) continue;
         const f = o.f * d.f;
         const ut = Math.exp(-beta * (bc + asc - drive));
         const sum = 1 + ut + uw + ub, F = T * f * ut / sum;
-        cov += f; fT += F; if (WM[bs] === false && WM[bt2] === false) fB += F; cS += T * f / sum; wS += T * f * uw / sum; bS += T * f * ub / sum;
+        // bus-only when the best journey uses no metro line (a bus feeding the metro counts as a metro trip)
+        const jk = bs * S + bt2, md = JM[jk];
+        cov += f; fT += F; if (md === 2) fB += F; cS += T * f / sum; wS += T * f * uw / sum; bS += T * f * ub / sum;
+        jF += F; jWalk += F * bw; jWait += F * JW[jk]; jRide += F * JR[jk]; jXfer += F * JX[jk]; jCrowd += F * JC[jk]; jCh += F * JN[jk]; if (md === 3) jFeed += F;
         if (F > 0.002) { stOD[bs * S + bt2] += F; stOD[bt2 * S + bs] += F; stEntries[bs] += F; stEntries[bt2] += F; }
       }
       // the part of the trips with no station within walking distance at one end chooses between car, walking and cycling
@@ -1844,6 +1851,8 @@ export class Sim {
     this.totalTrips = total;
     this.modeTrips = { car, transit, walk, bike, bus };
     this.busTrips = bus;
+    const jd = Math.max(1e-9, jF);
+    this.journey = { walk: jWalk / jd, wait: jWait / jd, ride: jRide / jd, xfer: jXfer / jd, crowd: jCrowd / jd, changes: jCh / jd, feeder: jFeed / jd, trips: 2 * jF };
     for (let z = 0; z < ZONES; z++) {
       this.zTransitShare[z] = zTransit[z] + zCar[z] > 0 ? zTransit[z] / (zTransit[z] + zCar[z]) : 0;
       this.zCarShare[z] = zTrips[z] > 0 ? zCar[z] / zTrips[z] : TRIP.carShare0;
@@ -1886,7 +1895,7 @@ export class Sim {
       money: this.money, income: this.income, expenses: this.expenses, build: this.buildSpend,
       resDemand: this.resDemand, comDemand: this.comDemand, indDemand: this.indDemand,
       congestion: this.congestion, driveSpeed: this.driveSpeed, transitShare: this.motorShare(),
-      transitTrips: this.transitTrips, rating: this.rating, buildings: b, totalTrips: this.totalTrips, modeTrips: { ...this.modeTrips },
+      transitTrips: this.transitTrips, rating: this.rating, buildings: b, totalTrips: this.totalTrips, modeTrips: { ...this.modeTrips }, journey: { ...this.journey },
     };
   }
 

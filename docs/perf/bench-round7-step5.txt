@@ -1,0 +1,77 @@
+
+> tidewater-transit-demo@0.1.0 bench
+> node --expose-gc --import tsx scripts/bench.ts
+
+seed 4821 none m 12  tick   52.9 ms  snap 3.4 clone 0.9 msg 377 KB  heap 15 MB buffers 7 MB  pop 8922 lots 2057 edges 242
+      construction 0.3  assemblies 0.1  aggregate 14.5  traffic 5.1  catchments 11.5  trips 3.6  growth 5.7  roads 1.3  events 0.0  upkeep 7.0  fun 0.2  other 3.4
+      top: field.update 9.6, computeTransit 9.0, grow 5.4, computeDriveTimes 5.0, projects.tick 3.9, computeRiders 3.6
+seed 4821 none m 60  tick   31.2 ms  snap 5.8 clone 0.9 msg 383 KB  heap 16 MB buffers 6 MB  pop 21107 lots 2104 edges 328
+      construction 0.1  assemblies 0.1  aggregate 7.6  traffic 3.4  catchments 6.1  trips 3.7  growth 2.3  roads 2.3  events 0.0  upkeep 1.3  fun 0.0  other 4.4
+      top: field.update 5.2, other 4.4, computeRiders 3.7, computeWalkFields 3.7, computeDriveTimes 3.4, computeTransit 2.4
+seed 4821 none m120  tick   31.3 ms  snap 2.3 clone 0.5 msg 399 KB  heap 17 MB buffers 9 MB  pop 36913 lots 2251 edges 492
+      construction 0.1  assemblies 0.0  aggregate 5.5  traffic 4.7  catchments 5.8  trips 1.5  growth 1.2  roads 1.6  events 0.0  upkeep 9.3  fun 0.0  other 1.5
+      top: projects.tick 7.3, computeDriveTimes 4.7, field.update 3.8, computeWalkFields 3.7, computeTransit 2.1, repairRoads 2.0
+seed 4821 none m240  tick   27.4 ms  snap 2.5 clone 0.6 msg 432 KB  heap 17 MB buffers 15 MB  pop 42748 lots 2581 edges 732
+      construction 0.1  assemblies 0.0  aggregate 5.7  traffic 7.9  catchments 4.9  trips 1.8  growth 1.1  roads 1.1  events 0.0  upkeep 2.8  fun 0.0  other 2.0
+      top: computeDriveTimes 7.9, field.update 3.7, computeWalkFields 2.9, repairRoads 2.7, computeTransit 2.1, other 2.0
+seed 4821 line m 12  tick   44.7 ms  snap 4.1 clone 0.6 msg 380 KB  heap 16 MB buffers 16 MB  pop 9202 lots 2054 edges 233
+      construction 0.2  assemblies 0.1  aggregate 12.4  traffic 5.4  catchments 8.8  trips 2.4  growth 6.9  roads 0.9  events 0.2  upkeep 3.5  fun 1.0  other 2.9
+      top: field.update 8.1, computeTransit 7.0, grow 6.6, computeDriveTimes 5.2, other 2.9, computeLandValue 2.8
+seed 4821 line m 60  tick   18.3 ms  snap 2.6 clone 0.6 msg 378 KB  heap 17 MB buffers 12 MB  pop 34758 lots 1988 edges 240
+      construction 0.0  assemblies 0.1  aggregate 5.8  traffic 2.6  catchments 2.4  trips 1.4  growth 2.3  roads 0.3  events 1.3  upkeep 0.7  fun 0.1  other 1.3
+      top: field.update 4.0, computeDriveTimes 2.6, computeTransit 2.4, grow 2.3, computeRiders 1.4, other 1.3
+seed 4821 line m120  tick   22.7 ms  snap 2.6 clone 0.7 msg 382 KB  heap 18 MB buffers 18 MB  pop 66272 lots 2013 edges 268
+      construction 0.0  assemblies 0.2  aggregate 5.4  traffic 2.8  catchments 3.8  trips 1.5  growth 1.1  roads 1.2  events 0.0  upkeep 5.1  fun 0.1  other 1.5
+      top: projects.tick 4.1, field.update 3.7, computeDriveTimes 2.8, computeTransit 2.3, computeRiders 1.5, other 1.5
+seed 4821 line m240  tick   21.6 ms  snap 2.7 clone 0.7 msg 383 KB  heap 18 MB buffers 18 MB  pop 74007 lots 2007 edges 290
+      construction 0.0  assemblies 0.1  aggregate 5.3  traffic 3.0  catchments 3.4  trips 1.7  growth 1.0  roads 1.2  events 0.1  upkeep 4.0  fun 0.1  other 1.6
+      top: field.update 3.6, projects.tick 3.2, computeDriveTimes 3.0, computeTransit 2.4, computeRiders 1.7, other 1.6
+seed 187 none m 12  tick   25.3 ms  snap 3.0 clone 0.6 msg 399 KB  heap 18 MB buffers 19 MB  pop 10276 lots 2253 edges 431
+      construction 0.1  assemblies 0.2  aggregate 6.5  traffic 4.2  catchments 5.1  trips 1.6  growth 2.6  roads 0.6  events 0.0  upkeep 2.0  fun 0.1  other 2.4
+      top: field.update 4.3, computeDriveTimes 4.2, computeWalkFields 2.7, grow 2.5, computeTransit 2.4, other 2.4
+seed 187 none m 60  tick   32.2 ms  snap 2.6 clone 0.5 msg 408 KB  heap 18 MB buffers 10 MB  pop 26323 lots 2367 edges 500
+      construction 0.0  assemblies 0.0  aggregate 5.7  traffic 5.3  catchments 5.6  trips 1.9  growth 1.3  roads 1.3  events 0.0  upkeep 9.2  fun 0.0  other 1.8
+      top: projects.tick 8.0, computeDriveTimes 5.3, field.update 3.8, computeWalkFields 3.5, computeTransit 2.1, computeRiders 1.9
+seed 187 none m120  tick   25.1 ms  snap 2.6 clone 0.5 msg 428 KB  heap 18 MB buffers 10 MB  pop 40791 lots 2560 edges 620
+      construction 0.1  assemblies 0.0  aggregate 5.5  traffic 6.7  catchments 4.3  trips 2.0  growth 1.2  roads 1.3  events 0.0  upkeep 2.2  fun 0.0  other 1.8
+      top: computeDriveTimes 6.7, field.update 3.5, computeWalkFields 2.2, repairRoads 2.1, computeTransit 2.1, computeRiders 2.0
+seed 187 none m240  tick   29.4 ms  snap 2.8 clone 0.6 msg 442 KB  heap 19 MB buffers 16 MB  pop 47189 lots 2674 edges 741
+      construction 0.1  assemblies 0.0  aggregate 5.9  traffic 8.7  catchments 5.2  trips 2.3  growth 1.2  roads 1.3  events 0.0  upkeep 2.8  fun 0.0  other 2.0
+      top: computeDriveTimes 8.6, field.update 3.6, computeWalkFields 2.8, repairRoads 2.7, computeTransit 2.4, computeRiders 2.3
+seed 187 line m 12  tick   26.7 ms  snap 2.7 clone 0.6 msg 401 KB  heap 18 MB buffers 17 MB  pop 10276 lots 2253 edges 431
+      construction 0.1  assemblies 0.0  aggregate 5.7  traffic 3.7  catchments 7.8  trips 1.8  growth 3.1  roads 0.8  events 0.0  upkeep 1.9  fun 0.1  other 1.7
+      top: computeTransit 5.4, field.update 3.8, computeDriveTimes 3.7, grow 3.0, computeWalkFields 2.4, computeRiders 1.8
+seed 187 line m 60  tick   30.8 ms  snap 2.4 clone 0.5 msg 409 KB  heap 18 MB buffers 17 MB  pop 26323 lots 2367 edges 500
+      construction 0.0  assemblies 0.0  aggregate 5.5  traffic 5.0  catchments 5.1  trips 1.8  growth 1.5  roads 1.1  events 0.0  upkeep 9.0  fun 0.0  other 1.6
+      top: projects.tick 7.8, computeDriveTimes 5.0, field.update 3.6, computeWalkFields 3.1, computeTransit 2.0, computeRiders 1.8
+seed 187 line m120  tick   25.7 ms  snap 2.5 clone 0.6 msg 430 KB  heap 19 MB buffers 23 MB  pop 40791 lots 2560 edges 620
+      construction 0.1  assemblies 0.0  aggregate 5.7  traffic 6.9  catchments 4.3  trips 2.2  growth 1.3  roads 1.4  events 0.0  upkeep 2.0  fun 0.0  other 1.8
+      top: computeDriveTimes 6.9, field.update 3.6, computeWalkFields 2.2, computeRiders 2.2, computeTransit 2.1, repairRoads 1.9
+seed 187 line m240  tick   28.4 ms  snap 2.7 clone 0.6 msg 443 KB  heap 19 MB buffers 41 MB  pop 47189 lots 2674 edges 741
+      construction 0.1  assemblies 0.0  aggregate 5.7  traffic 8.3  catchments 4.9  trips 2.3  growth 1.2  roads 1.3  events 0.0  upkeep 2.7  fun 0.0  other 1.8
+      top: computeDriveTimes 8.3, field.update 3.5, computeWalkFields 2.9, repairRoads 2.6, computeRiders 2.3, computeTransit 2.1
+seed 304 none m 12  tick   18.4 ms  snap 2.4 clone 0.5 msg 384 KB  heap 18 MB buffers 14 MB  pop 10631 lots 2140 edges 273
+      construction 0.0  assemblies 0.0  aggregate 5.3  traffic 2.2  catchments 2.5  trips 1.0  growth 2.3  roads 0.5  events 0.0  upkeep 3.1  fun 0.1  other 1.4
+      top: field.update 3.7, grow 2.2, projects.tick 2.2, computeDriveTimes 2.2, computeTransit 1.5, other 1.4
+seed 304 none m 60  tick   20.7 ms  snap 2.5 clone 0.5 msg 404 KB  heap 18 MB buffers 24 MB  pop 28435 lots 2374 edges 372
+      construction 0.0  assemblies 0.0  aggregate 5.4  traffic 3.8  catchments 3.5  trips 1.6  growth 1.3  roads 1.2  events 0.0  upkeep 1.8  fun 0.0  other 1.9
+      top: computeDriveTimes 3.8, field.update 3.7, other 1.9, computeWalkFields 1.9, repairRoads 1.7, computeTransit 1.7
+seed 304 none m120  tick   25.7 ms  snap 2.6 clone 0.5 msg 440 KB  heap 19 MB buffers 29 MB  pop 42067 lots 2749 edges 495
+      construction 0.1  assemblies 0.0  aggregate 5.4  traffic 5.8  catchments 4.0  trips 2.2  growth 1.2  roads 1.2  events 0.0  upkeep 3.7  fun 0.0  other 2.1
+      top: computeDriveTimes 5.7, field.update 3.6, computeWalkFields 2.3, computeRiders 2.2, repairRoads 2.1, other 2.1
+seed 304 none m240  tick   32.3 ms  snap 6.7 clone 0.6 msg 468 KB  heap 18 MB buffers 8 MB  pop 46085 lots 3031 edges 662
+      construction 0.1  assemblies 0.1  aggregate 6.1  traffic 8.9  catchments 3.8  trips 4.5  growth 1.7  roads 1.6  events 0.0  upkeep 3.1  fun 0.0  other 2.4
+      top: computeDriveTimes 8.9, computeRiders 4.5, field.update 4.0, repairRoads 2.9, other 2.4, computeWalkFields 2.1
+seed 304 line m 12  tick   32.6 ms  snap 3.6 clone 0.6 msg 389 KB  heap 17 MB buffers 19 MB  pop 11031 lots 2147 edges 280
+      construction 0.0  assemblies 0.0  aggregate 6.1  traffic 2.4  catchments 9.5  trips 2.1  growth 4.5  roads 0.9  events 0.0  upkeep 4.6  fun 0.7  other 1.6
+      top: computeTransit 7.2, grow 4.3, field.update 4.1, projects.tick 3.7, computeDriveTimes 2.4, computeWalkFields 2.3
+seed 304 line m 60  tick   26.1 ms  snap 2.9 clone 0.8 msg 399 KB  heap 17 MB buffers 25 MB  pop 45131 lots 2214 edges 336
+      construction 0.0  assemblies 0.1  aggregate 5.5  traffic 3.0  catchments 4.4  trips 1.5  growth 2.5  roads 1.1  events 0.0  upkeep 6.1  fun 0.1  other 1.8
+      top: projects.tick 4.7, field.update 3.9, computeDriveTimes 3.0, computeTransit 2.4, grow 2.2, computeWalkFields 2.0
+seed 304 line m120  tick   25.4 ms  snap 2.9 clone 0.6 msg 425 KB  heap 18 MB buffers 30 MB  pop 84813 lots 2497 edges 396
+      construction 0.1  assemblies 0.1  aggregate 5.5  traffic 4.5  catchments 4.0  trips 2.4  growth 1.3  roads 1.1  events 1.0  upkeep 3.3  fun 0.1  other 2.0
+      top: computeDriveTimes 4.5, field.update 3.6, computeRiders 2.4, computeTransit 2.3, other 2.0, projects.tick 1.9
+seed 304 line m240  tick   29.2 ms  snap 6.2 clone 1.1 msg 433 KB  heap 18 MB buffers 11 MB  pop 80967 lots 2590 edges 411
+      construction 0.1  assemblies 0.1  aggregate 5.8  traffic 4.9  catchments 4.6  trips 3.2  growth 1.5  roads 1.3  events 0.0  upkeep 5.6  fun 0.2  other 2.0
+      top: computeDriveTimes 4.9, projects.tick 4.2, field.update 3.7, computeRiders 3.2, computeTransit 2.3, computeWalkFields 2.2
+total 53.7 s

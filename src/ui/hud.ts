@@ -54,6 +54,8 @@ export class Hud {
         <div class="row"><span>Road congestion</span><b data-k="cong">-</b></div>
         <div class="row"><span>Avg drive speed</span><b data-k="spd">-</b></div>
         <div class="row"><span>Transit trips / day</span><b data-k="trips">-</b></div>
+        <div class="row" title="Trips on buses only (a bus that feeds the metro counts as a metro trip)"><span>Bus-only trips / day</span><b data-k="bustrips">-</b></div>
+        <div class="row" data-k="jrow"><span>Avg journey</span><b data-k="journey">-</b></div>
         <div class="row" title="Station area plans pay the city a planning gain on the floors they allow above the old zoning"><span>Value captured</span><b data-k="capture">-</b></div>
         <div class="h lmh">Projects <span class="muted small" data-k="projbudget"></span></div>
         <div class="lmlist" data-k="projlist"></div>
@@ -319,6 +321,14 @@ export class Hud {
     e.cong.textContent = `${Math.round(st.congestion * 100)}%`;
     e.spd.textContent = `${st.driveSpeed.toFixed(0)} km/h`;
     e.trips.textContent = num(st.transitTrips);
+    e.bustrips.textContent = num(st.modeTrips.bus);
+    // round 7 step 5: the average door-to-door transit journey, its parts in the tooltip
+    const j = st.journey;
+    if (j && j.trips > 0) {
+      const tot = j.walk + j.wait + j.ride + j.xfer + j.crowd;
+      e.journey.textContent = `${tot.toFixed(0)} min`;
+      e.jrow.title = `Average transit journey, door to door: walk ${j.walk.toFixed(1)} min, wait ${j.wait.toFixed(1)}, in the vehicle ${j.ride.toFixed(1)}, changes ${j.xfer.toFixed(1)} (${j.changes.toFixed(2)} per trip), crowding ${j.crowd.toFixed(1)}. ${(j.feeder * 100).toFixed(0)}% of transit trips combine a bus and the metro.`;
+    } else { e.journey.textContent = '-'; e.jrow.title = ''; }
     // value capture from approved station area plans: paid as buildings complete, so the total so far reads better than a monthly figure
     const paid = (s.plans ?? []).reduce((a, p) => a + p.paid, 0);
     e.capture.textContent = s.plans?.some((p) => p.state === 'approved') ? `$${(paid / 1e6).toFixed(1)}M` : 'no plans yet';

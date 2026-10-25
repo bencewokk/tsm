@@ -53,6 +53,9 @@ export interface Stats {
   transitTrips: number; // metro trips per day (journeys, both directions; a change of line is one trip)
   totalTrips: number;   // trips per day by all modes
   modeTrips: { car: number; transit: number; walk: number; bike: number; bus: number };
+  /** round 7 step 5: the average transit journey in minutes (walk both ends, wait, in-vehicle, transfer penalties incl. the walk
+   *  between stops, crowding), changes per trip, the share of transit trips that combine bus and metro, and transit trips a day */
+  journey?: { walk: number; wait: number; ride: number; xfer: number; crowd: number; changes: number; feeder: number; trips: number };
   rating: number;
   buildings: number;
 }
