@@ -31,16 +31,19 @@ export class PressureSystem {
   pWalk = new Float32Array(ZONES * ZONES);
   pCar = new Float32Array(ZONES * ZONES);
   pOpp = new Float32Array(ZONES * ZONES);
+  /** transit trips by zone pair (round 7 step 7: a viable transit alternative weighs against a new road) */
+  pTr = new Float32Array(ZONES * ZONES);
   cands: LinkCandidate[] = [];
   /** month each pair was last routed (no retest for a year) */
   private tested = new Map<number, number>();
   constructor(private sim: Sim) {}
 
   /** called at the start of computeRiders */
-  reset() { this.pWalk.fill(0); this.pCar.fill(0); this.pOpp.fill(0); }
+  reset() { this.pWalk.fill(0); this.pCar.fill(0); this.pOpp.fill(0); this.pTr.fill(0); }
   /** from route(): one zone pair's daily trips by mode; `cov` = share of the trips with a station within walking distance at both ends */
-  add(a: number, b: number, walk: number, car: number, dk: number, cov: number) {
+  add(a: number, b: number, walk: number, car: number, dk: number, cov: number, tr = 0) {
     const k = a < b ? a * ZONES + b : b * ZONES + a;
+    this.pTr[k] += tr;
     if (dk < 2) this.pWalk[k] += walk;
     this.pCar[k] += car;
     if (dk >= 1.2 && dk <= 8 && cov < 0.3) this.pOpp[k] += car * (1 - cov);

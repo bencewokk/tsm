@@ -153,8 +153,10 @@ export class Traffic {
     // cold start (the first month): the method of successive averages over a few rounds from free flow. Later months warm-start from
     // last month's volumes and run one round (the demand itself is last month's), which is also the pass the zone-to-zone times come from
     const cold = !this.warm;
+    const noCars = sim.roadPlan.noCars;
     for (let e = 0; e < E; e++) {
-      if (!R.alive[e]) { this.vol[e] = 0; this.time[e] = Infinity; continue; }
+      // dead streets and transit streets (round 7 step 7: buses, trams, bikes and walkers only) carry no cars
+      if (!R.alive[e] || noCars.has(e)) { this.vol[e] = 0; this.time[e] = Infinity; continue; }
       if (cold) this.vol[e] = 0;
       const c = R.ecls[e] as number;
       this.time[e] = this.freeTime(e) * Math.min(5, 1 + TRAFFIC.bprA * Math.pow(this.vol[e] / TRAFFIC.cap[c], TRAFFIC.bprB));
@@ -186,7 +188,7 @@ export class Traffic {
       }
       const k = cold ? 1 / (r + 1) : TRAFFIC.relax;
       for (let e = 0; e < E; e++) {
-        if (!R.alive[e]) continue;
+        if (!R.alive[e] || noCars.has(e)) continue;
         this.vol[e] += (load[e] - this.vol[e]) * k;
         const c = R.ecls[e] as number, vc = this.vol[e] / TRAFFIC.cap[c];
         this.vc[e] = vc;

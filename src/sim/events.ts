@@ -38,7 +38,9 @@ export type Effect =
   | { kind: 'project'; inst: number; choice: number }
   /** a decision on defences against a natural hazard (hazards.ts) */
   | { kind: 'hazard'; id: string; choice: number }
-  | { kind: 'plan'; id: number; choice: number };
+  | { kind: 'plan'; id: number; choice: number }
+  /** a decision on a road proposal from the highways department (arterials.ts) */
+  | { kind: 'road'; id: number; choice: number };
 
 export interface DocksDeal {
   id: string;

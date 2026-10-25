@@ -2,6 +2,7 @@ import { N, CELL, ZONE, NZ, ZONES, BT, Flag, Water, isAmenity, HOMES, COM_JOBS, 
 import { EnvelopeSystem, ENV, ENVS } from './envelopes';
 import { PressureSystem } from './pressure';
 import { Traffic, TRAFFIC } from './traffic';
+import { RoadPlanner } from './arterials';
 import { BUS_STOP_COST, BUS_COST, BUS_MONTH, STOP_UPKEEP, LANE_COST_KM, TRAM_COST, TRAM_MONTH } from './constants';
 import { STATION_COST, TRAIN_COST, START_MONEY, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
@@ -209,6 +210,8 @@ export class Sim {
   demand = new PressureSystem(this);
   /** zonal road congestion on the street graph (traffic.ts) */
   traffic = new Traffic(this);
+  /** round 7 step 7: the highways department's road proposals (arterials, bridges, bypasses) and the transit streets */
+  roadPlan = new RoadPlanner(this);
   /** the station whose plan preview the UI asked for */
   previewStation: number | null = null;
   lastEventMonth = -99;
@@ -285,6 +288,8 @@ export class Sim {
     for (const e of path) {
       const free = R.alive[e] ? T.free(e) : (R.edgeLen(e) * CELL / 1000) / 30 * 60;
       const cong = T.time.length > e && T.time[e] < Infinity && R.alive[e] ? T.time[e] : free;
+      // a transit street (round 7 step 7): no cars, so even an ordinary bus runs as on a busway
+      if (l.lane !== 3 && this.roadPlan.noCars.has(e)) { t += free * 1.05; continue; }
       t += l.lane === 3 ? free : l.lane === 2 ? free * 1.05 : l.lane === 1 ? free * 1.2 : Math.max(free * 1.2, cong * 1.25);
     }
     return t;
@@ -594,6 +599,14 @@ export class Sim {
       this.pending = { def, variant: null, vars: {} };
       return;
     }
+    // road proposals from the highways department (arterials.ts)
+    const rd = this.roadPlan.nextDecision();
+    if (rd) {
+      const rid = Number(rd.id.slice(5));
+      const def: EventDef = { id: rd.id, trigger: {}, title: rd.title, text: rd.text, choices: rd.choices.map((c, k) => ({ ...c, effects: [{ kind: 'road', id: rid, choice: k }] })) };
+      this.pending = { def, variant: null, vars: {} };
+      return;
+    }
     // development projects: queued decisions, one at a time and spaced out
     if (this.month < this.projects.lastDecision + PACE.decisionGap) return;
     const d = this.projects.nextDecision();
@@ -672,6 +685,7 @@ export class Sim {
       case 'lmCarPark': this.lm.setCarPark(e.id); this.say('Car park extended'); break;
       case 'project': this.projects.choose(e.inst, e.choice); this.projects.lastDecision = this.month; break;
       case 'hazard': this.hazards.choose(e.id, e.choice); break;
+      case 'road': this.roadPlan.choose(e.id, e.choice); break;
       case 'plan': this.envs.choose(e.id, e.choice); break;
       case 'docksRoadRelief': this.docks.roadRelief = true; this.say('Bus lanes painted along the harbour roads'); break;
     }
@@ -752,6 +766,7 @@ export class Sim {
       else if (e.kind === 'landmark' && e.pay === 'city') c += LANDMARKS.find((x) => x.id === e.id)?.cost ?? 0;
       else if (e.kind === 'project') c += Math.max(0, -this.projects.choiceMoney(e.inst, e.choice));
       else if (e.kind === 'hazard' && e.choice === 0) c += this.hazards.defenceCost(e.id);
+      else if (e.kind === 'road') c += this.roadPlan.cost(e.id, e.choice);
     }
     return c;
   }
@@ -786,6 +801,7 @@ export class Sim {
     this.computeTransit();
     this.computeRiders();
     this.demand.tick();
+    this.roadPlan.tick();
     this.computeLandValue();
     for (let i = 0; i < N * N; i++) this.lvS[i] += (this.lv[i] - this.lvS[i]) * TUNE.lvLag;
     this.field.update(this);
@@ -1869,7 +1885,7 @@ export class Sim {
       car += 2 * C; walk += 2 * (wS + rest * uw / sum3); bike += 2 * (bS + rest * ub / sum3);
       if (C > 15 && dk > 1.2) desire.push({ a, b, trips: 2 * C });
       transit += 2 * (fT - fB - fR); bus += 2 * fB; tram += 2 * fR; zTransit[a] += 2 * fT;
-      if (a !== b) this.demand.add(a, b, 2 * (wS + rest * uw / sum3), 2 * C, dk, cov);
+      if (a !== b) this.demand.add(a, b, 2 * (wS + rest * uw / sum3), 2 * C, dk, cov, 2 * fT);
     };
     for (let a = 0; a < ZONES; a++) {
       const P = this.zHomes[a] * PERSONS_PER_HOME * TRIP.perResident / 2;
@@ -2029,7 +2045,7 @@ export class Sim {
       landmarks: this.lm.info(),
       assemblies: this.asm.infos(),
       projects: this.projects.infos(), notices: this.projects.notices.slice(-5),
-      env: this.envs.env.slice(), plans: this.envs.infos(), pressure: this.demand.info(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
+      env: this.envs.env.slice(), plans: this.envs.infos(), pressure: this.demand.info(), roadPlan: this.roadPlan.info(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
       desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
       goals: this.goals.infos(), goalsDone: this.goals.count(), goalsTotal: this.goals.total(), moments: this.moments.slice(-10), unlocks: this.unlocks.slice(),
       log: this.log.slice(-8), speed: this.speed,

@@ -46,7 +46,7 @@ if (params.get('perf') === '1') perf.show();
 // render quality (?quality=auto|high|performance, HUD button): the 3D scene's resolution scale
 const quality = new Quality((s) => env.setScale(s));
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
-const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean; noboom?: boolean; noenv?: boolean; notraffic?: boolean; nobus?: boolean }) => worker.postMessage(c);
+const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean; noboom?: boolean; noenv?: boolean; notraffic?: boolean; nobus?: boolean; roadplan?: number }) => worker.postMessage(c);
 
 let init: InitMsg | null = null;
 let markers: ProjectMarkers | null = null;
@@ -127,7 +127,8 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     carBlobs = new CarBlobs((life as unknown as { cars: THREE.InstancedMesh }).cars, () => !!life?.group.visible);
     env.scene.add(carBlobs.mesh);
     metro = new MetroView((x, z) => terrain!.sample(x, z));
-    busView = new BusView((x, z) => terrain!.sample(x, z));
+    // buses and transit streets follow the street surface: over water that is the bridge deck (6 m, as the road renderer draws it)
+    busView = new BusView((x, z) => { const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL); return cx >= 0 && cz >= 0 && cx < N && cz < N && m.water[cz * N + cx] ? 5.4 : terrain!.sample(x, z); });
     env.scene.add(busView.group);
     env.scene.add(metro.group);
     markers = new ProjectMarkers((x, z) => terrain!.sample(x, z));
@@ -163,6 +164,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     perf.step('city', () => city?.update(m, CITY_BUDGET));
     markers?.update(m.projects);
     busView?.update(m.buses ?? [], m.stops ?? []);
+    if (m.roadPlan) busView?.setRoads(m.roadPlan);
     if (linesChanged) { perf.step('metro', () => metro?.update(m)); if (sunShadow) sunShadow.dirty = true; }
     planner?.onState(m);
     perf.step('overlays', () => {
@@ -180,7 +182,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     console.error('[sim]', m.message);
   }
 };
-send({ type: 'start', seed, noboom: params.get('noboom') === '1', noenv: params.get('noenv') === '1', notraffic: params.get('notraffic') === '1', nobus: params.get('nobus') === '1', terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1', nores: params.get('nores') === '1', nosat: params.get('nosat') === '1', norepair: params.get('norepair') === '1' });
+send({ type: 'start', seed, noboom: params.get('noboom') === '1', noenv: params.get('noenv') === '1', notraffic: params.get('notraffic') === '1', nobus: params.get('nobus') === '1', roadplan: params.has('roadplan') ? Number(params.get('roadplan')) : undefined, terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1', nores: params.get('nores') === '1', nosat: params.get('nosat') === '1', norepair: params.get('norepair') === '1' });
 
 // ------------------------------------------------------------------ station card and the zoning legend (round 7 envelopes)
 const card = new StationCard(document.body, (c) => send(c));

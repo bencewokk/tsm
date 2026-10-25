@@ -10,6 +10,9 @@ import type { BusInfo, StationInfo } from '../sim/protocol';
 export class BusView {
   group = new THREE.Group();
   private routes = new THREE.Group();
+  /** round 7 step 7: transit streets (no cars) and the road proposal waiting for a decision */
+  private roads = new THREE.Group();
+  private roadSig = '';
   private stopsMesh: THREE.InstancedMesh | null = null;
   private fleet: THREE.InstancedMesh;
   private sig = '';
@@ -24,6 +27,7 @@ export class BusView {
 
   constructor(private ground: (x: number, z: number) => number) {
     this.group.add(this.routes);
+    this.group.add(this.roads);
     const geo = new THREE.BoxGeometry(13, 3.6, 3.2);
     this.fleet = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }), 256);
     this.fleet.count = 0;
@@ -77,6 +81,36 @@ export class BusView {
     stops.forEach((s, k) => { const x = s.x * CELL, z = s.y * CELL; this.m4.makeTranslation(x, this.ground(x, z) + 3.5, z); this.stopsMesh!.setMatrixAt(k, this.m4); });
     this.stopsMesh.count = stops.length;
     this.group.add(this.stopsMesh);
+  }
+
+  /** transit streets as a terracotta street surface; a proposal waiting at City hall as a dashed orange line with posts at its ends */
+  setRoads(info: { proposals: { id: number; state: string; pts: number[] }[]; transitStreets: number[][] }) {
+    const asked = info.proposals.filter((p) => p.state === 'asked');
+    const sig = JSON.stringify([info.transitStreets, asked.map((p) => p.id)]);
+    if (sig === this.roadSig) return;
+    this.roadSig = sig;
+    this.roads.traverse((o) => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
+    this.roads.clear();
+    const toPts = (flat: number[], lift: number, step: number) => {
+      const out: THREE.Vector3[] = [];
+      for (let k = 2; k < flat.length; k += 2) {
+        const ax = flat[k - 2] * CELL, az = flat[k - 1] * CELL, bx = flat[k] * CELL, bz = flat[k + 1] * CELL;
+        const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / step));
+        for (let q = k === 2 ? 0 : 1; q <= n; q++) { const x = ax + (bx - ax) * q / n, z = az + (bz - az) * q / n; out.push(new THREE.Vector3(x, this.ground(x, z) + lift, z)); }
+      }
+      return out;
+    };
+    for (const pl of info.transitStreets) this.roads.add(this.strip(toPts(pl, 1.2, 10), 7.5, 0, 0xb4613f, 0.75));
+    for (const p of asked) {
+      const pts = toPts(p.pts, 3, 12);
+      // dashes: every other short piece
+      for (let k = 1; k < pts.length; k += 2) this.roads.add(this.strip([pts[k - 1], pts[k]], 6, 0, 0xe8862c, 0.95));
+      for (const v of [pts[0], pts[pts.length - 1]]) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 40, 8), new THREE.MeshBasicMaterial({ color: 0xe8862c }));
+        post.position.set(v.x, v.y + 20, v.z);
+        this.roads.add(post);
+      }
+    }
   }
 
   /** a flat strip of width w along the polyline, offset sideways by off (metres) */

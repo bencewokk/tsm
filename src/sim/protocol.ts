@@ -153,6 +153,8 @@ export interface StateMsg {
   capture: number;
   /** round 7 step 3: demand pressure by mode (walk, car, transit opportunity: 3 bytes a cell, log scale) and missing-link candidates */
   pressure: { field: Uint8Array; cands: import('./pressure').LinkCandidate[] };
+  /** round 7 step 7: the highways department's proposals (polyline in cells) and the transit streets (buses, trams, bikes, walkers) */
+  roadPlan?: { proposals: { id: number; kind: string; state: string; name: string; pts: number[]; pressure: number; km: number }[]; transitStreets: number[][] };
   desire: DesireLine[];
   /** the active goal of each track, newest headline moments (each has a unique seq), unlocked upgrades */
   goals: import('./goals').GoalInfo[];
