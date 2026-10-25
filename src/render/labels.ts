@@ -54,7 +54,7 @@ export class Labels {
    * they are placed in order (old town first, then the others as listed), a tag that would overlap one already placed is lifted
    * along the screen's up direction in steps, and if it still overlaps after three steps it is faded out for this frame.
    */
-  update(dist: number, plan: boolean, night = 0, cam?: THREE.PerspectiveCamera, viewH = 900) {
+  update(dist: number, plan: boolean, night = 0, cam?: THREE.PerspectiveCamera, viewH = 900, tagsOn = false) {
     const t = plan ? 1 : THREE.MathUtils.smoothstep(dist, 2600, 4200);
     const placed: [number, number, number, number][] = [];
     if (cam && this.avoid) { cam.updateMatrixWorld(); this.up.setFromMatrixColumn(cam.matrixWorld, 1).normalize(); }
@@ -62,7 +62,8 @@ export class Labels {
     for (const { s, big, base } of order) {
       const m = s.material as THREE.SpriteMaterial;
       m.color.setScalar(1 - 0.72 * night);
-      let op = big ? Math.max(t, THREE.MathUtils.smoothstep(dist, 1800, 3000) * 0.9) : t;
+      // with the paper tags pinned on the stations (diegetic layer) the district names stand back earlier, so the two never pile up
+      let op = big ? Math.max(t, THREE.MathUtils.smoothstep(dist, tagsOn ? 2300 : 1800, tagsOn ? 3400 : 3000) * 0.9) : t;
       s.position.copy(base);
       if (cam && this.avoid && op > 0.02) {
         let ok = false;

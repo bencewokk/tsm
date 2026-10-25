@@ -1,4 +1,5 @@
 import './style.css';
+import './ui/diegetic/diegetic.css';
 import * as THREE from 'three';
 import { Env } from './render/env';
 import { buildTerrain, type TerrainView } from './render/terrain';
@@ -10,14 +11,19 @@ import { ProjectMarkers } from './render/markers';
 import { Ships } from './render/ships';
 import { Life } from './render/life';
 import { lookUniforms } from './render/look';
+import { VFX } from './render/vfx';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
-import { Hud } from './ui/hud';
+import { Hud, money as fmtMoney } from './ui/hud';
 import { Sound, bindSound } from './ui/sound';
 import { gameEvents } from './ui/gameEvents';
 import { FeedbackEmitter } from './ui/feedbackEmitter';
 import { FeedbackDom } from './ui/feedback';
 import { Ripple } from './render/ripple';
 import { GoalMarker } from './render/goalmarker';
+import { DiegeticLayer } from './ui/diegetic/layer';
+import { syncWorld, logSlips, stationLoads } from './ui/diegetic/world';
+import { skinHud } from './ui/diegetic/hudskin';
+import { demoEvent } from './ui/diegetic/demo';
 import { Planner } from './ui/planner';
 import { CELL, N, STATION_COST, TRAIN_COST, METRO_SPEED } from './sim/constants';
 import { quoteLine } from './sim/relief';
@@ -83,6 +89,11 @@ let ripple: Ripple | null = null;
 let goalMarker: GoalMarker | null = null;
 let autoSpeed = false;
 for (const ev of ['pointerdown', 'keydown'] as const) window.addEventListener(ev, () => sound.unlock(), { capture: true });
+// diegetic presentation (src/ui/diegetic): paper tags and flags pinned on the model, the HUD dressed as table objects; ?hud=classic keeps the old HUD
+const classicHud = params.get('hud') === 'classic';
+const dg = classicHud ? null : new DiegeticLayer(document.body, env.camera, hud.root);
+const skin = classicHud ? null : skinHud(hud);
+const seenLog = new Set<string>();
 
 worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   const m = ev.data;
@@ -128,7 +139,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
       labels = new Labels(init.villages, init.city.site, m.docks.centre, (x, z) => terrain!.sample(x, z));
       env.addText(labels.group);
     }
-    perf.step('life', () => { life?.setRoads(m.roads); if (newMonth) life?.setCity(m.stats.homes, m.stations); });
+    perf.step('life', () => { life?.setRoads(m.roads); if (newMonth) life?.setCity(m.stats.homes, m.stations, stationLoads(m)); });
     if (newMonth) lastStateAt = performance.now();
     perf.step('city', () => city?.update(m, CITY_BUDGET));
     markers?.update(m.projects);
@@ -141,6 +152,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
       if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
     });
     perf.step('hud', () => { hud.update(m); refreshPlan(); });
+    if (dg && terrain) { skin?.update(m); dg.desk.setMonth(m.stats.month); dg.desk.setSpeed(m.speed); syncWorld(dg, m, (x, z) => terrain!.sample(x, z)); logSlips(dg, m, seenLog); }
     perf.message(m, performance.now() - tApply);
   } else if (m.type === 'error') {
     console.error('[sim]', m.message);
@@ -263,6 +275,10 @@ function refreshPlan() {
   metro.draft(planner.points(state), planner.hover, planner.color(state), planner.profile(state, true));
   hud.hint(planner.hint(state));
   gameEvents.emit(planner.costInfo(state));
+  if (dg && terrain && planner.draft.length && planner.hover) {
+    const r = planner.quote(state), ok = r.cost <= state.stats.money && (!r.q || r.q.ok);
+    dg.cost({ x: planner.hover.x * CELL, y: terrain.sample(planner.hover.x * CELL, planner.hover.y * CELL) + 2, z: planner.hover.y * CELL }, { title: fmtMoney(r.cost), sub: `${r.km.toFixed(1)} km  ·  ${planner.draft.length} stations  ·  ${r.trains} trains`, badge: ok ? '' : 'too dear', color: ok ? '#2f7d5a' : '#c0503a', look: 2, ok });
+  } else dg?.cost(null);
 }
 
 // ------------------------------------------------------------------ picking
@@ -314,19 +330,24 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { held.delete(e.code); shiftDown = e.shiftKey; });
 window.addEventListener('blur', () => { held.clear(); shiftDown = false; });
 /** Move camera and target together over the ground plane, relative to where the camera faces. Speed scales with the camera distance. */
+const panV = { f: 0, r: 0 };
 function panByKeys(dt: number, fast: boolean) {
-  if (!held.size) return;
+  // smoothed input: the camera accelerates into a pan and glides to a stop (instant with ?novfx=cam)
+  const inF = (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
+  const inR = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
+  if (VFX.is('cam')) {
+    const a = 1 - Math.exp(-dt * (inF || inR ? 12 : 6));
+    panV.f += (inF - panV.f) * a; panV.r += (inR - panV.r) * a;
+    if (Math.abs(panV.f) < 0.01 && Math.abs(panV.r) < 0.01) { panV.f = panV.r = 0; return; }
+  } else { panV.f = inF; panV.r = inR; if (!inF && !inR) return; }
   const cam = env.camera.position, tgt = env.controls.target;
   let fx = tgt.x - cam.x, fz = tgt.z - cam.z;
   const fl = Math.hypot(fx, fz);
   if (fl < 1e-3) { fx = 0; fz = -1; } else { fx /= fl; fz /= fl; }
   const rx = -fz, rz = fx; // right of the facing direction
-  const f = (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
-  const r = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
-  if (!f && !r) return;
-  const len = Math.hypot(f, r), dist = cam.distanceTo(tgt);
-  const step = Math.max(150, dist) * 0.8 * (fast ? 2.8 : 1) * dt / len;
-  let dx = (fx * f + rx * r) * step, dz = (fz * f + rz * r) * step;
+  const mag = Math.hypot(panV.f, panV.r), dist = cam.distanceTo(tgt);
+  const step = Math.max(150, dist) * 0.8 * (fast ? 2.8 : 1) * dt * (mag > 1 ? 1 / mag : 1);
+  let dx = (fx * panV.f + rx * panV.r) * step, dz = (fz * panV.f + rz * panV.r) * step;
   const lim = N * CELL;
   dx = Math.max(-tgt.x, Math.min(lim - tgt.x, dx)); dz = Math.max(-tgt.z, Math.min(lim - tgt.z, dz));
   cam.x += dx; cam.z += dz; tgt.x += dx; tgt.z += dz;
@@ -397,7 +418,7 @@ function paperAndLabels() {
   const plan = hud.tool === 'plan';
   const k = plan ? 0.8 : 0.55 * THREE.MathUtils.smoothstep(dist, 3200, 5600);
   terrain?.setPaper(k * (1 - 0.92 * env.night));
-  labels?.update(dist, plan, env.night, env.camera as THREE.PerspectiveCamera, env.renderer.domElement.clientHeight || 900);
+  labels?.update(dist, plan, env.night, env.camera as THREE.PerspectiveCamera, env.renderer.domElement.clientHeight || 900, !!dg);
   if (life) life.group.visible = dist < 6500 && !plan;
 }
 let lastXray = -1;
@@ -434,6 +455,7 @@ function drawFrame(now: number) {
     if (fly.t >= 1) fly = null;
   }
   panByKeys(dt, shiftDown);
+  env.feel.step(dt);
   env.controls.update();
   const frac = state ? Math.min(1, (now - lastStateAt) / (MS[state.speed] ?? 1500)) : 0;
   if (city?.pending) perf.step('city', () => city!.pump(CITY_BUDGET));
@@ -468,6 +490,7 @@ function drawFrame(now: number) {
   if (city) city.roadMat.emissiveIntensity = night * 0.05;
   if (metro) { metro.setXray(xray); metro.animate(now / 1000); }
   env.render();
+  if (dg) { dg.setNight(env.night); dg.draw(now); skin?.plan(hud.tool === 'plan'); }
   perf.frameEnd();
   // Auto quality: one sample per resolved GPU timer query (else the frame interval)
   const fresh = perf.gpuSeq !== gpuSeq;
@@ -585,11 +608,12 @@ async function shotUI(name: string) {
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d')!;
   g.drawImage(gl, 0, 0);
+  if (dg) { dg.setNight(env.night); dg.draw(performance.now()); g.drawImage(dg.canvas, 0, 0, W, H); }
   const css = [...document.styleSheets].map((sh) => { try { return [...sh.cssRules].map((r) => r.cssText).join(' '); } catch { return ''; } }).join(' ');
   const clone = document.body.cloneNode(true) as HTMLElement;
   clone.querySelectorAll('canvas, script').forEach((e) => e.remove());
   const html = new XMLSerializer().serializeToString(clone).replace(/^<body[^>]*>/, '').replace(/<\/body>$/, '');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')} *{animation:none !important;transition:none !important}</style>${html}</div></foreignObject></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" class="${document.body.className}" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')} *{animation:none !important;transition:none !important}</style>${html}</div></foreignObject></svg>`;
   const img = new Image();
   await new Promise((r, j) => { img.onload = r; img.onerror = j; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
   g.drawImage(img, 0, 0);
@@ -606,4 +630,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { events: gameEvents, get ripple() { return ripple; }, sound, env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; }, get sunShadow() { return sunShadow; }, quality, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };
+(window as unknown as { tsm: unknown }).tsm = { events: gameEvents, get ripple() { return ripple; }, sound, dg, fun: (k: Parameters<typeof demoEvent>[2] = 'all') => (dg && state ? demoEvent(dg, state, k) : 'no layer'), env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; }, get sunShadow() { return sunShadow; }, quality, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };
