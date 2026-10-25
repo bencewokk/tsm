@@ -55,6 +55,7 @@ export class Hud {
         <div class="row"><span>Avg drive speed</span><b data-k="spd">-</b></div>
         <div class="row"><span>Transit trips / day</span><b data-k="trips">-</b></div>
         <div class="row" title="Trips on buses only (a bus that feeds the metro counts as a metro trip)"><span>Bus-only trips / day</span><b data-k="bustrips">-</b></div>
+        <div class="row" data-k="tramrow" style="display:none"><span>Tram trips / day</span><b data-k="tramtrips">-</b></div>
         <div class="row" data-k="jrow"><span>Avg journey</span><b data-k="journey">-</b></div>
         <div class="row" title="Station area plans pay the city a planning gain on the floors they allow above the old zoning"><span>Value captured</span><b data-k="capture">-</b></div>
         <div class="h lmh">Projects <span class="muted small" data-k="projbudget"></span></div>
@@ -113,7 +114,7 @@ export class Hud {
       if (b.dataset.act === 'lane') { this.send({ type: 'setLane', line: id, lane: Number(b.dataset.lane) }); return; }
       if (b.dataset.act === 'add') this.send({ type: 'setTrains', line: id, trains: l.trains + 1 });
       if (b.dataset.act === 'sub') this.send({ type: 'setTrains', line: id, trains: l.trains - 1 });
-      if (b.dataset.act === 'del' && confirm(id >= 100 ? `Withdraw bus line B${id - 100}?` : `Close line ${id}? Tunnels are written off.`)) this.send({ type: 'deleteLine', line: id });
+      if (b.dataset.act === 'del' && confirm(id >= 100 ? `Withdraw ${('lane' in l && l.lane === 3) ? 'tram' : 'bus'} line ${('lane' in l && l.lane === 3) ? 'T' : 'B'}${id - 100}?` : `Close line ${id}? Tunnels are written off.`)) this.send({ type: 'deleteLine', line: id });
     });
   }
 
@@ -231,16 +232,20 @@ export class Hud {
   private linesSig = '';
 
   private renderLines(s: StateMsg) {
-    const sig = JSON.stringify([s.lines.map((l) => [l.id, l.trains, Math.round(l.riders / 50), Math.round(l.rating), Math.round(l.peakLoad / 50)]), (s.buses ?? []).map((b) => [b.id, b.trains, b.lane, Math.round(b.riders / 50), Math.round(b.ride)]), s.stats.money > 3e6]);
+    const sig = JSON.stringify([s.lines.map((l) => [l.id, l.trains, Math.round(l.riders / 50), Math.round(l.rating), Math.round(l.peakLoad / 50)]), (s.buses ?? []).map((b) => [b.id, b.trains, b.lane, Math.round(b.riders / 50), Math.round(b.ride), b.tram?.ok]), s.stats.money > 3e6]);
     if (sig === this.linesSig) return;
     this.linesSig = sig;
     // round 7 step 4: bus lines below the metro: riders, buses, ride time in traffic, and the lane upgrade
-    const LANE = ['ordinary traffic', 'bus priority', 'busway (tram candidate)'];
+    const LANE = ['ordinary traffic', 'bus priority', 'busway (tram candidate)', 'tram on street track'];
     const buses = (s.buses ?? []).map((b) => {
-      const next = b.lane < 2 ? `<button class="mini" data-line="${b.id}" data-act="lane" data-lane="${b.lane + 1}" title="${b.lane === 0 ? 'Paint bus lanes and give buses the signals: $0.8M a km, the buses leave the queues' : 'Build a kerbed busway: $5M a km, faster, bigger buses; the corridor becomes a tram candidate'}">${b.lane === 0 ? 'priority' : 'busway'}</button>` : '';
-      return `<div class="line bus"><div class="lh"><i class="sw" style="background:${b.color}"></i><b>B${b.id - 100}</b><span class="muted">${b.stations.length} stops · ${b.lengthKm.toFixed(1)} km${b.inherited ? ' · inherited' : ''}</span><span class="spacer"></span><button class="mini" data-line="${b.id}" data-act="del" title="Withdraw the line">✕</button></div>
+      // round 7 step 6: a busway can become a tram if its stops can be joined over arterials / collectors
+      const tramOk = b.lane === 2 && !!b.tram?.ok;
+      const tramTitle = b.lane === 2 ? (b.tram?.ok ? `Lay tram track over the busway: $11M a km on ${b.tram.km.toFixed(1)} km of wide streets, trams ($3.5M each, 200 seats) replace the buses; land along the track gains value` : `No tram here: ${b.tram?.why ?? 'not checked yet'}`) : '';
+      const next = b.lane < 2 ? `<button class="mini" data-line="${b.id}" data-act="lane" data-lane="${b.lane + 1}" title="${b.lane === 0 ? 'Paint bus lanes and give buses the signals: $0.8M a km, the buses leave the queues' : 'Build a kerbed busway: $5M a km, faster, bigger buses; the corridor becomes a tram candidate'}">${b.lane === 0 ? 'priority' : 'busway'}</button>`
+        : b.lane === 2 ? `<button class="mini" data-line="${b.id}" data-act="lane" data-lane="3" title="${tramTitle}"${tramOk ? '' : ' disabled'}>tram</button>` : '';
+      return `<div class="line bus"><div class="lh"><i class="sw" style="background:${b.color}"></i><b>${b.lane === 3 ? 'T' : 'B'}${b.id - 100}</b><span class="muted">${b.stations.length} stops · ${b.lengthKm.toFixed(1)} km${b.inherited ? ' · inherited' : ''}</span><span class="spacer"></span><button class="mini" data-line="${b.id}" data-act="del" title="Withdraw the line">✕</button></div>
         <div class="lg"><span>Riders/day</span><b>${num(b.riders)}</b><span>Ride</span><b>${b.ride.toFixed(0)} min</b>
-          <span>Buses</span><b><button class="mini" data-line="${b.id}" data-act="sub">−</button> ${b.trains} <button class="mini" data-line="${b.id}" data-act="add">+</button></b><span>Headway</span><b>${b.headway.toFixed(0)} min</b>
+          <span>${b.lane === 3 ? 'Trams' : 'Buses'}</span><b><button class="mini" data-line="${b.id}" data-act="sub">−</button> ${b.trains} <button class="mini" data-line="${b.id}" data-act="add">+</button></b><span>Headway</span><b>${b.headway.toFixed(0)} min</b>
           <span>Lane</span><b class="small" style="grid-column: span 3">${LANE[b.lane]} ${next}</b></div></div>`;
     }).join('');
     if (!s.lines.length) {
@@ -322,6 +327,8 @@ export class Hud {
     e.spd.textContent = `${st.driveSpeed.toFixed(0)} km/h`;
     e.trips.textContent = num(st.transitTrips);
     e.bustrips.textContent = num(st.modeTrips.bus);
+    e.tramrow.style.display = (s.buses ?? []).some((b) => b.lane === 3) ? '' : 'none';
+    e.tramtrips.textContent = num(st.modeTrips.tram ?? 0);
     // round 7 step 5: the average door-to-door transit journey, its parts in the tooltip
     const j = st.journey;
     if (j && j.trips > 0) {

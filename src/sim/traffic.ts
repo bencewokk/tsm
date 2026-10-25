@@ -40,19 +40,30 @@ export class Traffic {
   stats = { vehKm: 0, meanVC: 0, meanSpeed: 0, overCap: 0 };
   constructor(private sim: Sim) {}
 
-  /** the street edges of the shortest path (by length) between the nodes nearest two points, and its km; null if none */
-  route(ax: number, ay: number, bx: number, by: number): { edges: number[]; km: number } | null {
+  /** the street edges of the shortest path (by length) between the nodes nearest two points, its km and its first node; null if none.
+   *  wide: arterials and collectors only (a tram needs a street wide enough for track), from the nearest node on such a street */
+  route(ax: number, ay: number, bx: number, by: number, wide = false): { edges: number[]; km: number; from: number } | null {
     const R = this.sim.roads;
-    const s = R.nearestNode(ax, ay, 4), t = R.nearestNode(bx, by, 4);
+    const ok = (e: number) => R.alive[e] && (!wide || R.ecls[e] !== RC.Local);
+    const near = (x: number, y: number) => {
+      if (!wide) return R.nearestNode(x, y, 4);
+      let n = -1, bd = 3;
+      for (let k = 0; k < R.nx.length; k++) {
+        const d = Math.hypot(R.nx[k] - x, R.ny[k] - y);
+        if (d < bd && R.adj[k].some(ok)) { bd = d; n = k; }
+      }
+      return n;
+    };
+    const s = near(ax, ay), t = near(bx, by);
     if (s < 0 || t < 0) return null;
-    if (s === t) return { edges: [], km: Math.hypot(bx - ax, by - ay) * CELL / 1000 };
+    if (s === t) return { edges: [], km: Math.hypot(bx - ax, by - ay) * CELL / 1000, from: s };
     const M = R.nx.length, d = new Float64Array(M).fill(Infinity), via = new Int32Array(M).fill(-1), h = new MinHeap();
     d[s] = 0; h.push(s, 0);
     while (h.size) {
       const n = h.pop();
       if (n === t) break;
       for (const e of R.adj[n]) {
-        if (!R.alive[e]) continue;
+        if (!ok(e)) continue;
         const o = R.other(e, n), v = d[n] + R.edgeLen(e);
         if (v < d[o]) { d[o] = v; via[o] = e; h.push(o, v + Math.hypot(R.nx[o] - R.nx[t], R.ny[o] - R.ny[t])); }
       }
@@ -61,7 +72,7 @@ export class Traffic {
     const edges: number[] = [];
     for (let n = t, g = 0; n !== s && g < 5000; g++) { const e = via[n]; if (e < 0) return null; edges.push(e); n = R.other(e, n); }
     edges.reverse();
-    return { edges, km: d[t] * CELL / 1000 };
+    return { edges, km: d[t] * CELL / 1000, from: s };
   }
 
   /** minutes to drive an edge at free flow */

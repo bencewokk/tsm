@@ -2,7 +2,7 @@ import { N, CELL, ZONE, NZ, ZONES, BT, Flag, Water, isAmenity, HOMES, COM_JOBS, 
 import { EnvelopeSystem, ENV, ENVS } from './envelopes';
 import { PressureSystem } from './pressure';
 import { Traffic, TRAFFIC } from './traffic';
-import { BUS_STOP_COST, BUS_COST, BUS_MONTH, STOP_UPKEEP, LANE_COST_KM } from './constants';
+import { BUS_STOP_COST, BUS_COST, BUS_MONTH, STOP_UPKEEP, LANE_COST_KM, TRAM_COST, TRAM_MONTH } from './constants';
 import { STATION_COST, TRAIN_COST, START_MONEY, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
 import { generateTerrain, idx, inb, DIR4, SAT, type Grid } from './terrain';
@@ -53,6 +53,7 @@ export const TUNE = {
   walkDecay: 7,          // minutes: how fast station value fades with walking time
   stationPrem: 0.3,      // walkable-station premium on land value
   premWalk: 9,           // minutes: premium reaches zero at this walk time
+  tramFront: 0.08,       // round 7 step 6: land value on the street frontage of tram track (permanent rail, a calmer street)
   serveWalk: 8,          // minutes: docks blocks count as served within this walk (~600 m)
   spawnLV: 0.24,
   upLV: [0, 0.6, 0.82],
@@ -271,7 +272,8 @@ export class Sim {
   private busRoadsVersion = -1;
   /** walk field index -> true for metro stations (bus stops follow them in the matrix) */
   walkMetro: boolean[] = [];
-  /** minutes for segment k of a bus line: street times in traffic (lane 0), at free flow with priority (1), a little faster on a busway (2) */
+  /** minutes for segment k of a bus line: street times in traffic (lane 0), at free flow with priority (1), a little faster on a busway (2),
+   *  a tram on its own track with signal priority (3): about the busway's speed; the tram wins on seats (200), the frontage and permanence */
   busSegTime(l: Line, k: number): number {
     const path = l.path?.[k];
     const T = this.traffic, R = this.roads;
@@ -283,27 +285,62 @@ export class Sim {
     for (const e of path) {
       const free = R.alive[e] ? T.free(e) : (R.edgeLen(e) * CELL / 1000) / 30 * 60;
       const cong = T.time.length > e && T.time[e] < Infinity && R.alive[e] ? T.time[e] : free;
-      t += l.lane === 2 ? free * 1.05 : l.lane === 1 ? free * 1.2 : Math.max(free * 1.2, cong * 1.25);
+      t += l.lane === 3 ? free : l.lane === 2 ? free * 1.05 : l.lane === 1 ? free * 1.2 : Math.max(free * 1.2, cong * 1.25);
     }
     return t;
   }
   /** street path of each segment of a bus line (re-found when the street graph changes) */
-  private busPath(ids: number[]): { path: number[][]; km: number } | null {
-    const m = this.metro, path: number[][] = [];
+  private busPath(ids: number[], wide = false): { path: number[][]; from: number[]; km: number } | null {
+    const m = this.metro, path: number[][] = [], from: number[] = [];
     let km = 0;
     for (let k = 1; k < ids.length; k++) {
       const a = m.station(ids[k - 1]), b = m.station(ids[k]);
       if (!a || !b) return null;
-      const r = this.traffic.route(a.x, a.y, b.x, b.y);
+      const r = this.traffic.route(a.x, a.y, b.x, b.y, wide);
       if (!r) return null;
-      path.push(r.edges); km += r.km;
+      path.push(r.edges); from.push(r.from); km += r.km;
     }
-    return { path, km };
+    return { path, from, km };
+  }
+  /** round 7 step 6: does a tram fit this busway? track needs arterials or collectors between every pair of stops, and the wide-street
+   *  route may be at most 1.5x the bus route (plus 300 m) */
+  tramFit(l: Line): { ok: boolean; km: number; why: string; path?: number[][]; from?: number[] } {
+    const w = this.busPath(l.stations, true);
+    if (!w) return { ok: false, km: 0, why: 'no route on arterials or collectors between its stops: track needs a wide street' };
+    if (w.km > l.lengthKm * 1.5 + 0.3) return { ok: false, km: w.km, why: `the wide streets take ${w.km.toFixed(1)} km against ${l.lengthKm.toFixed(1)} km by bus` };
+    return { ok: true, km: w.km, why: '', path: w.path, from: w.from };
+  }
+  /** cells along tram track (for the frontage value effect), rebuilt with the tram paths */
+  tramCell = new Float32Array(N * N);
+  private rasterTrams() {
+    const R = this.roads, tc = this.tramCell;
+    tc.fill(0);
+    for (const l of this.metro.buses) {
+      if (l.lane !== 3) continue;
+      for (const seg of l.path ?? []) for (const e of seg) {
+        const ax = R.nx[R.ea[e]], ay = R.ny[R.ea[e]], bx = R.nx[R.eb[e]], by = R.ny[R.eb[e]];
+        const L = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(L * 2));
+        for (let k = 0; k <= n; k++) {
+          const x = ax + (bx - ax) * k / n, y = ay + (by - ay) * k / n;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const cx = Math.floor(x) + dx, cy = Math.floor(y) + dy;
+            if (cx < 0 || cy < 0 || cx >= N || cy >= N) continue;
+            const f = Math.max(0, 1 - Math.hypot(cx + 0.5 - x, cy + 0.5 - y) / 1.6);
+            if (f > tc[cy * N + cx]) tc[cy * N + cx] = f;
+          }
+        }
+      }
+    }
   }
   private refreshBusPaths() {
     if (this.roads.version === this.busRoadsVersion) return;
     this.busRoadsVersion = this.roads.version;
-    for (const l of this.metro.buses) { const p = this.busPath(l.stations); if (p) { l.path = p.path; l.lengthKm = p.km; } }
+    for (const l of this.metro.buses) {
+      const p = this.busPath(l.stations, l.lane === 3);
+      if (p) { l.path = p.path; l.pathFrom = p.from; l.lengthKm = p.km; }
+      if (l.lane === 2) { const f = this.tramFit(l); l.tramCheck = { ok: f.ok, km: f.km, why: f.why }; }
+    }
+    this.rasterTrams();
   }
   /**
    * The bus network the player inherits: one slow route from the old town to each of up to three other settlements along the streets,
@@ -427,7 +464,7 @@ export class Sim {
         const l = m.line(cmd.line);
         if (!l) return;
         const n = Math.max(1, Math.min(40, Math.round(cmd.trains)));
-        const d = n - l.trains, unit = l.mode === 'bus' ? BUS_COST : TRAIN_COST;
+        const d = n - l.trains, unit = l.mode === 'bus' ? (l.lane === 3 ? TRAM_COST : BUS_COST) : TRAIN_COST;
         if (d > 0 && this.money < d * unit) return;
         this.money -= d > 0 ? d * unit : d * unit * 0.4;
         l.trains = n;
@@ -439,11 +476,27 @@ export class Sim {
       case 'setLane': {
         // a bus line's street: ordinary traffic -> bus priority (painted lanes, signals) -> busway; the busway marks a tram candidate
         const l = m.buses.find((q) => q.id === cmd.line);
-        if (!l || cmd.lane <= (l.lane ?? 0) || cmd.lane > 2) return;
+        if (!l || cmd.lane <= (l.lane ?? 0) || cmd.lane > 3) return;
+        if (cmd.lane === 3) {
+          // round 7 step 6: a tram is the upgrade of a busway: street track on wide streets, trams in place of the buses
+          if (l.lane !== 2) { this.say('A tram needs a busway first'); return; }
+          const f = this.tramFit(l);
+          if (!f.ok) { this.say(`B${l.id - 100} cannot take a tram: ${f.why}`); return; }
+          const trams = Math.max(2, Math.ceil(l.trains * 0.75));
+          const cost = (LANE_COST_KM[3] - LANE_COST_KM[2]) * f.km + trams * TRAM_COST;
+          if (this.money < cost) { this.say(`The tram costs ${(cost / 1e6).toFixed(1)}M: not enough money`); return; }
+          this.money -= cost; this.buildSpend += cost;
+          l.lane = 3; l.path = f.path; l.pathFrom = f.from; l.lengthKm = f.km; l.trains = trams; l.tramCheck = undefined;
+          this.rasterTrams();
+          this.say(`T${l.id - 100}: tram track laid on ${f.km.toFixed(1)} km, ${trams} trams (${(cost / 1e6).toFixed(1)}M)`);
+          this.refreshTransit();
+          break;
+        }
         const cost = (LANE_COST_KM[cmd.lane] - LANE_COST_KM[l.lane ?? 0]) * l.lengthKm;
         if (this.money < cost) { this.say(`The upgrade costs ${(cost / 1e6).toFixed(1)}M: not enough money`); return; }
         this.money -= cost; this.buildSpend += cost;
         l.lane = cmd.lane;
+        if (l.lane === 2) { const f = this.tramFit(l); l.tramCheck = { ok: f.ok, km: f.km, why: f.why }; }
         this.say(`B${l.id - 100}: ${cmd.lane === 1 ? 'bus priority on its streets' : 'a busway: its own kerbed lane (a tram candidate)'} (${(cost / 1e6).toFixed(1)}M)`);
         this.refreshTransit();
         break;
@@ -1107,9 +1160,26 @@ export class Sim {
       for (let b = 0; b < ZONES; b++) if (this.zJobs[b] > 0 && eg[s * ZONES + b] < Infinity) a += this.zJobs[b] * Math.exp(-eg[s * ZONES + b] / TUNE.tau);
       this.stAccess[s] = a / J;
     }
+    const tramStop = used.map((st) => m.buses.some((l) => l.lane === 3 && l.stations.includes(st.id)));
     for (let s = 0; s < S; s++) {
       const A = this.stAccess[s], f = this.walk[s];
       if (!this.walkMetro[s]) {
+        if (tramStop[s]) {
+          // round 7 step 6: a tram stop is permanent rail on the street: most of a station's value, half its premium and of its
+          // access for the density field (mid-rise along the line, not towers)
+          const premT = 0.5 * TUNE.stationPrem * Math.min(1, A / 0.1);
+          for (let i = 0; i < N * N; i++) {
+            const wt = f[i];
+            if (!(wt < 8)) continue;
+            const val = 0.75 * A * Math.exp(-wt / TUNE.walkDecay);
+            if (val > this.transitCell[i]) this.transitCell[i] = val;
+            const p = premT * Math.max(0, 1 - wt / 7);
+            if (p > this.stationPrem[i]) this.stationPrem[i] = p;
+            const av = 0.5 * Math.min(1, A / FIELD.accRef) * clamp((FIELD.walkZero - wt) / (FIELD.walkZero - FIELD.walkFull), 0, 1);
+            if (av > this.accCell[i]) this.accCell[i] = av;
+          }
+          continue;
+        }
         // a bus stop raises value a little (no station premium, no tower access: a bus route is not a metro)
         for (let i = 0; i < N * N; i++) { const wt = f[i]; if (wt < 8) { const val = 0.35 * A * Math.exp(-wt / TUNE.walkDecay); if (val > this.transitCell[i]) this.transitCell[i] = val; } }
         continue;
@@ -1177,7 +1247,7 @@ export class Sim {
       const pk = Math.min(0.15, park[i] * TUNE.wPark);
       const nz = Math.min(0.4, ind[i] * TUNE.wInd);
       const dc = Math.hypot(x - cx, y - cy) / (N * 0.5);
-      let v = TUNE.base + TUNE.wCar * car + TUNE.wTransit * this.transitCell[i] + this.stationPrem[i] + water + pk - nz - TUNE.wCentre * dc;
+      let v = TUNE.base + TUNE.wCar * car + TUNE.wTransit * this.transitCell[i] + this.stationPrem[i] + water + pk - nz - TUNE.wCentre * dc + TUNE.tramFront * this.tramCell[i];
       if (g.flags[i] & Flag.Steep) v -= 0.2;
       if (ENVS.on && this.envs.env[i] === ENV.Protected) v += 0.06;   // a protected old town is worth more (and visited more, see computeRiders)
       if (g.flags[i] & Flag.Flood) v -= 0.25;
@@ -1724,7 +1794,7 @@ export class Sim {
   // ---------------------------------------------------------------- riders
   /** daily trips by mode (both directions), from the last computeRiders */
   /** transit = trips that use the metro (alone or with a bus); bus = trips by bus only (round 7 step 4b) */
-  modeTrips = { car: 0, transit: 0, walk: 0, bike: 0, bus: 0 };
+  modeTrips = { car: 0, transit: 0, walk: 0, bike: 0, bus: 0, tram: 0 };
   busTrips = 0;
   /** round 7 step 5: the average transit journey (minutes per trip: walk both ends, wait, in-vehicle, transfers, crowding), changes
    *  per trip, and the share of transit trips that combine a bus and the metro (feeder trips; they count as metro trips) */
@@ -1748,7 +1818,7 @@ export class Sim {
     const zd = (a: number, b: number) => a === b ? 0.3 : Math.hypot((a % NZ) - (b % NZ), ((a / NZ) | 0) - ((b / NZ) | 0)) * ZONE * CELL / 1000;
     const gv = new Float64Array(ZONES);
     const desire: { a: number; b: number; trips: number }[] = [];
-    let total = 0, transit = 0, car = 0, walk = 0, bike = 0, bus = 0;
+    let total = 0, transit = 0, car = 0, walk = 0, bike = 0, bus = 0, tram = 0;
     const JW = m.jWait, JR = m.jRide, JX = m.jXfer, JC = m.jCrowd, JN = m.jChanges, JM = m.jModes;
     let jWalk = 0, jWait = 0, jRide = 0, jXfer = 0, jCrowd = 0, jCh = 0, jFeed = 0, jF = 0;
     const beta = TRIP.beta, ww = TRIP.walkWeight, T_ = m.T;
@@ -1766,7 +1836,7 @@ export class Sim {
       // utilities relative to the car (exp(0) = 1); long walks underflow to 0 smoothly
       const uw = Math.exp(-beta * (walkT - drive)), ub = Math.exp(-beta * (bikeT - drive));
       const go = a !== b ? this.zAccO[a] : null, gd = this.zAccD[b];
-      let fT = 0, fB = 0, cS = 0, wS = 0, bS = 0, cov = 0;
+      let fT = 0, fB = 0, fR = 0, cS = 0, wS = 0, bS = 0, cov = 0;
       if (go && go.length && gd.length) for (const o of go) for (const d of gd) {
         // the better access pair: the metro station or the bus stop at each end (s2 is the group's bus stop next to its metro station)
         let bs = -1, bt2 = -1, bc = Infinity, bw = 0;
@@ -1788,8 +1858,8 @@ export class Sim {
         const sum = 1 + ut + uw + ub, F = T * f * ut / sum;
         // bus-only when the best journey uses no metro line (a bus feeding the metro counts as a metro trip)
         const jk = bs * S + bt2, md = JM[jk];
-        cov += f; fT += F; if (md === 2) fB += F; cS += T * f / sum; wS += T * f * uw / sum; bS += T * f * ub / sum;
-        jF += F; jWalk += F * bw; jWait += F * JW[jk]; jRide += F * JR[jk]; jXfer += F * JX[jk]; jCrowd += F * JC[jk]; jCh += F * JN[jk]; if (md === 3) jFeed += F;
+        cov += f; fT += F; if (md === 2) fB += F; else if (!(md & 1)) fR += F; cS += T * f / sum; wS += T * f * uw / sum; bS += T * f * ub / sum;
+        jF += F; jWalk += F * bw; jWait += F * JW[jk]; jRide += F * JR[jk]; jXfer += F * JX[jk]; jCrowd += F * JC[jk]; jCh += F * JN[jk]; if ((md & 1) && md > 1) jFeed += F;
         if (F > 0.002) { stOD[bs * S + bt2] += F; stOD[bt2 * S + bs] += F; stEntries[bs] += F; stEntries[bt2] += F; }
       }
       // the part of the trips with no station within walking distance at one end chooses between car, walking and cycling
@@ -1798,7 +1868,7 @@ export class Sim {
       total += 2 * T; zTrips[a] += 2 * T; zCar[a] += 2 * C;
       car += 2 * C; walk += 2 * (wS + rest * uw / sum3); bike += 2 * (bS + rest * ub / sum3);
       if (C > 15 && dk > 1.2) desire.push({ a, b, trips: 2 * C });
-      transit += 2 * (fT - fB); bus += 2 * fB; zTransit[a] += 2 * fT;
+      transit += 2 * (fT - fB - fR); bus += 2 * fB; tram += 2 * fR; zTransit[a] += 2 * fT;
       if (a !== b) this.demand.add(a, b, 2 * (wS + rest * uw / sum3), 2 * C, dk, cov);
     };
     for (let a = 0; a < ZONES; a++) {
@@ -1849,7 +1919,7 @@ export class Sim {
     this.rating = rW > 0 ? rSum / rW : 0;
     this.transitTrips = transit;
     this.totalTrips = total;
-    this.modeTrips = { car, transit, walk, bike, bus };
+    this.modeTrips = { car, transit, walk, bike, bus, tram };
     this.busTrips = bus;
     const jd = Math.max(1e-9, jF);
     this.journey = { walk: jWalk / jd, wait: jWait / jd, ride: jRide / jd, xfer: jXfer / jd, crowd: jCrowd / jd, changes: jCh / jd, feeder: jFeed / jd, trips: 2 * jF };
@@ -1869,13 +1939,13 @@ export class Sim {
   protected finance() {
     const m = this.metro;
     // fares, plus the value captured from approved station area plans (envelopes.ts)
-    this.fares = (this.transitTrips + this.busTrips) * FARE * 30;
+    this.fares = (this.transitTrips + this.busTrips + this.modeTrips.tram) * FARE * 30;
     this.income = this.fares + this.envs.capture;
     let trains = 0, km = 0;
     for (const l of m.lines) { trains += l.trains; km += l.lengthKm; }
-    let buses = 0;
-    for (const l of m.buses) buses += l.trains;
-    this.expenses = trains * TRAIN_MONTH + m.stations.length * STATION_UPKEEP + km * TRACK_UPKEEP_KM + buses * BUS_MONTH + m.stops.length * STOP_UPKEEP;
+    let buses = 0, trams = 0;
+    for (const l of m.buses) if (l.lane === 3) trams += l.trains; else buses += l.trains;
+    this.expenses = trains * TRAIN_MONTH + m.stations.length * STATION_UPKEEP + km * TRACK_UPKEEP_KM + buses * BUS_MONTH + trams * TRAM_MONTH + m.stops.length * STOP_UPKEEP;
     this.money += this.income - this.expenses;
   }
 
@@ -1885,7 +1955,7 @@ export class Sim {
   }
 
   /** the metro's share of motorised trips (metro vs car): what "won from the car" means */
-  motorShare() { const d = this.modeTrips.transit + this.modeTrips.car + this.modeTrips.bus; return d > 0 ? this.modeTrips.transit / d : 0; }
+  motorShare() { const d = this.modeTrips.transit + this.modeTrips.car + this.modeTrips.bus + this.modeTrips.tram; return d > 0 ? this.modeTrips.transit / d : 0; }
 
   stats(): Stats {
     let b = 0;
@@ -1945,10 +2015,11 @@ export class Sim {
         l.stations.forEach((id, k) => {
           const st = this.metro.station(id);
           if (k === 0 && st) pts.push(st.x, st.y);
-          let n = st ? R.nearestNode(st.x, st.y, 4) : -1;
+          let n = l.pathFrom?.[k] ?? (st ? R.nearestNode(st.x, st.y, 4) : -1);
+          if (l.pathFrom?.[k] !== undefined && n >= 0) pts.push(R.nx[n], R.ny[n]);
           for (const e of l.path?.[k] ?? []) { if (n < 0) break; n = R.other(e, n); pts.push(R.nx[n], R.ny[n]); }
         });
-        return { id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders, capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, lane: l.lane ?? 0, inherited: !!l.inherited, ride: l.segTime.reduce((a, b) => a + b, 0), pts };
+        return { id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders, capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, lane: l.lane ?? 0, inherited: !!l.inherited, ride: l.segTime.reduce((a, b) => a + b, 0), pts, tram: l.tramCheck ? { ...l.tramCheck } : undefined };
       }),
       lines: this.metro.lines.map((l) => ({ id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders,
         capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice(), by: l.by.slice(), elev: l.elev.slice() })),

@@ -1,4 +1,4 @@
-import { N, CELL, METRO_SPEED, TRAIN_CAP, LINE_COLORS } from './constants';
+import { N, CELL, METRO_SPEED, TRAIN_CAP, LINE_COLORS, TRAM_CAP } from './constants';
 import { quoteLine, type Terr, type LineQuote } from './relief';
 
 /**
@@ -47,6 +47,10 @@ export interface Line {
   lane?: number;
   /** bus lines: the street edges of each segment, and the street km */
   path?: number[][];
+  /** first street node of each segment's path (a tram's path starts at the nearest node on a wide street) */
+  pathFrom?: number[];
+  /** round 7 step 6, on a busway: whether a tram fits (a route on arterials / collectors no more than 1.5x the bus route) */
+  tramCheck?: { ok: boolean; km: number; why: string };
   inherited?: boolean;
 }
 
@@ -83,7 +87,7 @@ export class Metro {
   dist: Float64Array[] = [];           // per source: cost to each node
   bestNode: Int32Array[] = [];         // per source: best arrival node at each target station index
   /** per station pair (S x S), the best journey's parts in minutes: wait, in-vehicle, transfer penalties (incl. the walk between
-   *  stops), crowding (the extra from packed lines); the number of changes; and the modes used (bit 1 metro, bit 2 bus) */
+   *  stops), crowding (the extra from packed lines); the number of changes; and the modes used (bit 1 metro, bit 2 bus, bit 4 tram) */
   jWait = new Float32Array(0); jRide = new Float32Array(0); jXfer = new Float32Array(0); jCrowd = new Float32Array(0);
   jChanges = new Uint8Array(0); jModes = new Uint8Array(0);
 
@@ -170,7 +174,7 @@ export class Metro {
       for (let k = 1; k < l.stations.length; k++) { const t = (this.busTime ? this.busTime(l, k - 1) : 3) + 0.5; l.segTime.push(t); ride += t; }
       const rt = ride * 2 + 6;
       l.headway = Math.max(3, rt / Math.max(1, l.trains));
-      l.capacity = (60 / l.headway) * (l.lane === 2 ? 110 : 70);
+      l.capacity = (60 / l.headway) * (l.lane === 3 ? TRAM_CAP : l.lane === 2 ? 110 : 70);
       if (l.segLoad.length !== l.segTime.length) l.segLoad = l.segTime.map(() => 0);
       return;
     }
@@ -254,7 +258,7 @@ export class Metro {
             jr += tt; jc += tt * (cm - 1);
           } else {
             // boarding li (the first one, or a change from the line at p)
-            jw += wait[li]; jc += wait[li] * (cm - 1); md |= L.mode === 'bus' ? 2 : 1;
+            jw += wait[li]; jc += wait[li] * (cm - 1); md |= L.mode !== 'bus' ? 1 : L.lane === 3 ? 4 : 2;
             if (p >= 0) {
               ch++;
               const ps = this.nodes[p].st;

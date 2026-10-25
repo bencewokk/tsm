@@ -13,12 +13,14 @@ export class BusView {
   private stopsMesh: THREE.InstancedMesh | null = null;
   private fleet: THREE.InstancedMesh;
   private sig = '';
-  private paths: { pts: THREE.Vector3[]; len: number[]; total: number; n: number; ride: number; color: THREE.Color }[] = [];
+  private paths: { pts: THREE.Vector3[]; len: number[]; total: number; n: number; ride: number; color: THREE.Color; tram: boolean }[] = [];
   private m4 = new THREE.Matrix4();
   private q = new THREE.Quaternion();
   private up = new THREE.Vector3(0, 1, 0);
   private dir = new THREE.Vector3();
   private v = new THREE.Vector3();
+  private one = new THREE.Vector3(1, 1, 1);
+  private tramScale = new THREE.Vector3(2.3, 1.05, 1.05);
 
   constructor(private ground: (x: number, z: number) => number) {
     this.group.add(this.routes);
@@ -44,7 +46,14 @@ export class BusView {
       for (let k = 1; k < pts.length; k++) len.push(len[k - 1] + pts[k].distanceTo(pts[k - 1]));
       const col = new THREE.Color(b.color);
       // the bus body is a lighter tint of the route colour so it stands out on its own ribbon
-      this.paths.push({ pts, len, total: len[len.length - 1], n: b.trains, ride: Math.max(1, b.ride), color: col.clone().lerp(new THREE.Color(0xffffff), 0.45) });
+      this.paths.push({ pts, len, total: len[len.length - 1], n: b.trains, ride: Math.max(1, b.ride), color: col.clone().lerp(new THREE.Color(0xffffff), 0.45), tram: b.lane === 3 });
+      // round 7 step 6: a tram line is a dark track bed with two light rails, edged in the line colour
+      if (b.lane === 3) {
+        this.routes.add(this.strip(pts, 5.6, 0, 0x4f4a45, 1));                                          // track bed (setts)
+        for (const off of [-0.75, 0.75]) this.routes.add(this.strip(pts, 0.55, off, 0xd8dbe0, 1));     // the rails
+        for (const off of [-2.7, 2.7]) this.routes.add(this.strip(pts, 0.6, off, col.getHex(), 1));    // kerb lines in the line colour
+        continue;
+      }
       // the ribbon: flat quads along the polyline
       const w = b.lane === 2 ? 5.5 : 3.2;
       const pos: number[] = [];
@@ -70,6 +79,23 @@ export class BusView {
     this.group.add(this.stopsMesh);
   }
 
+  /** a flat strip of width w along the polyline, offset sideways by off (metres) */
+  private strip(pts: THREE.Vector3[], w: number, off: number, color: number, opacity: number) {
+    const pos: number[] = [];
+    for (let k = 1; k < pts.length; k++) {
+      const a = pts[k - 1], c = pts[k];
+      const dx = c.x - a.x, dz = c.z - a.z, L = Math.hypot(dx, dz) || 1, ux = -dz / L, uz = dx / L;
+      const l0 = off - w / 2, l1 = off + w / 2;
+      pos.push(a.x + ux * l1, a.y + 0.05, a.z + uz * l1, c.x + ux * l1, c.y + 0.05, c.z + uz * l1, c.x + ux * l0, c.y + 0.05, c.z + uz * l0,
+        a.x + ux * l1, a.y + 0.05, a.z + uz * l1, c.x + ux * l0, c.y + 0.05, c.z + uz * l0, a.x + ux * l0, a.y + 0.05, a.z + uz * l0);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+    mesh.renderOrder = 4;
+    return mesh;
+  }
+
   /** move the buses: each runs out and back along its route, evenly spaced; hidden when the camera is far */
   animate(t: number, camDist: number) {
     const far = camDist > 3500;
@@ -92,7 +118,8 @@ export class BusView {
         // drive on the right: offset sideways by direction
         const side = back ? -1.6 : 1.6, L = Math.hypot(this.dir.x, this.dir.z) || 1;
         this.v.x += (-this.dir.z / L) * side * (back ? -1 : 1); this.v.z += (this.dir.x / L) * side * (back ? -1 : 1);
-        this.m4.compose(this.v, this.q, new THREE.Vector3(1, 1, 1));
+        // a tram: a long two-section car (about 30 m)
+        this.m4.compose(this.v, this.q, p.tram ? this.tramScale : this.one);
         this.fleet.setMatrixAt(i, this.m4);
         this.fleet.setColorAt(i, p.color);
       }

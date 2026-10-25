@@ -50,7 +50,11 @@ export const BUS_STOP_COST = 0.3e6;
 export const BUS_COST = 0.45e6;
 export const BUS_MONTH = 0.03e6;
 export const STOP_UPKEEP = 0.003e6;
-export const LANE_COST_KM = [0, 0.8e6, 5e6];   // ordinary, bus priority (paint, signals), busway (kerbed, own lane)
+export const LANE_COST_KM = [0, 0.8e6, 5e6, 16e6];   // ordinary, bus priority (paint, signals), busway (kerbed, own lane), tram (street track over the busway)
+/** round 7 step 6: a tram (replaces the buses of an upgraded busway; about three in four buses' worth), its running cost and seats */
+export const TRAM_COST = 3.5e6;
+export const TRAM_MONTH = 0.07e6;
+export const TRAM_CAP = 200;
 export const FARE = 4;                 // flat fare per trip
 export const TRAIN_CAP = 300;          // passengers per (short, automated) train
 export const METRO_SPEED = 36;         // km/h including dwell

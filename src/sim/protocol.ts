@@ -18,7 +18,9 @@ export interface InitMsg {
 
 export interface StationInfo { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; depth: number; opened: number; reach?: number; walkHomes?: number; ownHomes?: number; bus?: boolean }
 /** round 7 step 4b: a bus line for the HUD and the renderer (pts: the street polyline, cell units) */
-export interface BusInfo { id: number; color: string; stations: number[]; trains: number; headway: number; riders: number; capacity: number; peakLoad: number; rating: number; lengthKm: number; lane: number; inherited: boolean; ride: number; pts: number[] }
+export interface BusInfo { id: number; color: string; stations: number[]; trains: number; headway: number; riders: number; capacity: number; peakLoad: number; rating: number; lengthKm: number; lane: number; inherited: boolean; ride: number; pts: number[];
+  /** round 7 step 6, on a busway: whether a tram fits (route km on wide streets, or why not) */
+  tram?: { ok: boolean; km: number; why: string } }
 export interface LineInfo {
   id: number;
   color: string;
@@ -52,7 +54,7 @@ export interface Stats {
   transitShare: number; // 0..1, the metro's share of motorised trips (metro vs car)
   transitTrips: number; // metro trips per day (journeys, both directions; a change of line is one trip)
   totalTrips: number;   // trips per day by all modes
-  modeTrips: { car: number; transit: number; walk: number; bike: number; bus: number };
+  modeTrips: { car: number; transit: number; walk: number; bike: number; bus: number; tram: number };
   /** round 7 step 5: the average transit journey in minutes (walk both ends, wait, in-vehicle, transfer penalties incl. the walk
    *  between stops, crowding), changes per trip, the share of transit trips that combine bus and metro, and transit trips a day */
   journey?: { walk: number; wait: number; ride: number; xfer: number; crowd: number; changes: number; feeder: number; trips: number };
