@@ -21,6 +21,8 @@ export const TRAFFIC = {
   /** share of a day's trips in the peak hour, cars per car trip (occupancy 1.3) */
   peak: 0.11, perCar: 1 / 1.3,
   rounds: 3,
+  /** later months warm-start from last month's volumes: one round a month, relaxed by this much (the cold start runs `rounds`) */
+  relax: 0.5,
   /** km/h from a zone's activity centre to its street node (local access) */
   accessKmh: 18,
 };
@@ -86,9 +88,15 @@ export class Traffic {
     }
   }
 
+  private warm = false;
   run() {
     const sim = this.sim, R = sim.roads, E = R.ea.length, M = R.nx.length;
-    if (this.vol.length !== E) { this.vol = new Float32Array(E); this.time = new Float32Array(E); this.vc = new Float32Array(E); }
+    if (this.vol.length !== E) {
+      // the street graph grew: keep the volumes of the streets that were there (new edges start empty)
+      const ov = this.vol, ot = this.time;
+      this.vol = new Float32Array(E); this.time = new Float32Array(E); this.vc = new Float32Array(E);
+      this.vol.set(ov.subarray(0, Math.min(ov.length, E))); this.time.set(ot.subarray(0, Math.min(ot.length, E)));
+    }
     // zone access nodes: nearest street node to the zone's activity centre
     const ax = new Float64Array(ZONES), ay = new Float64Array(ZONES), aw = new Float64Array(ZONES);
     for (let i = 0; i < N * N; i++) {
@@ -131,13 +139,33 @@ export class Traffic {
     }
     const byOrigin = new Map<number, { b: number; v: number }[]>();
     for (const o of od) { (byOrigin.get(o.a) ?? byOrigin.set(o.a, []).get(o.a)!).push({ b: o.b, v: o.v }); }
-    // method of successive averages over a few rounds
-    for (let e = 0; e < E; e++) { this.vol[e] = 0; this.time[e] = R.alive[e] ? this.freeTime(e) : Infinity; }
+    // cold start (the first month): the method of successive averages over a few rounds from free flow. Later months warm-start from
+    // last month's volumes and run one round (the demand itself is last month's), which is also the pass the zone-to-zone times come from
+    const cold = !this.warm;
+    for (let e = 0; e < E; e++) {
+      if (!R.alive[e]) { this.vol[e] = 0; this.time[e] = Infinity; continue; }
+      if (cold) this.vol[e] = 0;
+      const c = R.ecls[e] as number;
+      this.time[e] = this.freeTime(e) * Math.min(5, 1 + TRAFFIC.bprA * Math.pow(this.vol[e] / TRAFFIC.cap[c], TRAFFIC.bprB));
+    }
+    this.warm = true;
     const dist = new Float64Array(M), via = new Int32Array(M), load = new Float32Array(E);
-    for (let r = 0; r < TRAFFIC.rounds; r++) {
+    this.dt.fill(Infinity);
+    const rounds = cold ? TRAFFIC.rounds : 1;
+    for (let r = 0; r < rounds; r++) {
       load.fill(0);
-      for (const [a, list] of byOrigin) {
+      const last = r === rounds - 1;
+      for (let a = 0; a < ZONES; a++) {
+        const list = byOrigin.get(a);
+        if (this.node[a] < 0 || (!list && !last)) continue;
         this.tree(this.node[a], dist, via);
+        // zone-to-zone times from the last round's trees (street times as they stood at the start of the round)
+        if (last) for (let b = 0; b < ZONES; b++) {
+          if (this.node[b] < 0) continue;
+          const d = a === b ? 0 : dist[this.node[b]];
+          if (d < Infinity) this.dt[a * ZONES + b] = d + this.access[a] + this.access[b];
+        }
+        if (!list) continue;
         for (const { b, v } of list) {
           let n = this.node[b], guard = 0;
           if (!(dist[n] < Infinity)) continue;
@@ -145,7 +173,7 @@ export class Traffic {
           while (n !== this.node[a] && guard++ < 2000) { const e = via[n]; if (e < 0) break; load[e] += 2 * v; n = R.other(e, n); }
         }
       }
-      const k = 1 / (r + 1);
+      const k = cold ? 1 / (r + 1) : TRAFFIC.relax;
       for (let e = 0; e < E; e++) {
         if (!R.alive[e]) continue;
         this.vol[e] += (load[e] - this.vol[e]) * k;
@@ -153,17 +181,6 @@ export class Traffic {
         this.vc[e] = vc;
         // a jammed street crawls but moves: at most five times its free-flow time (queues spill to other routes instead)
         this.time[e] = this.freeTime(e) * Math.min(5, 1 + TRAFFIC.bprA * Math.pow(vc, TRAFFIC.bprB));
-      }
-    }
-    // zone-to-zone times on the final street times
-    this.dt.fill(Infinity);
-    for (let a = 0; a < ZONES; a++) {
-      if (this.node[a] < 0) continue;
-      this.tree(this.node[a], dist, via);
-      for (let b = 0; b < ZONES; b++) {
-        if (this.node[b] < 0) continue;
-        const d = a === b ? 0 : dist[this.node[b]];
-        if (d < Infinity) this.dt[a * ZONES + b] = d + this.access[a] + this.access[b];
       }
     }
     // headline numbers and per-zone congestion (edge midpoints' zones, length-weighted)
