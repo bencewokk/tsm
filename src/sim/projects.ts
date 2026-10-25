@@ -13,6 +13,7 @@
  * Text comes from templates filled with real place names and numbers, with words chosen by the CityProfile (site kind, history layers).
  * Pacing: a global budget of active projects, a minimum gap between new ones, a queue of decisions shown one at a time.
  */
+import { ENV_DEF, ENVS } from './envelopes';
 import { BT, Flag, N, PERSONS_PER_HOME } from './constants';
 import { hash01 } from './profiles';
 import { T, TERR } from './territory';
@@ -228,7 +229,7 @@ export class ProjectSystem {
 
   constructor(private sim: Sim) {}
 
-  private areaOf(x: number, y: number): number {
+  areaOf(x: number, y: number): number {
     const vs = this.sim.g.villages;
     let bi = 0, bd = Infinity;
     for (let i = 0; i < vs.length; i++) { const d = Math.hypot(vs[i].x - x, vs[i].y - y); if (d < bd) { bd = d; bi = i; } }
@@ -509,6 +510,13 @@ export class ProjectSystem {
   }
 
   /** deals get worse where trust is low: the city receives less and pays more */
+  /** the money a choice of a proposed instance moves (to the city: positive), for the affordability check */
+  choiceMoney(inst: number, k: number): number {
+    const p = this.list.find((q) => q.id === inst);
+    const c = p ? this.typeOf(p).choices[k] : undefined;
+    return p && c && !c.decline ? this.dealMoney(c, this.trust[p.area] ?? 1) : 0;
+  }
+
   private dealMoney(c: ProjectChoice, tr: number): number {
     const m = c.money ?? 0;
     return m >= 0 ? m * clamp(tr, 0.4, 1.6) : m * clamp(2 - tr, 0.5, 1.8);
@@ -523,7 +531,10 @@ export class ProjectSystem {
       const p = this.list.find((q) => q.id === this.queue[0]);
       if (!p || p.status !== 'proposed') { this.queue.shift(); continue; }
       const t = this.typeOf(p);
-      return { id: 'proj_' + p.id, title: t.title, text: t.text, choices: t.choices.map((c) => ({ label: c.label, detail: c.detail })) };
+      // round 7: say what the zoning allows here; a taller scheme is cut to fit the envelope (envelopes.ts)
+      const cell = Math.floor(p.y) * N + Math.floor(p.x), env = ENV_DEF[this.sim.envs.env[cell]];
+      const note = ENVS.on ? `<br><br><b>Zoning:</b> ${env.name.toLowerCase()} (${env.floors})${env.assembly ? '' : ': no towers here, a taller scheme is built as mid-rise'}.` : '';
+      return { id: 'proj_' + p.id, title: t.title, text: t.text + note, choices: t.choices.map((c) => ({ label: c.label, detail: c.detail })) };
     }
     return null;
   }
@@ -552,9 +563,11 @@ export class ProjectSystem {
     if (!plan || plan.members.length < 2) { this.end(p, 'aborted', 'site no longer available'); return; }
     plan.plaza = this.plazaFor(plan, c.plaza ?? 0);
     // density discipline: a project never builds above what the density-and-height field allows at the site (no towers without transit)
-    const hm = sim.field.hmaxAt(p.x, p.y);
+    // ...and never above the development envelope (round 7): no tower where zoning does not allow plot assembly and the height
+    const cell = Math.floor(p.y) * N + Math.floor(p.x), ec = sim.envs.capAt(cell);
+    const hm = Math.min(sim.field.hmaxAt(p.x, p.y), ec > 0 ? ec : Infinity);
     const b = { ...c.build! };
-    if (b.level === 3 && hm < 36) { b.level = 2; b.hgt = 0; }
+    if (b.level === 3 && (hm < 36 || !sim.envs.assemblyAt(cell))) { b.level = 2; b.hgt = 0; }
     else if (b.level === 3) b.hgt = Math.round(Math.min(b.hgt, hm));
     const a = sim.asm.start(plan, { type: b.type === 'res' ? BT.Res : BT.Com, level: b.level, hgt: b.hgt, months: b.months, label: `${t.name} ${p.place}`, form: 'project' });
     // the developer captures regional demand, as the docks do

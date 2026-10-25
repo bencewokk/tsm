@@ -135,6 +135,8 @@ export class HazardSystem {
     };
   }
 
+  defenceCost(id: string) { return HAZARDS.find((x) => x.id === id)?.defence.cost ?? 0; }
+
   choose(id: string, k: number) {
     const h = HAZARDS.find((x) => x.id === id);
     this.queue = this.queue.filter((q) => q !== id);

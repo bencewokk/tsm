@@ -1,3 +1,4 @@
+import { ENV_DEF } from '../sim/envelopes';
 import * as THREE from 'three';
 import { N, CELL, Flag } from '../sim/constants';
 import { VS } from './common';
@@ -27,6 +28,9 @@ export interface TerrainView {
   /** land-use territory overlay (Z) */
   zones: THREE.Mesh;
   setZones(terr: Uint8Array, water: Uint8Array): void;
+  /** development envelopes (round 7), painted in plan mode like a zoning map */
+  envelopes: THREE.Mesh;
+  setEnvelopes(env: Uint8Array, water: Uint8Array): void;
 }
 
 export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uint8Array): TerrainView {
@@ -272,6 +276,17 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
   zones.renderOrder = 2;
   zones.position.y = 1.6;
 
+  // development envelopes: a zoning map wash (plan mode)
+  const edata = new Uint8Array(N * N * 4);
+  const envTex = new THREE.DataTexture(edata, N, N, THREE.RGBAFormat);
+  envTex.magFilter = THREE.LinearFilter; envTex.minFilter = THREE.LinearFilter; envTex.needsUpdate = true;
+  const envMat = new THREE.MeshBasicMaterial({ map: envTex, transparent: true, opacity: 0.8, toneMapped: false, depthWrite: false, depthTest: false });
+  const envelopes = new THREE.Mesh(geo, envMat);
+  envelopes.visible = false;
+  envelopes.renderOrder = 9;   // over the plan-mode catchment wash, which would otherwise bleach it
+  envelopes.position.y = 2.2;
+  let envSig = 1;
+
   // map paper: a cream sheet with grain, slope hatching, a kilometre grid and a pale wash on the water; its opacity follows the zoom
   const paperMat = new THREE.MeshBasicMaterial({ map: paperTexture(height, wmask), transparent: true, opacity: 0, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   const paper = new THREE.Mesh(geo, paperMat);
@@ -310,6 +325,19 @@ export function buildTerrain(height: Float32Array, wmask: Uint8Array, flags: Uin
       paper.visible = a > 0.01; paperMat.opacity = a; waterMat.color.copy(WHITE).lerp(PAPER_WATER, a * 0.7);
       if (VFX.is('sky')) paperMat.color.copy(skyLight); else paperMat.color.setRGB(1, 1, 1);   // the sheet is unlit: follow the light so it does not glow at dusk
     },   // every frame: no allocations
+    envelopes,
+    setEnvelopes(env: Uint8Array, w: Uint8Array) {
+      let sig = 0;
+      for (let i = 0; i < N * N; i++) sig = (Math.imul(sig, 31) + env[i]) | 0;
+      if (sig === envSig) return;
+      envSig = sig;
+      for (let i = 0; i < N * N; i++) {
+        const e = env[i], c = ENV_DEF[e]?.color ?? [0, 0, 0];
+        // outer residential stays nearly clear so the zones that matter (centres, growth districts, the core) read at a glance
+        edata[i * 4] = c[0]; edata[i * 4 + 1] = c[1]; edata[i * 4 + 2] = c[2]; edata[i * 4 + 3] = w[i] || e === 0 ? 0 : e === 5 ? 120 : 175;
+      }
+      envTex.needsUpdate = true;
+    },
     setZones(terr: Uint8Array, w: Uint8Array) {
       for (let i = 0; i < N * N; i++) {
         const t = terr[i], c = T_COLORS[t] ?? [0, 0, 0];

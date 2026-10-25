@@ -1,3 +1,5 @@
+import { StationCard } from './ui/stationCard';
+import { ENV_DEF } from './sim/envelopes';
 import './style.css';
 import './ui/diegetic/diegetic.css';
 import * as THREE from 'three';
@@ -42,7 +44,7 @@ if (params.get('perf') === '1') perf.show();
 // render quality (?quality=auto|high|performance, HUD button): the 3D scene's resolution scale
 const quality = new Quality((s) => env.setScale(s));
 const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
-const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean; noboom?: boolean }) => worker.postMessage(c);
+const send = (c: Command | { type: 'start'; seed: number; terrain?: string; origin?: string; nohier?: boolean; noterr?: boolean; nores?: boolean; nosat?: boolean; norepair?: boolean; noboom?: boolean; noenv?: boolean }) => worker.postMessage(c);
 
 let init: InitMsg | null = null;
 let markers: ProjectMarkers | null = null;
@@ -109,7 +111,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     init = m;
     terrain = buildTerrain(m.height, m.water, m.flags);
     { let top = 0; for (let i = 0; i < m.height.length; i++) if (m.height[i] > top) top = m.height[i]; sunShadow = new SunShadow(env.sun, env.renderer, top * VS + 10, top * VS + 320); }
-    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours, terrain.zones, terrain.paper, terrain.skirt);
+    env.scene.add(terrain.mesh, terrain.water, terrain.heat, terrain.catchment, terrain.contours, terrain.zones, terrain.envelopes, terrain.paper, terrain.skirt);
     city = new CityView(m.water, m.flags, m.villages, (x, z) => terrain!.sample(x, z), m);
     env.scene.add(city.group);
     life = new Life((x, z) => terrain!.sample(x, z), m.water);
@@ -158,8 +160,9 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
       if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
       if (hud.toggles.zones) terrain?.setZones(m.terr, init!.water);
       if (hud.toggles.desire) desire.update(m.desire);
-      if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
+      if (hud.tool === 'plan') { terrain?.setCatchment(m.catchment); terrain?.setEnvelopes(m.env, init!.water); }
     });
+    card.update(m);
     perf.step('hud', () => { hud.update(m); refreshPlan(); });
     if (dg && terrain) { skin?.update(m); dg.desk.setMonth(m.stats.month); dg.desk.setSpeed(m.speed); syncWorld(dg, m, (x, z) => terrain!.sample(x, z)); }
     perf.message(m, performance.now() - tApply);
@@ -167,7 +170,15 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     console.error('[sim]', m.message);
   }
 };
-send({ type: 'start', seed, noboom: params.get('noboom') === '1', terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1', nores: params.get('nores') === '1', nosat: params.get('nosat') === '1', norepair: params.get('norepair') === '1' });
+send({ type: 'start', seed, noboom: params.get('noboom') === '1', noenv: params.get('noenv') === '1', terrain: params.get('terrain') ?? undefined, origin: params.get('origin') ?? undefined, nohier: params.get('nohier') === '1', noterr: params.get('noterr') === '1', nores: params.get('nores') === '1', nosat: params.get('nosat') === '1', norepair: params.get('norepair') === '1' });
+
+// ------------------------------------------------------------------ station card and the zoning legend (round 7 envelopes)
+const card = new StationCard(document.body, (c) => send(c));
+const envLegend = document.createElement('div');
+envLegend.className = 'dg-legend';
+envLegend.style.display = 'none';
+envLegend.innerHTML = '<b>Zoning</b>' + ENV_DEF.map((d) => `<span><i style="background:rgb(${d.color.join(',')})"></i>${d.name} <em>${d.floors}</em></span>`).join('') + '<small>Click a station tag (in View) to propose a station area plan.</small>';
+document.body.appendChild(envLegend);
 
 // ------------------------------------------------------------------ tools
 let savedView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
@@ -186,15 +197,17 @@ hud.handlers.onTool = (t) => {
     c.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: -1 as unknown as THREE.MOUSE, RIGHT: THREE.MOUSE.PAN };
     c.screenSpacePanning = true;
     metro?.setPlan(true);
-    if (terrain && state) { terrain.setCatchment(state.catchment); terrain.catchment.visible = true; }
-    if (terrain) terrain.contours.visible = true;
+    if (terrain && state) { terrain.setCatchment(state.catchment); terrain.catchment.visible = true; terrain.setEnvelopes(state.env, init!.water); }
+    if (terrain) { terrain.contours.visible = true; terrain.envelopes.visible = true; }
+    envLegend.style.display = '';
   } else {
     c.enableRotate = true;
     c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: -1 as unknown as THREE.MOUSE, RIGHT: THREE.MOUSE.PAN };
     c.screenSpacePanning = false;
     if (savedView) flyTo(savedView.pos, savedView.target);
     metro?.setPlan(false);
-    if (terrain) { terrain.catchment.visible = false; terrain.contours.visible = hud.toggles.heat; }
+    if (terrain) { terrain.catchment.visible = false; terrain.contours.visible = hud.toggles.heat; terrain.envelopes.visible = false; }
+    envLegend.style.display = 'none';
     planner?.cancel();
     metro?.setCursor(null);
   }
@@ -313,7 +326,12 @@ canvas.addEventListener('pointerup', (e) => {
   if (moved <= 6 && hud.tool !== 'plan' && dg) {
     const r = canvas.getBoundingClientRect();
     const h = dg.hit(e.clientX - r.left, e.clientY - r.top);
-    if (h) { env.focus(h.pos.x, h.pos.z, 800); return; }
+    if (h) {
+      env.focus(h.pos.x, h.pos.z, 800);
+      // a station tag opens its card: what the walk holds, the zoning, the plans the council could approve
+      if (h.id.startsWith('st:')) card.open(Number(h.id.slice(3)));
+      return;
+    }
   }
   if (moved > 6 || hud.tool !== 'plan' || !state || !planner) return;
   const c = pickCell(e);
@@ -403,6 +421,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'z' || e.key === 'Z') hud.toggle('zones');
   else if (e.key === 'n' || e.key === 'N') hud.toggle('night');
   else if (e.key === 'l' || e.key === 'L') hud.toggle('desire');
+  else if (e.key === 'Escape' && card.isOpen && hud.tool !== 'plan') card.close();
   else if (hud.tool === 'plan' && planner) {
     if (e.key === 'Enter') planner.commit();
     else if (e.key === 'Backspace') planner.undo();
@@ -528,7 +547,9 @@ async function ff(target: number, deal = 0, picks: Record<string, number> = {}) 
     const before = state.stats.month;
     if (state.event) {
       const id = state.event.id;
-      send({ type: 'choose', event: id, choice: id === 'docks_bought' ? deal : (picks[id] ?? 0) });
+      const want = id === 'docks_bought' ? deal : (picks[id] ?? 0), chs = state.event.choices;
+      const pick = chs[want]?.ok === false ? Math.max(0, chs.findIndex((c) => c.ok !== false)) : want;
+      send({ type: 'choose', event: id, choice: pick });
       await until(() => !state!.event || state!.event.id !== id);
     } else {
       send({ type: 'step', months: Math.max(1, Math.min(4, target - before)) });

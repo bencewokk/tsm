@@ -3,6 +3,7 @@
 // when the first growth shows up round its stations compared with the same city without the line (determinism makes the control exact),
 // and how often the player has a decision to make.
 import { Sim, BOOM } from '../src/sim/sim';
+import { ENVS } from '../src/sim/envelopes';
 import { N, STATION_COST, TRAIN_COST, METRO_SPEED, START_MONEY } from '../src/sim/constants';
 import { quoteLine } from '../src/sim/relief';
 
@@ -12,6 +13,7 @@ const opt = (k: string, d: number) => { const a = args.find((x) => x.startsWith(
 const open = opt('open', 3), months = opt('months', 60);
 const showEvents = args.includes('--events');
 if (args.includes('--noboom')) BOOM.on = false;
+if (args.includes('--noenv')) ENVS.on = false;
 { const x = opt('boomx', 1); BOOM.res *= x; BOOM.com *= x; }
 let seeds = args.filter((a) => !a.startsWith('--')).map(Number).filter((n) => n > 0);
 if (!seeds.length) seeds = [4821, 187, 304, 57, 83, 421, 369, 252];

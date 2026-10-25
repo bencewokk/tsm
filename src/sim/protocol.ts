@@ -55,7 +55,8 @@ export interface Stats {
   buildings: number;
 }
 
-export interface EventChoiceInfo { label: string; detail: string }
+/** cost: what the choice takes from the city account ($, 0 = nothing or it pays the city); ok: the city can afford it (round 7: no debt) */
+export interface EventChoiceInfo { label: string; detail: string; cost?: number; ok?: boolean }
 export interface EventInfo { id: string; title: string; text: string; choices: EventChoiceInfo[] }
 
 export interface DocksInfo {
@@ -135,6 +136,11 @@ export interface StateMsg {
   projects: import('./projects').ProjectInfo[];
   /** latest project notifications (newest last) */
   notices: { month: number; text: string; x: number; y: number; color: string }[];
+  /** round 7: development envelope per cell (envelopes.ts ENV), the station area plans, the requested plan preview, value capture this month */
+  env: Uint8Array;
+  plans: ReturnType<import('./envelopes').EnvelopeSystem['infos']>;
+  planPreview: ReturnType<import('./envelopes').EnvelopeSystem['preview']>;
+  capture: number;
   desire: DesireLine[];
   /** the active goal of each track, newest headline moments (each has a unique seq), unlocked upgrades */
   goals: import('./goals').GoalInfo[];
@@ -156,6 +162,10 @@ export type Command =
   | { type: 'setTrains'; line: number; trains: number }
   | { type: 'deleteLine'; line: number }
   | { type: 'choose'; event: string; choice: number }
-  | { type: 'step'; months: number };
+  | { type: 'step'; months: number }
+  /** round 7: a station area plan (upzoning, CBD edge) or protecting the old town, decided by the council */
+  | { type: 'proposePlan'; station: number; kind: 'station' | 'cbd' | 'protect' }
+  /** ask for the plan preview of a station in the next state messages (null = none) */
+  | { type: 'planPreview'; station: number | null };
 
 export type WorkerOut = InitMsg | StateMsg | { type: 'error'; message: string } | { type: 'quote'; id: number; cost: number; km: number; underwaterKm: number };

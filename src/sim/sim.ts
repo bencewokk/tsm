@@ -1,4 +1,5 @@
 import { N, CELL, ZONE, NZ, ZONES, BT, Flag, Water, isAmenity, HOMES, COM_JOBS, IND_JOBS, BUILD_MONTHS, PERSONS_PER_HOME, WORKERS_PER_HOME } from './constants';
+import { EnvelopeSystem, ENV, ENVS } from './envelopes';
 import { STATION_COST, TRAIN_COST, START_MONEY, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
 import { generateTerrain, idx, inb, DIR4, SAT, type Grid } from './terrain';
@@ -68,6 +69,7 @@ export const TUNE = {
   carLockASC: 14,
   growth: 0.032,
   minGrowth: 180,
+  servedFirst: 0.25,      // ranking bonus for vacant plots in a station's walk (station access 0..1)
 };
 
 /**
@@ -160,7 +162,7 @@ export class Sim {
   congestion = 0; pressure = 0; driveSpeed = 45;
   centre = { x: N / 2, y: N / 2 };
   money = START_MONEY;
-  income = 0; expenses = 0; buildSpend = 0;
+  income = 0; expenses = 0; buildSpend = 0; fares = 0;
   // metro
   metro = new Metro();
   stAccess = new Float64Array(0);
@@ -194,6 +196,10 @@ export class Sim {
   asm = new AssemblySystem(this);
   projects = new ProjectSystem(this);
   hazards = new HazardSystem(this);
+  /** development envelopes and the station area plans (envelopes.ts) */
+  envs = new EnvelopeSystem(this);
+  /** the station whose plan preview the UI asked for */
+  previewStation: number | null = null;
   lastEventMonth = -99;
   // goals, headlines and the station boom
   goals = new GoalSystem(this);
@@ -241,6 +247,8 @@ export class Sim {
     this.lvS.set(this.lv);
     this.field.update(this);
     updateTerritories(this);
+    this.envs.defaults();
+    this.field.update(this);
     this.reserve = planReserves(this);
     for (const l of this.lots.lots) if (l.alive) applyReserve(this, l);
     this.safeguardStationSites();
@@ -314,6 +322,8 @@ export class Sim {
         break;
       }
       case 'deleteLine': m.lines = m.lines.filter((l) => l.id !== cmd.line); this.refreshTransit(); break;
+      case 'proposePlan': { const r = this.envs.propose(cmd.station, cmd.kind); if (r !== 'ok') this.say(r); break; }
+      case 'planPreview': this.previewStation = cmd.station; break;
       default: this.applyEvent(cmd);
     }
   }
@@ -328,8 +338,17 @@ export class Sim {
   protected applyEvent(cmd: Command) {
     if (cmd.type !== 'choose' || !this.pending || this.pending.def.id !== cmd.event) return;
     const choices = this.pending.variant ? this.pending.variant.choices : this.pending.def.choices;
-    const ch = choices[cmd.choice];
+    let ch = choices[cmd.choice];
     if (!ch) return;
+    // money binds (round 7): a choice the account cannot pay for is not taken; the dialog greys it out, and a script that asks for it
+    // gets the first choice the city can afford (the cheapest if none)
+    const cost = this.choiceCost(ch);
+    if (cost > Math.max(0, this.money)) {
+      const ok = choices.find((c) => this.choiceCost(c) <= Math.max(0, this.money)) ?? choices.slice().sort((x, y) => this.choiceCost(x) - this.choiceCost(y))[0];
+      this.say(`The city cannot pay ${(cost / 1e6).toFixed(0)}M for "${fill(ch.label, this.pending.vars)}" with ${(this.money / 1e6).toFixed(0)}M in the account`);
+      ch = ok;
+      cmd = { ...cmd, choice: choices.indexOf(ok) };
+    }
     for (const e of ch.effects) this.applyEffect(e);
     this.resolved[cmd.event] = { month: this.month, choice: cmd.choice };
     this.lastEventMonth = this.month;
@@ -381,6 +400,14 @@ export class Sim {
       return;
     }
     // hazard defences (hazards.ts): asked after repeated floods / landslides
+    // station area plans the council will approve only with conditions (envelopes.ts)
+    const pd = this.envs.nextDecision();
+    if (pd) {
+      const pid = Number(pd.id.slice(5));
+      const def: EventDef = { id: pd.id, trigger: {}, title: pd.title, text: pd.text, choices: pd.choices.map((c, k) => ({ ...c, effects: [{ kind: 'plan', id: pid, choice: k }] })) };
+      this.pending = { def, variant: null, vars: {} };
+      return;
+    }
     const hz = this.hazards.nextDecision();
     if (hz) {
       const hid = hz.id.slice(4);
@@ -439,7 +466,7 @@ export class Sim {
         }
         this.asm.startDocks(this.docksLots(), SITE_TEXT[this.cp.site].project);
         this.say(`Docks deal signed with ${d.name}${d.deadline ? `: metro needed within ${d.deadline} months` : ''}`);
-        break;
+        this.envs.defaults(); break;
       }
       case 'docksExtraPlots': {
         const c = this.docksCentre();
@@ -466,6 +493,7 @@ export class Sim {
       case 'lmCarPark': this.lm.setCarPark(e.id); this.say('Car park extended'); break;
       case 'project': this.projects.choose(e.inst, e.choice); this.projects.lastDecision = this.month; break;
       case 'hazard': this.hazards.choose(e.id, e.choice); break;
+      case 'plan': this.envs.choose(e.id, e.choice); break;
       case 'docksRoadRelief': this.docks.roadRelief = true; this.say('Bus lanes painted along the harbour roads'); break;
     }
   }
@@ -533,7 +561,19 @@ export class Sim {
     const p = this.pending;
     if (!p) return null;
     const choices = p.variant ? p.variant.choices : p.def.choices;
-    return { id: p.def.id, title: fill(p.variant?.title ?? p.def.title, p.vars), text: fill(p.variant?.text ?? p.def.text, p.vars), choices: choices.map((c) => ({ label: fill(c.label, p.vars), detail: fill(c.detail, p.vars) })) };
+    return { id: p.def.id, title: fill(p.variant?.title ?? p.def.title, p.vars), text: fill(p.variant?.text ?? p.def.text, p.vars), choices: choices.map((c) => { const cost = this.choiceCost(c); return { label: fill(c.label, p.vars), detail: fill(c.detail, p.vars), cost, ok: cost <= Math.max(0, this.money) }; }) };
+  }
+
+  /** What a decision takes from the city account (round 7: money binds, so a choice the city cannot pay for is refused). */
+  choiceCost(ch: { effects: Effect[] }): number {
+    let c = 0;
+    for (const e of ch.effects) {
+      if (e.kind === 'money' && e.amount < 0) c -= e.amount;
+      else if (e.kind === 'landmark' && e.pay === 'city') c += LANDMARKS.find((x) => x.id === e.id)?.cost ?? 0;
+      else if (e.kind === 'project') c += Math.max(0, -this.projects.choiceMoney(e.inst, e.choice));
+      else if (e.kind === 'hazard' && e.choice === 0) c += this.hazards.defenceCost(e.id);
+    }
+    return c;
   }
 
   paused(): boolean { return this.pending !== null; }
@@ -581,6 +621,7 @@ export class Sim {
     this.checkGraph(`month ${this.month}`);
     this.projects.tick();
     this.hazards.tick();
+    this.envs.tick();
     this.finance();
     this.goals.tick();
     this.networkMoments();
@@ -588,11 +629,12 @@ export class Sim {
   }
 
   private progressConstruction() {
+    this.envs.resetCapture();
     for (const l of this.lots.lots) {
       if (!l.alive) continue;
       l.age = Math.min(65000, l.age + 1);
       if (l.demo > 0 && --l.demo === 0) { if (l.ntype) l.type = l.ntype; else l.type = BT.None; l.ntype = 0; l.level = 0; l.hgt = 0; }
-      if (l.constr > 0 && --l.constr === 0) { l.level = l.target; l.hgt = l.nhgt; l.nhgt = 0; l.target = 0; l.age = 0; l.built = this.month; }
+      if (l.constr > 0 && --l.constr === 0) { l.level = l.target; l.hgt = l.nhgt; l.nhgt = 0; l.target = 0; l.age = 0; l.built = this.month; this.envs.onBuilt(l); }
     }
   }
 
@@ -976,6 +1018,7 @@ export class Sim {
       const dc = Math.hypot(x - cx, y - cy) / (N * 0.5);
       let v = TUNE.base + TUNE.wCar * car + TUNE.wTransit * this.transitCell[i] + this.stationPrem[i] + water + pk - nz - TUNE.wCentre * dc;
       if (g.flags[i] & Flag.Steep) v -= 0.2;
+      if (ENVS.on && this.envs.env[i] === ENV.Protected) v += 0.06;   // a protected old town is worth more (and visited more, see computeRiders)
       if (g.flags[i] & Flag.Flood) v -= 0.25;
       v += TUNE.wView * this.view[i];   // views raise value (not density: the field ignores them)
       this.lv[i] = clamp(v, 0, 1.5);
@@ -1103,6 +1146,7 @@ export class Sim {
     for (const l of lots) {
       if (l.constr || l.asm || (l.flags & (Flag.Planned | Flag.Docks)) && !l.type) continue;
       if (l.flags & Flag.Planned) continue;
+      if (this.envs.frozen(l)) continue;   // protected old town: no redevelopment
       const v = this.fieldAt(this.lvS, l.x, l.y), t = l.type, lv = l.level;
       const jit = this.rng.next() * 0.12;
       const pf = this.profiles[l.prof], fr = (0.5 + pf.landUseMix.res) * pf.growthRate, fc = (0.5 + pf.landUseMix.com) * pf.growthRate, fi = (0.5 + pf.landUseMix.ind) * pf.growthRate;
@@ -1121,7 +1165,8 @@ export class Sim {
         const heavy = tt === T.Port || tt === T.Industry;
         // satellites grow by their own rule (homes by the works, round the station of a rail town or a served garden suburb): a local pull on top of land value
         const sb = sat[l.cell];
-        if (v + sb + BOOM.lvBonus * bm >= spawnR && !heavy) res.push({ l, s: (v + sb + jit + fill + BOOM.rank * bm) * fr, kind: BT.Res, to: 1, h: 0 });
+        // round 7: new homes go to plots a station serves first (catchments on plain seeds stayed 40-50% vacant while the fringe filled)
+        if (v + sb + BOOM.lvBonus * bm >= spawnR && !heavy) res.push({ l, s: (v + sb + jit + fill + BOOM.rank * bm + TUNE.servedFirst * this.accCell[l.cell]) * fr, kind: BT.Res, to: 1, h: 0 });
         if (v + BOOM.lvBonus * bm >= spawnC && !heavy) com.push({ l, s: (BOOM.rank * bm + v * 0.8 + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.5 + this.transitCell[l.cell] * 0.9 + pull * 0.4 + front + jit - 0.12 + fill + 0.3 * Math.min(1, this.cSquare[l.cell])) * fc, kind: BT.Com, to: 1, h: 0 });
         if (!TERR.on || heavy) ind.push({ l, s: (0.6 - v * 0.4 + (this.g.distWater[l.cell] <= 3 ? 0.15 : 0) + this.zoneSampleXY(this.zCarAcc, l.x, l.y) * 0.3 + front + jit) * fi, kind: BT.Ind, to: 1, h: 0 });
       } else if (t === BT.Res && lv < 3) {
@@ -1163,7 +1208,10 @@ export class Sim {
       for (const c of list) {
         if (ops >= maxOps) break;
         // an anchor tower may be financed on credit (regional demand) while the pool is in debt, as long as the debt stays under ~2 months of growth
-        const credit = c.to === 3 && c.h >= 36 && poolKey !== 'indPool' && this[poolKey] > -TUNE.towerCredit * B;
+        const isTower = c.to === 3 && c.h >= 36 && c.kind !== BT.Ind;
+        // envelopes: a tower may only start where zoning allows the height and plot assembly (credit too: no borrowing for towers elsewhere)
+        if (isTower && !this.envs.assemblyAt(c.l.cell)) continue;
+        const credit = isTower && poolKey !== 'indPool' && this[poolKey] > -TUNE.towerCredit * B;
         // a plot in a young station's catchment may spend the station's own boom pool (never for an anchor tower: the height cap is untouched)
         const bp = poolKey === 'resPool' ? 'boomRes' : poolKey === 'comPool' ? 'boomCom' : null;
         const useBoom = !!bp && BOOM.on && !(c.to === 3 && c.h >= 36) && this.boom[c.l.cell] > BOOM.thresh && this[bp] > 0;
@@ -1185,6 +1233,8 @@ export class Sim {
         }
         const wEff = plan ? Math.hypot(plan.quad[2] - plan.quad[0], plan.quad[3] - plan.quad[1]) : c.l.w;
         const add = this.capacity(c.l, c.kind, c.to, h, wEff) - (c.l.type === c.kind ? this.capacity(c.l, c.kind, c.l.level, c.l.hgt) : 0);
+        // ...and land value, major station access and developer capital (envelopes.ts towerOk)
+        if (isTower && !this.envs.towerOk(c.l, h, add)) continue;
         const avail = useBoom ? this[bp!] : this[poolKey];
         if (add > Math.max(0, avail) * 2.5 + 10 && !(credit && add <= B * 3)) { if (c.to === 3 && h >= 36 && keep === 0) keep = start * TUNE.saveShare; continue; }
         if (useBoom) {
@@ -1197,10 +1247,13 @@ export class Sim {
         } else this[poolKey] -= add;
         taken.add(c.l.id); zoneOps[z]++; ops++;
         if (c.to === 3) towers++; else if (c.to === 2) mids++;
+        if (isTower) this.envs.spend(add);
         if (plan) {
           // beside a young station the crews work shifts: a quarter fewer months of structure (the height itself is still the field's)
           const months0 = Math.max(3, Math.min(11, Math.round(h / 11)));
-          const months = BOOM.on && this.boom[c.l.cell] > 0.3 ? Math.max(3, Math.round(months0 * 0.75)) : months0;
+          // planning certainty: inside an approved station area plan or the CBD the structure goes up a fifth faster again
+          const upz = ENVS.on && (this.envs.env[c.l.cell] === ENV.Station || this.envs.env[c.l.cell] === ENV.CBD) ? 0.8 : 1;
+          const months = Math.max(3, Math.round((BOOM.on && this.boom[c.l.cell] > 0.3 ? months0 * 0.75 : months0) * upz));
           this.asm.start(plan, { type: c.kind, level: 3, hgt: h, months, label: `${c.kind === BT.Res ? 'Residential' : 'Office'} tower (${h} m)` });
           continue;
         }
@@ -1534,6 +1587,8 @@ export class Sim {
     // attraction of open landmarks pulls ordinary trips toward their zone
     const lmOpen = this.lm.open();
     for (const o of lmOpen) attr[o.zone] += o.def.attr * (o.st.eventDay ? 1.5 : 1);
+    // a protected old town draws visitors: every protected cell is a small attraction
+    if (ENVS.on) for (let i = 0; i < N * N; i++) if (this.envs.env[i] === ENV.Protected) attr[this.zoneOf(i)] += 14;
     /** Route T round trips from zone a to zone b and back: logit over car / metro / walk / bike, stations and desire lines. */
     const route = (a: number, b: number, T: number, asc: number, extraDrive = 0) => {
       const dk = zd(a, b);
@@ -1625,7 +1680,9 @@ export class Sim {
   // ---------------------------------------------------------------- money
   protected finance() {
     const m = this.metro;
-    this.income = this.transitTrips * FARE * 30;
+    // fares, plus the value captured from approved station area plans (envelopes.ts)
+    this.fares = this.transitTrips * FARE * 30;
+    this.income = this.fares + this.envs.capture;
     let trains = 0, km = 0;
     for (const l of m.lines) { trains += l.trains; km += l.lengthKm; }
     this.expenses = trains * TRAIN_MONTH + m.stations.length * STATION_UPKEEP + km * TRACK_UPKEEP_KM;
@@ -1699,6 +1756,7 @@ export class Sim {
       landmarks: this.lm.info(),
       assemblies: this.asm.infos(),
       projects: this.projects.infos(), notices: this.projects.notices.slice(-5),
+      env: this.envs.env.slice(), plans: this.envs.infos(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
       desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
       goals: this.goals.infos(), goalsDone: this.goals.count(), goalsTotal: this.goals.total(), moments: this.moments.slice(-10), unlocks: this.unlocks.slice(),
       log: this.log.slice(-8), speed: this.speed,

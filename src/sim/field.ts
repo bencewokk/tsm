@@ -111,6 +111,8 @@ export class DensityField {
       this.hmax[i] = (FIELD.hBase + FIELD.hRange * Math.pow(clamp(hp, 0, 1), FIELD.hPow)) * slopeF;
       // territories: no towers on working quays, low heavy industry and workers' terraces, low detached suburbs
       if (TERR.on) { const cap = T_CAP[sim.town.terr[i]]; if (cap && this.hmax[i] > cap) this.hmax[i] = cap; }
+      // development envelopes (envelopes.ts): the zoning cap on top of what the market would build
+      { const ec = sim.envs ? sim.envs.capAt(i) : 0; if (ec > 0 && this.hmax[i] > ec) this.hmax[i] = ec; }
       const lvT = clamp((sim.lvS[i] - 0.3) / 0.5, 0, 1);
       this.F[i] = clamp(0.5 * cc + 0.2 * this.jc[i] + 0.2 * a + 0.2 * lvT, 0, 1) * (0.55 + 0.45 * slopeF);
     }

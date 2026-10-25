@@ -54,6 +54,7 @@ export class Hud {
         <div class="row"><span>Road congestion</span><b data-k="cong">-</b></div>
         <div class="row"><span>Avg drive speed</span><b data-k="spd">-</b></div>
         <div class="row"><span>Transit trips / day</span><b data-k="trips">-</b></div>
+        <div class="row" title="Station area plans pay the city a planning gain on the floors they allow above the old zoning"><span>Value captured</span><b data-k="capture">-</b></div>
         <div class="h lmh">Projects <span class="muted small" data-k="projbudget"></span></div>
         <div class="lmlist" data-k="projlist"></div>
         <div class="news" data-k="news"></div>
@@ -196,7 +197,7 @@ export class Hud {
       <div class="h">${dateStr(s.stats.month)} · City hall</div>
       <h2>${ev.title}</h2>
       <p>${ev.text}</p>
-      <div class="choices">${ev.choices.map((c, k) => `<button class="choice" data-choice="${k}"><b>${c.label}</b><span>${c.detail}</span></button>`).join('')}</div>
+      <div class="choices">${ev.choices.map((c, k) => `<button class="choice" data-choice="${k}" ${c.ok === false ? 'disabled title="Not enough money in the city account"' : ''}><b>${c.label}</b><span>${c.detail}${c.ok === false ? ' <i class="nomoney">Not enough money.</i>' : ''}</span></button>`).join('')}</div>
     </div>`;
     wrap.querySelectorAll<HTMLButtonElement>('[data-choice]').forEach((b) => b.addEventListener('click', () => {
       this.send({ type: 'choose', event: ev.id, choice: Number(b.dataset.choice) });
@@ -307,6 +308,9 @@ export class Hud {
     e.cong.textContent = `${Math.round(st.congestion * 100)}%`;
     e.spd.textContent = `${st.driveSpeed.toFixed(0)} km/h`;
     e.trips.textContent = num(st.transitTrips);
+    // value capture from approved station area plans: paid as buildings complete, so the total so far reads better than a monthly figure
+    const paid = (s.plans ?? []).reduce((a, p) => a + p.paid, 0);
+    e.capture.textContent = s.plans?.some((p) => p.state === 'approved') ? `$${(paid / 1e6).toFixed(1)}M` : 'no plans yet';
     this.bar(e.dR, st.resDemand);
     this.bar(e.dC, st.comDemand);
     this.bar(e.dI, st.indDemand);

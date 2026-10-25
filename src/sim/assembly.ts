@@ -305,7 +305,8 @@ export class AssemblySystem {
             continue;
           }
           // sellers near a young station's boom are keener
-          const p = Math.min(0.98, (c === 0 ? 0.95 : c <= 1 ? 0.8 : c <= 3 ? 0.6 : 0.45) + (sim.boom[l.cell] > 0.3 ? 0.2 : 0));
+          // ...and so are sellers inside an approved station area plan (the zoning is settled: round 7 envelopes)
+          const p = Math.min(0.98, (c === 0 ? 0.95 : c <= 1 ? 0.8 : c <= 3 ? 0.6 : 0.45) + (sim.boom[l.cell] > 0.3 ? 0.2 : 0) + (sim.envs.lock[l.cell] && sim.envs.plans[sim.envs.lock[l.cell] - 1]?.state === 'approved' ? 0.25 : 0));
           if (hash01(l.id * 31 + a.id * 977, sim.month) < p) l.astate = 1;
           else {
             a.fails[l.id] = (a.fails[l.id] ?? 0) + 1;

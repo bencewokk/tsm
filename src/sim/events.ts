@@ -37,7 +37,8 @@ export type Effect =
   /** a choice on a development project instance (projects.ts) */
   | { kind: 'project'; inst: number; choice: number }
   /** a decision on defences against a natural hazard (hazards.ts) */
-  | { kind: 'hazard'; id: string; choice: number };
+  | { kind: 'hazard'; id: string; choice: number }
+  | { kind: 'plan'; id: number; choice: number };
 
 export interface DocksDeal {
   id: string;
