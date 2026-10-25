@@ -15,8 +15,9 @@ import { VFX } from './render/vfx';
 import type { InitMsg, StateMsg, WorkerOut, Command } from './sim/protocol';
 import { Hud, money as fmtMoney } from './ui/hud';
 import { DiegeticLayer } from './ui/diegetic/layer';
-import { syncWorld, logSlips } from './ui/diegetic/world';
+import { syncWorld, logSlips, stationLoads } from './ui/diegetic/world';
 import { skinHud } from './ui/diegetic/hudskin';
+import { demoEvent } from './ui/diegetic/demo';
 import { Planner } from './ui/planner';
 import { CELL, N, STATION_COST, TRAIN_COST, METRO_SPEED } from './sim/constants';
 import { quoteLine } from './sim/relief';
@@ -100,7 +101,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
       labels = new Labels(init.villages, init.city.site, m.docks.centre, (x, z) => terrain!.sample(x, z));
       env.addText(labels.group);
     }
-    perf.step('life', () => { life?.setRoads(m.roads); if (newMonth) life?.setCity(m.stats.homes, m.stations); });
+    perf.step('life', () => { life?.setRoads(m.roads); if (newMonth) life?.setCity(m.stats.homes, m.stations, stationLoads(m)); });
     if (newMonth) lastStateAt = performance.now();
     perf.step('city', () => city?.update(m, CITY_BUDGET));
     markers?.update(m.projects);
@@ -113,7 +114,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
       if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
     });
     perf.step('hud', () => { hud.update(m); refreshPlan(); });
-    if (dg && terrain) { skin?.update(m); syncWorld(dg, m, (x, z) => terrain!.sample(x, z)); logSlips(dg, m, seenLog); }
+    if (dg && terrain) { skin?.update(m); dg.desk.setMonth(m.stats.month); dg.desk.setSpeed(m.speed); syncWorld(dg, m, (x, z) => terrain!.sample(x, z)); logSlips(dg, m, seenLog); }
     perf.message(m, performance.now() - tApply);
   } else if (m.type === 'error') {
     console.error('[sim]', m.message);
@@ -514,7 +515,7 @@ async function shotUI(name: string) {
   const clone = document.body.cloneNode(true) as HTMLElement;
   clone.querySelectorAll('canvas, script').forEach((e) => e.remove());
   const html = new XMLSerializer().serializeToString(clone).replace(/^<body[^>]*>/, '').replace(/<\/body>$/, '');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" class="${document.body.className}" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')}</style>${html}</div></foreignObject></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" class="${document.body.className}" style="position:relative;width:${gl.clientWidth}px;height:${gl.clientHeight}px;transform:scale(${k});transform-origin:0 0;overflow:hidden"><style>${css.replace(/</g, ' ')} .dg-news, .dg-slip { animation: none !important; }</style>${html}</div></foreignObject></svg>`;
   const img = new Image();
   await new Promise((r, j) => { img.onload = r; img.onerror = j; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
   g.drawImage(img, 0, 0);
@@ -530,4 +531,4 @@ function view(x: number, y: number, dist: number, az = 0.6, pol = 0.9) {
 }
 /** Dev helper: set the time of day (0..1, 0.86 is deep night) and hold it for screenshots. */
 function phase(p: number) { nightTarget = 0; fastDawn = false; dayPhase = p; }
-(window as unknown as { tsm: unknown }).tsm = { dg, env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; }, get sunShadow() { return sunShadow; }, quality, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };
+(window as unknown as { tsm: unknown }).tsm = { dg, fun: (k: Parameters<typeof demoEvent>[2] = 'all') => (dg && state ? demoEvent(dg, state, k) : 'no layer'), env, send, hud, cellToScreen, demo, uiLine, ff, shot, shotUI, view, phase, get city() { return city; }, get life() { return life; }, panStep: (dt: number) => { panByKeys(dt, shiftDown); env.controls.update(); }, get labels() { return labels; }, get planner() { return planner; }, get state() { return state; }, get init() { return init; }, get graph() { return graphReport; }, get sunShadow() { return sunShadow; }, quality, get carBlobs() { return carBlobs; }, shadowCfg: SHADOW, perf: { report: () => perf.report(), show: (on = true) => perf.show(on), reset: () => perf.reset(), sizes: (on = true) => { perf.sizes = on; }, bench: (n = 120) => perf.bench(n, drawFrame), frame: () => drawFrame(performance.now()), mon: perf } };

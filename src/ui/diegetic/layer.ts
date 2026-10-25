@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { renderTag, type Bitmap, type TagSpec, MONO } from './paper';
+import { Desk } from './desk';
+import type { DiegeticEvent } from './events';
+import { CELL } from '../../sim/constants';
+
+export type { DiegeticEvent } from './events';
 
 /**
  * The diegetic presentation layer: one 2D canvas over the 3D view that carries the objects pinned to the model (station tags with their
@@ -13,7 +18,9 @@ import { renderTag, type Bitmap, type TagSpec, MONO } from './paper';
  *   ui.untag(id) / ui.sweep(prefix, keepIds)
  *   ui.float(pos, text, color)    a coin pop / message rising from a point
  *   ui.cost(pos | null, spec)     the plan-mode cost slip (tracing paper) that follows a point
- *   ui.notify(event)              stationOpened, fare, moment, crowding, planCost ... (shapes as in src/ui/gameEvents.ts)
+ *   ui.brief(id, cellPos, spec)   a paper brief pinned at a site for a few seconds (a beat that has a place)
+ *   ui.newspaper(...) / ui.slip(...)  the table objects (desk.ts): a front page, a news slip
+ *   ui.notify(event)              every kind of the fun-pass contract (events.ts, mapping in VISUAL-PASS.md)
  */
 export interface World3 { x: number; y: number; z: number }
 export interface TagOpts {
@@ -30,16 +37,11 @@ export interface TagOpts {
 interface Item {
   id: string; pos: World3; spec: TagSpec; o: Required<TagOpts>; flag: boolean;
   day?: Bitmap; night?: Bitmap; mini?: Bitmap; miniNight?: Bitmap; sig: string; pulse: number;
+  /** briefs expire: performance.now() time after which the item fades out and is dropped */
+  until?: number;
 }
 interface Floater { pos: World3; text: string; color: string; t0: number; dur: number }
 interface Rect { x: number; y: number; w: number; h: number }
-
-export type DiegeticEvent =
-  | { kind: 'stationOpened'; name: string; x: number; y: number; color: string }
-  | { kind: 'fare'; x: number; y: number; amount: number }
-  | { kind: 'moment'; title: string; text: string; color: string; big?: boolean }
-  | { kind: 'crowding'; lines: { id: number; color: string; load: number }[] }
-  | { kind: 'planCost'; cost: number; km: number; affordable: boolean; notice: string };
 
 const fmtMoney = (v: number) => (v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(1)}k` : `$${Math.round(v)}`);
 
@@ -57,6 +59,11 @@ export class DiegeticLayer {
   private placed: Rect[] = [];
   /** per-line load (0..) from crowding events, read by the world sync */
   lineLoad = new Map<number, number>();
+  /** table objects: newspaper, clipboard, dial plate */
+  readonly desk: Desk;
+  /** terrain height under a world point, set by the world sync (events carry cell positions) */
+  ground: (x: number, z: number) => number = () => 0;
+  private lastDug: World3 | null = null;
   enabled = true;
   /** counts for the perf notes */
   stats = { items: 0, drawn: 0 };
@@ -72,6 +79,7 @@ export class DiegeticLayer {
     this.g = this.canvas.getContext('2d')!;
     this.slips.className = 'dg-slips';
     parent.appendChild(this.slips);
+    this.desk = new Desk(parent);
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -96,7 +104,7 @@ export class DiegeticLayer {
     return it;
   }
   tag(id: string, pos: World3, spec: TagSpec, opts?: TagOpts) { return this.upsert(id, pos, spec, opts, false); }
-  pin(id: string, pos: World3, spec: TagSpec, opts?: TagOpts) { return this.upsert(id, pos, { ...spec, look: 1 }, opts, true); }
+  pin(id: string, pos: World3, spec: TagSpec, opts?: TagOpts) { return this.upsert(id, pos, { ...spec, look: spec.look === 3 ? 3 : 1 }, opts, true); }
   untag(id: string) { this.items.delete(id); }
   /** drop every item whose id starts with `prefix` and is not in `keep` */
   sweep(prefix: string, keep: Set<string>) { for (const id of this.items.keys()) if (id.startsWith(prefix) && !keep.has(id)) this.items.delete(id); }
@@ -113,12 +121,65 @@ export class DiegeticLayer {
   }
 
   // ------------------------------------------------------------------ events
-  notify(e: DiegeticEvent) {
-    if (e.kind === 'fare') this.float({ x: e.x, y: 0, z: e.y }, `+${fmtMoney(e.amount)}`, '#c58b00');
-    else if (e.kind === 'stationOpened') { this.slip(`${e.name} station opens`, 'Ribbon cut. Riders will follow the new walking routes.', e.color, false); }
-    else if (e.kind === 'moment') this.slip(e.title, e.text, e.color, !!e.big);
-    else if (e.kind === 'crowding') { for (const l of e.lines) this.lineLoad.set(l.id, l.load); }
+  /** a world point from cell units */
+  at(cx: number, cy: number, up = 1): World3 { const x = cx * CELL, z = cy * CELL; return { x, y: this.ground(x, z) + up, z }; }
+
+  /**
+   * A brief pinned at a site for a few seconds: a beat that has a place (cranes at a station, a tower topping out) stays at the spot
+   * instead of only appearing in a toast. Replaced by id, fades out, then is dropped.
+   */
+  brief(id: string, cell: { x: number; y: number }, spec: { title: string; sub?: string; color: string }, ms = 9000) {
+    const it = this.upsert(id, this.at(cell.x, cell.y, 1), { ...spec, look: 1 }, { priority: 75, far: 6500, full: 6500 }, true);
+    it.until = performance.now() + ms;
+    it.pulse = performance.now();
   }
+
+  /** Every game-feedback event of the fun-pass contract has a place on the table or on the model (see VISUAL-PASS.md for the table). */
+  notify(e: DiegeticEvent) {
+    switch (e.kind) {
+      case 'fare': this.float(this.at(e.x, e.y, 6), `+${fmtMoney(e.amount)}`, '#c58b00'); break;
+      case 'stationOpened':
+        if (e.stationId !== undefined) this.pulse(`st:${e.stationId}`, performance.now());
+        this.slip(`${e.name} station opens`, 'Ribbon cut. Riders will follow the new walking routes.', e.color, false);
+        break;
+      case 'lineOpened': this.desk.newspaper(e.moment.title, e.moment.text, e.color, true); break;
+      case 'moment': {
+        const m = e.moment;
+        if (m.big) this.desk.newspaper(m.title, m.text, m.color, false);
+        else this.slip(m.title, m.text, m.color, false);
+        if (Number.isFinite(m.x) && Number.isFinite(m.y) && m.kind !== 'goal') this.brief(`mo:${m.ref ?? m.title}`, m, { title: m.title, sub: m.text.length > 46 ? m.text.slice(0, 44) + '...' : m.text, color: m.color });
+        break;
+      }
+      case 'objectives': {
+        this.desk.goals(e.goals, e.done, e.total);
+        const keep = new Set<string>();
+        for (const g of e.goals) {
+          if (g.x === undefined || g.y === undefined) continue;
+          const id = `goal:${g.id}`; keep.add(id);
+          this.pin(id, this.at(g.x, g.y, 1), { title: g.title, sub: `${Math.round(g.cur)} of ${g.target}${g.reward ? `  ·  ${g.reward}` : ''}`, color: '#c9a227', look: 1, pct: g.target ? g.cur / g.target : 0 }, { priority: 80, far: 9000, full: 9000 });
+        }
+        this.sweep('goal:', keep);
+        break;
+      }
+      case 'objectiveReached':
+        this.slip(e.moment.title, e.moment.text, '#c9a227', true);
+        break;
+      case 'crowding': for (const l of e.lines) this.lineLoad.set(l.id, l.load); break;
+      case 'planCost':
+        if (this.costItem && this.costPos) this.cost(this.costPos, { title: fmtMoney(e.cost), sub: `${e.km.toFixed(1)} km${e.trains ? `  ·  ${e.trains} trains` : ''}`, badge: e.affordable ? '' : 'too dear', color: e.affordable ? '#2f7d5a' : '#c0503a', look: 2, ok: e.affordable });
+        break;
+      case 'stationDug': {
+        this.lastDug = this.at(e.x, e.y, 8);
+        this.float(this.lastDug, `-${fmtMoney(e.cost)}`, '#b4402d');
+        break;
+      }
+      case 'undo': this.float(this.lastDug ?? this.at(0, 0, 0), `+${fmtMoney(e.refund)}`, '#3f8f5a'); if (this.lastDug) this.slip('Plan taken back', `${fmtMoney(e.refund)} returned in full.`, '#3f8f5a', false); this.lastDug = null; break;
+      case 'clock': this.desk.clock(e.mode, e.speed, e.auto); break;
+    }
+  }
+
+  /** a front page on the table (headlines, a line opening) */
+  newspaper(title: string, text: string, color: string, ribbon = false) { this.desk.newspaper(title, text, color, ribbon); }
 
   /** A paper slip pinned to the table edge: headline in serif, a line of text, fades after a few seconds. */
   slip(title: string, text: string, color: string, big: boolean) {
@@ -154,6 +215,7 @@ export class DiegeticLayer {
     g.setTransform(d, 0, 0, d, 0, 0);
     const vis: { it: Item; sx: number; sy: number; dist: number; mini: boolean }[] = [];
     const consider = (it: Item) => {
+      if (it.until !== undefined && now > it.until + 800) { this.items.delete(it.id); return; }
       const dx = it.pos.x - cam.x, dy = it.pos.y - cam.y, dz = it.pos.z - cam.z, dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (dist > it.o.far) return;
       this.v.set(it.pos.x, it.pos.y, it.pos.z).project(this.camera);
@@ -174,7 +236,7 @@ export class DiegeticLayer {
     for (const e of vis) {
       const b = this.bmp(e.it, e.mini);
       const stick = e.mini ? 10 : e.it.o.stick;
-      const fade = e.it.id === 'cost' ? 1 : Math.min(1, (e.it.o.far - e.dist) / 900);
+      const fade = (e.it.id === 'cost' ? 1 : Math.min(1, (e.it.o.far - e.dist) / 900)) * (e.it.until !== undefined ? Math.max(0, Math.min(1, (e.it.until + 800 - now) / 800)) : 1);
       const x = e.sx - b.w / 2, y = e.sy - stick - b.h;
       const r = { x: x - 2, y: y - 2, w: b.w + 4, h: b.h + stick + 4 };
       if (e.it.id !== 'cost' && e.it.o.priority < 90) {
@@ -192,7 +254,7 @@ export class DiegeticLayer {
       const pulse = Math.max(0, 1 - (now - e.it.pulse) / 2600);
       if (pulse > 0) { g.strokeStyle = e.it.spec.color; g.globalAlpha = fade * pulse; g.lineWidth = 2; g.beginPath(); g.arc(e.sx, e.sy, 6 + (1 - pulse) * 40, 0, Math.PI * 2); g.stroke(); g.globalAlpha = fade; }
       // the paper (flags hang a little askew from their pin)
-      if (e.it.flag) { g.save(); g.translate(e.sx, e.sy - stick); g.rotate(-0.04); g.drawImage(b.c, -b.w / 2, -b.h, b.w, b.h); g.restore(); }
+      if (e.it.flag && e.it.spec.look !== 3) { g.save(); g.translate(e.sx, e.sy - stick); g.rotate(-0.04); g.drawImage(b.c, -b.w / 2, -b.h, b.w, b.h); g.restore(); }
       else g.drawImage(b.c, x, y, b.w, b.h);
       g.fillStyle = e.it.spec.color; g.strokeStyle = 'rgba(30,20,10,0.6)'; g.lineWidth = 0.8;
       g.beginPath(); g.arc(e.sx, e.sy, e.mini ? 2.4 : 3.2, 0, Math.PI * 2); g.fill(); g.stroke();

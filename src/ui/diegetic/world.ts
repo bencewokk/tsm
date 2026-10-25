@@ -4,12 +4,23 @@ import type { DiegeticLayer } from './layer';
 
 const abbr = (v: number) => (v >= 10000 ? `${(v / 1000).toFixed(0)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`);
 
+/** Peak-hour load (peak / capacity, 1 = every seat taken) of the busiest line through each station: the crowds at the entrances grow and pack with it. */
+export function stationLoads(s: StateMsg): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const l of s.lines) {
+    const load = l.capacity > 0 ? l.peakLoad / l.capacity : 0;
+    for (const id of l.stations) out.set(id, Math.max(out.get(id) ?? 0, load));
+  }
+  return out;
+}
+
 /**
  * Turn a state message into the objects pinned on the model: a tag on every station (name, ridership, line), a flag at every running
  * development project, the docks brief at the docks, a tag on each landmark. Called once per state message; the layer pools by id and
  * only re-renders a bitmap when a string changes.
  */
 export function syncWorld(ui: DiegeticLayer, s: StateMsg, ground: (x: number, z: number) => number) {
+  ui.ground = ground;
   const keep = new Set<string>();
   const P = (cx: number, cy: number, up: number) => { const x = cx * CELL, z = cy * CELL; return { x, y: ground(x, z) + up, z }; };
 
@@ -35,7 +46,7 @@ export function syncWorld(ui: DiegeticLayer, s: StateMsg, ground: (x: number, z:
   for (const p of s.projects) {
     if (p.status !== 'proposed' && p.status !== 'assembling' && p.status !== 'building') continue;
     const id = `pr:${p.id}`; keep.add(id);
-    ui.pin(id, P(p.x, p.y, 1), { title: p.name, sub: p.status === 'proposed' ? 'decision at City hall' : `${p.phase}${p.pct ? `  ${Math.round(p.pct * 100)}%` : ''}`, color: p.color, look: 1, pct: p.status === 'proposed' ? 0 : p.pct }, { priority: 40, far: 4200, full: 4200 });
+    ui.pin(id, P(p.x, p.y, 1), { title: p.name, sub: p.status === 'proposed' ? 'decision at City hall' : `${p.phase}${p.pct ? `  ${Math.round(p.pct * 100)}%` : ''}`, color: p.color, look: p.status === 'proposed' ? 1 : 3, pct: p.status === 'proposed' ? 0 : p.pct }, { priority: 40, far: 4200, full: 4200 });
   }
   ui.sweep('pr:', keep);
   keep.clear();

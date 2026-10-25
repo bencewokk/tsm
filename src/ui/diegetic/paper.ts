@@ -11,8 +11,8 @@ export interface TagSpec {
   badge?: string;
   /** line / type colour (pin head, badge, left edge) */
   color: string;
-  /** 0 = tag, 1 = flag (project: tilted card, folded corner, progress bar), 2 = cost slip (tracing paper) */
-  look: 0 | 1 | 2;
+  /** 0 = tag, 1 = flag (project: tilted card, folded corner, progress bar), 2 = cost slip (tracing paper), 3 = site hoarding (painted board) */
+  look: 0 | 1 | 2 | 3;
   /** progress 0..1 for flags */
   pct?: number;
   /** red / green accent on a cost slip */
@@ -24,6 +24,7 @@ export interface TagSpec {
 export interface Bitmap { c: HTMLCanvasElement; w: number; h: number }
 
 export const SERIF = 'Georgia, "Iowan Old Style", "Palatino Linotype", serif';
+export const SANS = 'Inter, system-ui, -apple-system, "Segoe UI", sans-serif';
 export const MONO = 'ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace';
 
 function rr(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -35,8 +36,47 @@ function rr(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: num
   g.closePath();
 }
 
+/** A hoarding: the painted plywood board that stands on a building site, with a hazard stripe, the project's name and its phase. */
+function renderHoarding(t: TagSpec, s: number, night: boolean): Bitmap {
+  const m = document.createElement('canvas');
+  const g0 = m.getContext('2d')!;
+  g0.font = `800 13px ${SANS}`;
+  const tw = g0.measureText(t.title.toUpperCase()).width;
+  g0.font = `600 9.5px ${SANS}`;
+  const sw = t.sub ? g0.measureText(t.sub.toUpperCase()).width : 0;
+  const w = Math.ceil(Math.max(tw, sw) + 26), h = t.pct !== undefined ? 46 : 40, M = 3;
+  m.width = Math.ceil((w + M * 2) * s); m.height = Math.ceil((h + M * 2) * s);
+  const g = m.getContext('2d')!;
+  g.scale(s, s); g.translate(M, M);
+  g.fillStyle = 'rgba(30,22,10,0.25)'; g.fillRect(1.5, 2, w, h);
+  // painted board with a grain
+  g.fillStyle = night ? '#a9a089' : '#e6dab5'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = night ? 'rgba(80,66,40,0.25)' : 'rgba(120,96,56,0.2)'; g.lineWidth = 0.6;
+  for (let y = 7; y < h; y += 7) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+  // hazard stripe along the top
+  g.save(); g.beginPath(); g.rect(0, 0, w, 6); g.clip();
+  g.fillStyle = '#e2b43a'; g.fillRect(0, 0, w, 6);
+  g.fillStyle = '#2b2722';
+  for (let x = -6; x < w + 6; x += 10) { g.beginPath(); g.moveTo(x, 6); g.lineTo(x + 5, 6); g.lineTo(x + 11, 0); g.lineTo(x + 6, 0); g.closePath(); g.fill(); }
+  g.restore();
+  g.strokeStyle = 'rgba(40,30,15,0.7)'; g.lineWidth = 1; g.strokeRect(0.5, 0.5, w - 1, h - 1);
+  // the project colour as a painted band on the left
+  g.fillStyle = t.color; g.fillRect(0, 6, 4, h - 6);
+  g.textBaseline = 'alphabetic'; g.fillStyle = '#2b2722';
+  g.font = `800 13px ${SANS}`; g.fillText(t.title.toUpperCase(), 13, 21);
+  if (t.sub) { g.fillStyle = '#5d5240'; g.font = `600 9.5px ${SANS}`; g.fillText(t.sub.toUpperCase(), 13, 33); }
+  if (t.pct !== undefined) {
+    g.fillStyle = 'rgba(60,45,25,0.2)'; g.fillRect(13, h - 7, w - 24, 3);
+    g.fillStyle = t.color; g.fillRect(13, h - 7, (w - 24) * Math.max(0, Math.min(1, t.pct)), 3);
+  }
+  // two screws
+  g.fillStyle = '#6b6254'; for (const x of [w - 6, 8]) { g.beginPath(); g.arc(x, h - 4, 1.2, 0, Math.PI * 2); g.fill(); }
+  return { c: m, w: w + M * 2, h: h + M * 2 };
+}
+
 /** Render a tag at `s` device pixels per CSS pixel. The bitmap includes a 3 px margin for the paper's shadow. */
 export function renderTag(t: TagSpec, s: number, night: boolean): Bitmap {
+  if (t.look === 3 && !t.mini) return renderHoarding(t, s, night);
   const m = document.createElement('canvas');
   const g0 = m.getContext('2d')!;
   const tf = t.mini ? 10.5 : t.look === 2 ? 16 : 12.5, sf = 9.5, bf = 10.5;

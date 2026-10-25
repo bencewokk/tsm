@@ -89,13 +89,15 @@ export class Life {
     }
   }
 
-  setCity(homes: number, stations: StationInfo[]) {
+  setCity(homes: number, stations: StationInfo[], load?: Map<number, number>) {
     this.homes = homes;
     this.fleet();
     this.crowd = [];
     for (const st of stations) {
-      const n = Math.min(18, Math.floor(st.riders / 320));
-      for (let k = 0; k < n; k++) this.crowd.push({ x: st.x * CELL, z: st.y * CELL, r: 12 + Math.random() * 24, a: Math.random() * Math.PI * 2, w: 0.15 + Math.random() * 0.3, s: Math.random() < 0.5 ? 1 : -1 });
+      // crowding shows at the entrance: a line near capacity puts more people on the pavement and packs them closer
+      const ld = Math.max(0, Math.min(1.5, load?.get(st.id) ?? 0.4)), packed = ld > 0.9;
+      const n = Math.min(26, Math.floor((st.riders / 320) * (0.7 + 0.6 * ld)));
+      for (let k = 0; k < n; k++) this.crowd.push({ x: st.x * CELL, z: st.y * CELL, r: (packed ? 6 : 12) + Math.random() * (packed ? 16 : 24), a: Math.random() * Math.PI * 2, w: 0.15 + Math.random() * 0.3, s: Math.random() < 0.5 ? 1 : -1 });
     }
   }
 
