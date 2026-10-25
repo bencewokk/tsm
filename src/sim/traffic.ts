@@ -38,6 +38,33 @@ export class Traffic {
   stats = { vehKm: 0, meanVC: 0, meanSpeed: 0, overCap: 0 };
   constructor(private sim: Sim) {}
 
+  /** the street edges of the shortest path (by length) between the nodes nearest two points, and its km; null if none */
+  route(ax: number, ay: number, bx: number, by: number): { edges: number[]; km: number } | null {
+    const R = this.sim.roads;
+    const s = R.nearestNode(ax, ay, 4), t = R.nearestNode(bx, by, 4);
+    if (s < 0 || t < 0) return null;
+    if (s === t) return { edges: [], km: Math.hypot(bx - ax, by - ay) * CELL / 1000 };
+    const M = R.nx.length, d = new Float64Array(M).fill(Infinity), via = new Int32Array(M).fill(-1), h = new MinHeap();
+    d[s] = 0; h.push(s, 0);
+    while (h.size) {
+      const n = h.pop();
+      if (n === t) break;
+      for (const e of R.adj[n]) {
+        if (!R.alive[e]) continue;
+        const o = R.other(e, n), v = d[n] + R.edgeLen(e);
+        if (v < d[o]) { d[o] = v; via[o] = e; h.push(o, v + Math.hypot(R.nx[o] - R.nx[t], R.ny[o] - R.ny[t])); }
+      }
+    }
+    if (!(d[t] < Infinity)) return null;
+    const edges: number[] = [];
+    for (let n = t, g = 0; n !== s && g < 5000; g++) { const e = via[n]; if (e < 0) return null; edges.push(e); n = R.other(e, n); }
+    edges.reverse();
+    return { edges, km: d[t] * CELL / 1000 };
+  }
+
+  /** minutes to drive an edge at free flow */
+  free(e: number) { return this.freeTime(e); }
+
   private freeTime(e: number) {
     const R = this.sim.roads, c = R.ecls[e] as number;
     return (R.edgeLen(e) * CELL / 1000) / TRAFFIC.speed[c] * 60;
@@ -124,7 +151,8 @@ export class Traffic {
         this.vol[e] += (load[e] - this.vol[e]) * k;
         const c = R.ecls[e] as number, vc = this.vol[e] / TRAFFIC.cap[c];
         this.vc[e] = vc;
-        this.time[e] = this.freeTime(e) * (1 + TRAFFIC.bprA * Math.pow(vc, TRAFFIC.bprB));
+        // a jammed street crawls but moves: at most five times its free-flow time (queues spill to other routes instead)
+        this.time[e] = this.freeTime(e) * Math.min(5, 1 + TRAFFIC.bprA * Math.pow(vc, TRAFFIC.bprB));
       }
     }
     // zone-to-zone times on the final street times

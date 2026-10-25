@@ -16,7 +16,9 @@ export interface InitMsg {
   profiles: import('./profiles').DistrictProfile[];
 }
 
-export interface StationInfo { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; depth: number; opened: number; reach?: number; walkHomes?: number; ownHomes?: number }
+export interface StationInfo { id: number; x: number; y: number; name: string; riders: number; underwater: boolean; depth: number; opened: number; reach?: number; walkHomes?: number; ownHomes?: number; bus?: boolean }
+/** round 7 step 4b: a bus line for the HUD and the renderer (pts: the street polyline, cell units) */
+export interface BusInfo { id: number; color: string; stations: number[]; trains: number; headway: number; riders: number; capacity: number; peakLoad: number; rating: number; lengthKm: number; lane: number; inherited: boolean; ride: number; pts: number[] }
 export interface LineInfo {
   id: number;
   color: string;
@@ -50,7 +52,7 @@ export interface Stats {
   transitShare: number; // 0..1, the metro's share of motorised trips (metro vs car)
   transitTrips: number; // metro trips per day (journeys, both directions; a change of line is one trip)
   totalTrips: number;   // trips per day by all modes
-  modeTrips: { car: number; transit: number; walk: number; bike: number };
+  modeTrips: { car: number; transit: number; walk: number; bike: number; bus: number };
   rating: number;
   buildings: number;
 }
@@ -126,6 +128,9 @@ export interface StateMsg {
   catchment: Uint8Array;
   stations: StationInfo[];
   lines: LineInfo[];
+  /** round 7 step 4b: bus stops and bus lines */
+  stops: StationInfo[];
+  buses: BusInfo[];
   event: EventInfo | null;
   /** dev builds only: road graph validation (graphcheck.ts) after the latest tick, and the log of changes in the defect count */
   graph?: { defects: number; report: import('./graphcheck').GraphReport; log: string[] };
@@ -158,9 +163,11 @@ export interface StateMsg {
 
 export type Command =
   | { type: 'speed'; speed: number }
-  | { type: 'placeStation'; x: number; y: number }
+  | { type: 'placeStation'; x: number; y: number; kind?: 'bus' }
   | { type: 'removeStation'; id: number; full?: boolean }
-  | { type: 'buildLine'; stations: number[] }
+  | { type: 'buildLine'; stations: number[]; mode?: 'bus' }
+  /** round 7 step 4b: upgrade a bus line's streets (1 bus priority, 2 busway) */
+  | { type: 'setLane'; line: number; lane: number }
   | { type: 'setTrains'; line: number; trains: number }
   | { type: 'deleteLine'; line: number }
   | { type: 'choose'; event: string; choice: number }

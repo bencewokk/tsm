@@ -45,6 +45,12 @@ export const TRAIN_COST = 2e6;         // buying a train
 export const TRAIN_MONTH = 0.12e6;     // running cost per train per month (crew, energy, maintenance)
 export const STATION_UPKEEP = 0.06e6;  // per station per month (staff, escalators, cleaning)
 export const TRACK_UPKEEP_KM = 0.04e6; // per km per month
+/** round 7 step 4b: buses. A stop costs little, a bus is cheap to buy and to run; lane upgrades per street km */
+export const BUS_STOP_COST = 0.3e6;
+export const BUS_COST = 0.45e6;
+export const BUS_MONTH = 0.03e6;
+export const STOP_UPKEEP = 0.003e6;
+export const LANE_COST_KM = [0, 0.8e6, 5e6];   // ordinary, bus priority (paint, signals), busway (kerbed, own lane)
 export const FARE = 4;                 // flat fare per trip
 export const TRAIN_CAP = 300;          // passengers per (short, automated) train
 export const METRO_SPEED = 36;         // km/h including dwell

@@ -6,7 +6,7 @@
 // Envelopes (round 7 step 2): `--noenv` turns them off (before); `--plans=M` makes the player submit a station area plan for the two busiest
 // stations of the dense line at month M (and a CBD edge plan for the busiest station near the core), taking the park when the council
 // offers conditions. Each checkpoint prints the height mix by distance from the centre and by walk to a station, and towers per envelope.
-import { Sim } from '../src/sim/sim';
+import { Sim, BUSES } from '../src/sim/sim';
 import { ENVS, ENV_DEF, ENV } from '../src/sim/envelopes';
 import { TRAFFIC } from '../src/sim/traffic';
 import { N, BT, CELL, PERSONS_PER_HOME, TRAIN_COST } from '../src/sim/constants';
@@ -17,6 +17,7 @@ const opt = (k: string, d: number) => { const a = args.find((x) => x.startsWith(
 const months = opt('months', 240), every = opt('every', 60), l2month = opt('l2', 30), nLines = opt('lines', 2), plansAt = opt('plans', -1);
 if (args.includes('--noenv')) ENVS.on = false;
 if (args.includes('--notraffic')) TRAFFIC.on = false;
+if (args.includes('--nobus')) BUSES.seed = false;
 let seeds = args.filter((a) => !a.startsWith('--')).map(Number).filter((n) => n > 0);
 if (!seeds.length) seeds = [4821];
 
@@ -53,11 +54,12 @@ for (const seed of seeds) {
       const s = sim.stats();
       const pop = s.population;
       console.log(`  m${sim.month}: pop ${k1(pop)} (households ${k1(s.homes)}, jobs ${k1(s.jobs)}), trips/day ${k1(sim.totalTrips)} (${(sim.totalTrips / Math.max(1, pop)).toFixed(2)} per resident), transit ${k1(sim.transitTrips)} = ${(s.transitShare * 100).toFixed(1)}% share, money ${(s.money / 1e6).toFixed(0)}M inc ${(s.income / 1e6).toFixed(2)}M/mo exp ${(s.expenses / 1e6).toFixed(2)}M/mo`);
-      { const mt = sim.modeTrips, T = Math.max(1, sim.totalTrips); console.log(`    mode split (all trips): car ${(mt.car / T * 100).toFixed(0)}%, metro ${(mt.transit / T * 100).toFixed(1)}%, walk ${(mt.walk / T * 100).toFixed(0)}%, bike ${(mt.bike / T * 100).toFixed(0)}%; congestion ${s.congestion.toFixed(2)}, drive speed ${s.driveSpeed.toFixed(0)} km/h, rating ${s.rating.toFixed(0)}; metro boardings per resident ${(sim.metro.lines.reduce((t, l) => t + l.riders, 0) / Math.max(1, pop)).toFixed(3)}`); }
+      { const mt = sim.modeTrips, T = Math.max(1, sim.totalTrips); console.log(`    mode split (all trips): car ${(mt.car / T * 100).toFixed(0)}%, metro ${(mt.transit / T * 100).toFixed(1)}%, bus ${(mt.bus / T * 100).toFixed(1)}%, walk ${(mt.walk / T * 100).toFixed(0)}%, bike ${(mt.bike / T * 100).toFixed(0)}%; congestion ${s.congestion.toFixed(2)}, drive speed ${s.driveSpeed.toFixed(0)} km/h, rating ${s.rating.toFixed(0)}; metro boardings per resident ${(sim.metro.lines.reduce((t, l) => t + l.riders, 0) / Math.max(1, pop)).toFixed(3)}`); }
       for (const l of sim.metro.lines) {
         const sts = l.stations.map((id) => sim.metro.station(id)!);
         console.log(`    line ${l.id}: ${sts.length} st ${l.lengthKm.toFixed(1)} km, boardings/day ${k1(l.riders)} (${k1(l.riders / Math.max(0.1, l.lengthKm))}/km), trains ${l.trains} hw ${l.headway.toFixed(1)} min, peak ${Math.round(l.peakLoad)}/h of cap ${Math.round(l.capacity)}/h (${Math.round(l.crowd * 100)}%), rating ${l.rating.toFixed(0)}; stations ${sts.map((st) => `${st.name} ${k1(st.riders)}`).join(', ')}`);
       }
+      for (const l of sim.metro.buses) console.log(`    bus B${l.id - 100}${l.inherited ? ' (inherited)' : ''}: ${l.stations.length} stops ${l.lengthKm.toFixed(1)} km, ${l.trains} buses hw ${l.headway.toFixed(0)} min, ride ${l.segTime.reduce((a, b) => a + b, 0).toFixed(0)} min, lane ${l.lane}, boardings/day ${k1(l.riders)}`);
       const zero = sim.metro.stations.filter((st) => sim.metro.onLine(st.id) && st.riders < 50);
       if (zero.length) console.log(`    stations under 50 riders: ${zero.map((st) => st.name).join(', ')}`);
       // heights
