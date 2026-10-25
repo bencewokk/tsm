@@ -42,9 +42,7 @@ export class Hud {
         <div class="stat"><span class="k">Rating</span><span class="v" data-k="rating">-</span></div>
       </div>
       <div class="side panel">
-        <div class="h">Goals <span class="muted small" data-k="goalcount"></span></div>
-        <div class="goals" data-k="goals"></div>
-        <div class="h lmh">City</div>
+        <div class="h">City</div>
         <div class="bars">
           <div class="bar"><span>R</span><i data-k="dR"></i></div>
           <div class="bar"><span>C</span><i data-k="dC"></i></div>
@@ -90,9 +88,6 @@ export class Hud {
       <div class="hint panel" data-k="hint"></div>
       <div class="ticker" data-k="ticker"></div>
       <div class="docks panel" data-k="docks"></div>
-      <div class="toasts" data-k="toasts"></div>
-      <div class="headline-wrap" data-k="headline"></div>
-      <div class="floaters" data-k="floaters"></div>
       <div class="modal-wrap" data-k="modal"></div>
       <div class="modal-wrap" data-k="intro"></div>`;
     parent.appendChild(this.root);

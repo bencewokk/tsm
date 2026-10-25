@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { renderTag, type Bitmap, type TagSpec, MONO } from './paper';
-import { Desk } from './desk';
+import { Desk, fmtGoal } from './desk';
 import type { DiegeticEvent } from './events';
 import { CELL } from '../../sim/constants';
 
@@ -145,7 +145,10 @@ export class DiegeticLayer {
       case 'lineOpened': this.desk.newspaper(e.moment.title, e.moment.text, e.color, true); break;
       case 'moment': {
         const m = e.moment;
-        if (m.big) this.desk.newspaper(m.title, m.text, m.color, false);
+        // a line opening and a goal reached also arrive as 'lineOpened' / 'objectiveReached' (the ribbon front page, the gold slip):
+        // presenting them here as well would lay a second page over the ribbon and show the goal twice
+        if (m.kind === 'open' || m.kind === 'goal') { /* presented by the dedicated event */ }
+        else if (m.big) this.desk.newspaper(m.title, m.text, m.color, false);
         else this.slip(m.title, m.text, m.color, false);
         if (Number.isFinite(m.x) && Number.isFinite(m.y) && m.kind !== 'goal') this.brief(`mo:${m.ref ?? m.title}`, m, { title: m.title, sub: m.text.length > 46 ? m.text.slice(0, 44) + '...' : m.text, color: m.color });
         break;
@@ -156,7 +159,7 @@ export class DiegeticLayer {
         for (const g of e.goals) {
           if (g.x === undefined || g.y === undefined) continue;
           const id = `goal:${g.id}`; keep.add(id);
-          this.pin(id, this.at(g.x, g.y, 1), { title: g.title, sub: `${Math.round(g.cur)} of ${g.target}${g.reward ? `  ·  ${g.reward}` : ''}`, color: '#c9a227', look: 1, pct: g.target ? g.cur / g.target : 0 }, { priority: 80, far: 9000, full: 9000 });
+          this.pin(id, this.at(g.x, g.y, 1), { title: g.title, sub: `${fmtGoal(g.cur, g.unit)} of ${fmtGoal(g.target, g.unit)}${g.reward ? `  ·  ${g.reward}` : ''}`, color: '#c9a227', look: 1, pct: g.target ? g.cur / g.target : 0 }, { priority: 80, far: 9000, full: 9000 });
         }
         this.sweep('goal:', keep);
         break;

@@ -17,11 +17,10 @@ import { Hud, money as fmtMoney } from './ui/hud';
 import { Sound, bindSound } from './ui/sound';
 import { gameEvents } from './ui/gameEvents';
 import { FeedbackEmitter } from './ui/feedbackEmitter';
-import { FeedbackDom } from './ui/feedback';
 import { Ripple } from './render/ripple';
 import { GoalMarker } from './render/goalmarker';
 import { DiegeticLayer } from './ui/diegetic/layer';
-import { syncWorld, logSlips, stationLoads } from './ui/diegetic/world';
+import { syncWorld, stationLoads } from './ui/diegetic/world';
 import { skinHud } from './ui/diegetic/hudskin';
 import { demoEvent } from './ui/diegetic/demo';
 import { Planner } from './ui/planner';
@@ -73,9 +72,22 @@ const userSend = (c: Command) => { if (c.type === 'speed' && c.speed > 0) { cloc
 const hud = new Hud(document.body, userSend, seed);
 hud.setSound(sound.enabled);
 bindSound(sound);
-/** gameplay feedback: events come from one emitter; the DOM presenter, sound and the world layer below only subscribe */
+// diegetic presentation (src/ui/diegetic): paper tags and flags pinned on the model, newspaper, clipboard, slips and the dial plate on the table.
+// It presents every gameplay beat in both HUD modes; ?hud=classic only skips the table skin (ledger strip, calendar, odometer, desk rail look).
+const classicHud = params.get('hud') === 'classic';
+const dg = new DiegeticLayer(document.body, env.camera, hud.root);
+const skin = classicHud ? null : skinHud(hud);
+/** gameplay feedback: events come from one emitter; the diegetic layer, sound and the world layer below only subscribe */
 const emitter = new FeedbackEmitter();
-const feedback = new FeedbackDom(hud.root, { focus: (x, y) => flyFocus(x, y, Math.max(1800, Math.min(3500, env.camera.position.distanceTo(env.controls.target)))), project: (x, y, lift) => project(x, y, lift) });
+gameEvents.onAny((e) => dg?.notify(e));
+/** wall-clock time of the last big headline (the Auto speed rule waits after one) */
+let lastBigAt = 0;
+gameEvents.on('moment', (e) => { if (e.moment.big) lastBigAt = performance.now(); });
+/** the Plan button pulses until the first line exists (not while planning or on the start card) */
+function pulsePlan(on: boolean) {
+  const plan = hud.root.querySelector('[data-tool="plan"]');
+  plan?.classList.toggle('pulse', on && !plan.classList.contains('on') && !hud.introOpen);
+}
 let lastClock = '';
 /** announce the clock mode when it changes */
 function emitClock() {
@@ -89,11 +101,6 @@ let ripple: Ripple | null = null;
 let goalMarker: GoalMarker | null = null;
 let autoSpeed = false;
 for (const ev of ['pointerdown', 'keydown'] as const) window.addEventListener(ev, () => sound.unlock(), { capture: true });
-// diegetic presentation (src/ui/diegetic): paper tags and flags pinned on the model, the HUD dressed as table objects; ?hud=classic keeps the old HUD
-const classicHud = params.get('hud') === 'classic';
-const dg = classicHud ? null : new DiegeticLayer(document.body, env.camera, hud.root);
-const skin = classicHud ? null : skinHud(hud);
-const seenLog = new Set<string>();
 
 worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
   const m = ev.data;
@@ -123,7 +130,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     const vy = m.villages.reduce((a, v) => a + v.y, 0) / m.villages.length;
     env.focus((vx + 0.5) * CELL, (vy + 0.5) * CELL, 3600);
     send({ type: 'speed', speed: 0 });
-    hud.showIntro(m.city, seed, () => { sound.unlock(); clockHeld = true; refreshPlan(); emitClock(); feedback.pulsePlan(true); });
+    hud.showIntro(m.city, seed, () => { sound.unlock(); clockHeld = true; refreshPlan(); emitClock(); pulsePlan(true); });
   } else if (m.type === 'state') {
     if (m.graph) { graphReport = m.graph; for (const l of m.graph.log) (m.graph.defects ? console.warn : console.info)(l); }
     perf.size(m);
@@ -152,7 +159,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
       if (hud.tool === 'plan') terrain?.setCatchment(m.catchment);
     });
     perf.step('hud', () => { hud.update(m); refreshPlan(); });
-    if (dg && terrain) { skin?.update(m); dg.desk.setMonth(m.stats.month); dg.desk.setSpeed(m.speed); syncWorld(dg, m, (x, z) => terrain!.sample(x, z)); logSlips(dg, m, seenLog); }
+    if (dg && terrain) { skin?.update(m); dg.desk.setMonth(m.stats.month); dg.desk.setSpeed(m.speed); syncWorld(dg, m, (x, z) => terrain!.sample(x, z)); }
     perf.message(m, performance.now() - tApply);
   } else if (m.type === 'error') {
     console.error('[sim]', m.message);
@@ -190,7 +197,7 @@ hud.handlers.onTool = (t) => {
     metro?.setCursor(null);
   }
   emitClock();
-  feedback.pulsePlan(!!state && !state.lines.length);
+  pulsePlan(!!state && !state.lines.length);
   refreshPlan();
 };
 hud.handlers.onToggle = (name, on) => {
@@ -215,6 +222,7 @@ function flyFocus(x: number, y: number, dist: number) {
   const dir = (hud.tool === 'plan' && savedView ? savedView.pos.clone().sub(savedView.target) : env.camera.position.clone().sub(env.controls.target)).normalize();
   flyTo(target.clone().addScaledVector(dir, dist), target);
 }
+dg.desk.onGoal = (x, y) => flyFocus(x, y, Math.max(1800, Math.min(3500, env.camera.position.distanceTo(env.controls.target))));
 hud.handlers.onSound = () => { sound.set(!sound.enabled); return sound.enabled; };
 hud.handlers.onAuto = (on) => { autoSpeed = on; emitClock(); };
 /** world layer: what the events do to the 3D scene and the camera (placeholder; a visual layer can replace it) */
@@ -225,7 +233,10 @@ gameEvents.on('stationOpened', (e) => {
 gameEvents.on('objectives', (e) => {
   const gt = e.goals.find((g) => g.x !== undefined && g.y !== undefined);
   goalMarker?.set(gt ? { x: gt.x!, y: gt.y! } : null);
-  feedback.pulsePlan(!e.hasLines);
+  pulsePlan(!e.hasLines);
+  // the start card names the first goal (the clipboard on the table carries the full list)
+  const ig = hud.root.querySelector('[data-introgoal]');
+  if (ig && e.goals[0]) ig.innerHTML = `<span class="gl">First goal</span> <b>${e.goals[0].title}</b> <span class="muted">reward ${e.goals[0].reward}</span>`;
 });
 /** control: the ribbon-cutting leaves plan mode, starts a held clock and flies out over the new line */
 gameEvents.on('lineOpened', (e) => {
@@ -239,20 +250,13 @@ gameEvents.on('lineOpened', (e) => {
   emitClock();
 });
 
-const projV = new THREE.Vector3();
-function project(x: number, y: number, lift: number) {
-  projV.set(x * CELL, (terrain ? terrain.sample(x * CELL, y * CELL) : 0) + lift, y * CELL).project(env.camera);
-  if (projV.z > 1) return null;
-  const r = env.renderer.domElement.getBoundingClientRect();
-  return { x: r.left + (projV.x + 1) / 2 * r.width, y: r.top + (1 - projV.y) / 2 * r.height };
-}
 let lastAutoCheck = 0;
 window.setInterval(() => autoSpeedTick(performance.now()), 600);
 function autoSpeedTick(now: number) {
   if (!autoSpeed || !state || planning || state.speed === 0 || now - lastAutoCheck < 600) return;
   lastAutoCheck = now;
   // quiet = no decision waiting and no headline in the last 9 seconds
-  const quiet = !state.event && now - feedback.lastBigAt > 9000;
+  const quiet = !state.event && now - lastBigAt > 9000;
   const want = quiet ? 3 : 1;
   if (state.speed !== want) send({ type: 'speed', speed: want });
 }
@@ -465,7 +469,6 @@ function drawFrame(now: number) {
   ships?.animate(now / 1000);
   ripple?.animate(dt);
   goalMarker?.animate(now / 1000, env.camera.position.distanceTo(env.controls.target));
-  feedback.tick(now);
   xray += (xrayTarget - xray) * Math.min(1, dt * 5);
   if (Math.abs(xray - xrayTarget) < 0.002) xray = xrayTarget;
   applyXray(xray);

@@ -5,10 +5,10 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 const h = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, html = '') => { const d = document.createElement(tag); d.className = cls; if (html) d.innerHTML = html; return d; };
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 
-/** how a goal's numbers read: 'k' thousands, 'pct' percent, 'mo' months, else plain */
-function fmtGoal(v: number, unit?: string) {
+/** how a goal's numbers read: 'k' thousands, 'pct' percent (the sim's values are fractions, 0.15 = 15%), 'mo' months, else plain */
+export function fmtGoal(v: number, unit?: string) {
   if (unit === 'k') return v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `${Math.round(v)}`;
-  if (unit === 'pct') return `${Math.round(v)}%`;
+  if (unit === 'pct') return `${Math.round(v * 100)}%`;
   return `${Math.round(v)}`;
 }
 
@@ -27,6 +27,9 @@ export class Desk {
   private mode: 'held' | 'planning' | 'paused' | 'running' = 'running';
   private speed = 1;
   private auto = false;
+  /** a goal row with a place was clicked (cell units): main.ts flies the camera there */
+  onGoal: ((x: number, y: number) => void) | null = null;
+  private clipGoals: GoalLike[] = [];
   /** once a `clock` event has been seen it decides the label; before that the state's speed does */
   private fromEvents = false;
   private shown = '';
@@ -35,6 +38,11 @@ export class Desk {
     this.news.style.display = 'none';
     this.clip.style.display = 'none';
     parent.append(this.news, this.clip);
+    this.clip.addEventListener('click', (ev) => {
+      const row = (ev.target as HTMLElement).closest<HTMLElement>('.g[data-goal]');
+      const g = row ? this.clipGoals[Number(row.dataset.goal)] : undefined;
+      if (g && g.x !== undefined && g.y !== undefined) this.onGoal?.(g.x, g.y);
+    });
     this.news.addEventListener('click', () => { clearTimeout(this.newsTimer); this.news.classList.add('out'); this.newsTimer = window.setTimeout(() => { this.news.style.display = 'none'; this.news.classList.remove('in'); }, 400); });
     const rail = document.querySelector('.toolbar .speed');
     if (rail) {
@@ -75,9 +83,11 @@ export class Desk {
     this.clipSig = sig;
     if (!goals.length) { this.clip.style.display = 'none'; return; }
     this.clip.style.display = '';
-    this.clip.innerHTML = `<div class="clipper"></div><div class="hd"><span>Goals</span><i>${done} of ${total} ticked</i></div>` + goals.map((g) => {
+    this.clipGoals = goals;
+    this.clip.innerHTML = `<div class="clipper"></div><div class="hd"><span>Goals</span><i>${done} of ${total} ticked</i></div>` + goals.map((g, k) => {
       const p = Math.max(0, Math.min(1, g.target ? g.cur / g.target : 0));
-      return `<div class="g" style="--c:${esc(g.track === 'city' ? '#4f8f6a' : g.track === 'riders' ? '#b8741e' : '#2f6fa8')}"><b>${esc(g.title)}</b><div class="bar"><u style="width:${(p * 100).toFixed(0)}%"></u></div><span>${fmtGoal(g.cur, g.unit)} of ${fmtGoal(g.target, g.unit)}${g.reward ? `  ·  ${esc(g.reward)}` : ''}</span></div>`;
+      const at = g.x !== undefined && g.y !== undefined ? ` data-goal="${k}" title="Show on the map"` : '';
+      return `<div class="g"${at} style="--c:${esc(g.track === 'city' ? '#4f8f6a' : g.track === 'riders' ? '#b8741e' : '#2f6fa8')}"><b>${esc(g.title)}</b><div class="bar"><u style="width:${(p * 100).toFixed(0)}%"></u></div><span>${fmtGoal(g.cur, g.unit)} of ${fmtGoal(g.target, g.unit)}${g.reward ? `  ·  ${esc(g.reward)}` : ''}</span></div>`;
     }).join('');
   }
 

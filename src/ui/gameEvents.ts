@@ -1,9 +1,9 @@
 /**
  * Gameplay feedback events: the one place the game announces things the player should feel (a line opened, an objective moved, fares came
  * in, a line is overcrowded, a plan's cost changed, an undo refunded). Pure data and a tiny bus: no DOM, no Three.js. Presenters subscribe
- * with `gameEvents.on(kind, fn)` (or `onAny`): src/ui/feedback.ts (placeholder DOM: toasts, newspaper card, goals list, coin pops),
- * src/ui/sound.ts (`bindSound`), and the world layer in main.ts (ripple, goal marker, camera). A different presentation layer can replace
- * all of them and only has to read these payloads. Every event also carries the sim month it belongs to.
+ * with `gameEvents.on(kind, fn)` (or `onAny`): the diegetic layer (src/ui/diegetic, `ui.notify`: newspaper, clipboard, slips, briefs,
+ * coin pops, station tags; mapping in VISUAL-PASS.md section 5), src/ui/sound.ts (`bindSound`), and the world layer in main.ts (ripple,
+ * goal marker, camera). Presenters only read these payloads. Every event also carries the sim month it belongs to.
  */
 import type { GoalInfo, Moment } from '../sim/goals';
 

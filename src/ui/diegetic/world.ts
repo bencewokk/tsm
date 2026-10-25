@@ -73,15 +73,3 @@ export function syncWorld(ui: DiegeticLayer, s: StateMsg, ground: (x: number, z:
   ui.sweep('lm:', new Set([...keep].filter((k) => k.startsWith('lm:'))));
   ui.sweep('as:', new Set([...keep].filter((k) => k.startsWith('as:'))));
 }
-
-/** News slips from the sim's log: a line opening is a headline on the table. (The game-feedback branch emits richer `moment` events; they go through `ui.notify`.) */
-export function logSlips(ui: DiegeticLayer, s: StateMsg, seen: Set<string>) {
-  const first = seen.size === 0;
-  for (const l of s.log) {
-    if (seen.has(l)) continue;
-    seen.add(l);
-    if (first) continue;
-    const t = l.slice(l.indexOf('|') + 1);
-    if (/opened:/.test(t)) ui.slip(t.split(':')[0], t.slice(t.indexOf(':') + 1).trim(), '#c0503a', true);
-  }
-}

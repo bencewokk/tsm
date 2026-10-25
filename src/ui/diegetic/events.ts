@@ -3,9 +3,8 @@
  * DESIGN-FUN.md section 3), declared here structurally so that a `GameEvent` can be passed to `ui.notify` as is (extra fields are
  * ignored) without importing a module that is not on this branch. `x` / `y` are cell units everywhere, as in the sim.
  *
- * Wiring once the branches meet (one line in main.ts):
- *     gameEvents.onAny((e) => dg?.notify(e));
- * and remove the placeholder DOM presenter (`feedback.ts`), which would otherwise show every beat twice.
+ * Wired in main.ts with `gameEvents.onAny((e) => dg?.notify(e))`; the fun pass's placeholder DOM presenter (feedback.ts) is gone, so each
+ * beat shows once.
  */
 export interface MomentLike {
   kind?: string;
