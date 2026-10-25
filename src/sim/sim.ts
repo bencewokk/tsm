@@ -3,6 +3,7 @@ import { EnvelopeSystem, ENV, ENVS } from './envelopes';
 import { PressureSystem } from './pressure';
 import { Traffic, TRAFFIC } from './traffic';
 import { RoadPlanner } from './arterials';
+import { Regional, REGION } from './regional';
 import { BUS_STOP_COST, BUS_COST, BUS_MONTH, STOP_UPKEEP, LANE_COST_KM, TRAM_COST, TRAM_MONTH } from './constants';
 import { STATION_COST, TRAIN_COST, START_MONEY, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
@@ -183,8 +184,8 @@ export class Sim {
    * so every station gets the riders of the streets it is nearest to (one centroid per 400 m zone used to hand all of a zone's trips to a
    * single station and left stations next to a better one at zero).
    */
-  zAccO: { s: number; w: number; f: number; s2: number; w2: number }[][] = [];
-  zAccD: { s: number; w: number; f: number; s2: number; w2: number }[][] = [];
+  zAccO: { s: number; w: number; f: number; s2: number; w2: number; s3: number; w3: number }[][] = [];
+  zAccD: { s: number; w: number; f: number; s2: number; w2: number; s3: number; w3: number }[][] = [];
   /** per used station (matrix index): walk minutes over the street network to every cell */
   walk: Float32Array[] = [];
   private walkKey = '';
@@ -212,6 +213,8 @@ export class Sim {
   traffic = new Traffic(this);
   /** round 7 step 7: the highways department's road proposals (arterials, bridges, bypasses) and the transit streets */
   roadPlan = new RoadPlanner(this);
+  /** round 7 step 8: regional rail and the commuters from the region (regional.ts) */
+  regional = new Regional(this);
   /** the station whose plan preview the UI asked for */
   previewStation: number | null = null;
   lastEventMonth = -99;
@@ -402,6 +405,18 @@ export class Sim {
     const m = this.metro, w = this.g.water;
     switch (cmd.type) {
       case 'placeStation': {
+        if (cmd.kind === 'rail') {
+          // a regional station: on the railway (snapped to the track), a surface platform
+          const pr = this.regional.project(cmd.x, cmd.y);
+          if (!pr) { this.say('A regional station has to be on the railway'); return; }
+          if (this.money < REGION.rail.stationCost) { this.say('Not enough money for a regional station'); return; }
+          const st = m.addStation(pr.x, pr.y, w);
+          if (!st) { this.say('Too close to another station'); return; }
+          st.rail = true;
+          this.money -= REGION.rail.stationCost; this.buildSpend += REGION.rail.stationCost;
+          this.say(`${st.name} regional station built on the railway`);
+          break;
+        }
         if (cmd.kind === 'bus') {
           // a bus stop: on a street (within 1.5 cells of a street node or edge), cheap
           if (this.money < BUS_STOP_COST) { this.say('Not enough money for a bus stop'); return; }
@@ -427,6 +442,30 @@ export class Sim {
         if (!m.onNet(cmd.id) && m.removeStation(cmd.id)) this.money += STATION_COST * (cmd.full ? 1 : 0.5);
         break;
       case 'buildLine': {
+        if (cmd.mode === 'rail') {
+          // regional rail along the railway between its stations (electrified, regional trains every 12 minutes or so)
+          const sts = cmd.stations.map((id) => m.station(id));
+          if (sts.length < 2 || sts.some((s) => !s || s.bus)) return;
+          const pts: [number, number][][] = [], km: number[] = [];
+          for (let k = 1; k < sts.length; k++) {
+            const lg = this.regional.leg(sts[k - 1]!.x, sts[k - 1]!.y, sts[k]!.x, sts[k]!.y);
+            if (!lg) { this.say(`Regional line not built: ${sts[k - 1]!.name} and ${sts[k]!.name} are not joined by the railway`); return; }
+            pts.push(lg.pts); km.push(lg.km);
+          }
+          const total = km.reduce((a, b) => a + b, 0), ride = total / REGION.rail.speed * 60 * 2 + sts.length * 2 + 6;
+          const trains = Math.max(2, Math.round(ride / 12));
+          const cost = total * REGION.rail.electrifyKm + trains * REGION.rail.trainCost;
+          if (this.money < cost) { this.say(`Regional line needs ${(cost / 1e6).toFixed(1)}M, not enough money`); return; }
+          const l = m.addRailLine(cmd.stations, this.month, pts, km, trains);
+          if (!l) return;
+          this.money -= cost; this.buildSpend += cost;
+          if (this.lines0 === 0) this.firstLineMonth = this.month;
+          this.lines0++;
+          this.refreshTransit();
+          this.moment('open', `Regional line R${l.id} opens: ${sts[0]!.name} to ${sts[sts.length - 1]!.name}`,
+            `${sts.length} stations over ${total.toFixed(1)} km of railway, ${trains} trains (every ${l.headway.toFixed(0)} minutes, 900 seats each).`, l.color, sts[0]!.x, sts[0]!.y, true, String(l.id));
+          break;
+        }
         if (cmd.mode === 'bus') {
           const p = this.busPath(cmd.stations);
           if (!p) { this.say('Bus line not built: no street route between two of its stops'); return; }
@@ -469,7 +508,7 @@ export class Sim {
         const l = m.line(cmd.line);
         if (!l) return;
         const n = Math.max(1, Math.min(40, Math.round(cmd.trains)));
-        const d = n - l.trains, unit = l.mode === 'bus' ? (l.lane === 3 ? TRAM_COST : BUS_COST) : TRAIN_COST;
+        const d = n - l.trains, unit = l.mode === 'bus' ? (l.lane === 3 ? TRAM_COST : BUS_COST) : l.mode === 'rail' ? REGION.rail.trainCost : TRAIN_COST;
         if (d > 0 && this.money < d * unit) return;
         this.money -= d > 0 ? d * unit : d * unit * 0.4;
         l.trains = n;
@@ -1085,6 +1124,7 @@ export class Sim {
   computeTransit() {
     const m = this.metro;
     this.refreshBusPaths();
+    this.regional.refresh();
     m.rebuildGraph();
     this.transitCell.fill(0);
     this.stationPrem.fill(0);
@@ -1120,29 +1160,32 @@ export class Sim {
     {
       // cell level: each cell walks to its nearest metro station and to its nearest bus stop; the cells of a zone with the same pair
       // form an access group (homes for trip origins, jobs + 0.3 homes for destinations), and a trip picks the better of the two per pair
-      type G = { s: number; w: number; s2: number; w2: number; f: number; tw: number; tw2: number };
+      // round 7 step 8: plus the second-nearest station when it is at most 4 minutes further (a regional station beside a metro catchment
+      // must not cut those homes off from the metro, and a trip may suit the station one street further)
+      type G = { s: number; w: number; s2: number; w2: number; s3: number; f: number; tw: number; tw2: number; tw3: number };
       const go = new Map<number, G>(), gd = new Map<number, G>();
       const zO = new Float64Array(ZONES), zD = new Float64Array(ZONES), own = new Float64Array(S);
-      const addG = (mp: Map<number, G>, z: number, m: number, wm: number, b: number, wb: number, v: number) => {
-        const key = (z * (S + 1) + (m + 1)) * (S + 1) + (b + 1);
+      const addG = (mp: Map<number, G>, z: number, m: number, wm: number, b: number, wb: number, c: number, wc: number, v: number) => {
+        const key = ((z * (S + 1) + (m + 1)) * (S + 1) + (b + 1)) * (S + 1) + (c + 1);
         let g = mp.get(key);
-        if (!g) { g = { s: m, w: 0, s2: b, w2: 0, f: 0, tw: 0, tw2: 0 }; mp.set(key, g); }
-        g.f += v; g.tw += v * wm; g.tw2 += v * wb;
+        if (!g) { g = { s: m, w: 0, s2: b, w2: 0, s3: c, f: 0, tw: 0, tw2: 0, tw3: 0 }; mp.set(key, g); }
+        g.f += v; g.tw += v * wm; g.tw2 += v * wb; g.tw3 += v * wc;
       };
       for (let i = 0; i < N * N; i++) {
         const h = this.cHomes[i], d = this.cJobs[i] + 0.3 * h;
         if (!h && !d) continue;
         const z = this.zoneOf(i);
         zO[z] += h; zD[z] += d;
-        let bk = -1, bt = TUNE.walkCap, sk = -1, stt = TUNE.walkCap;
+        let bk = -1, bt = TUNE.walkCap, sk = -1, stt = TUNE.walkCap, ck = -1, ct = TUNE.walkCap;
         for (let k = 0; k < S; k++) {
           const t = this.walk[k][i];
-          if (this.walkMetro[k]) { if (t < bt) { bt = t; bk = k; } } else if (t < stt) { stt = t; sk = k; }
+          if (this.walkMetro[k]) { if (t < bt) { ck = bk; ct = bt; bt = t; bk = k; } else if (t < ct) { ct = t; ck = k; } } else if (t < stt) { stt = t; sk = k; }
         }
         if (bk < 0 && sk < 0) continue;
+        if (ck >= 0 && ct > bt + 4) ck = -1;
         if (bk >= 0) own[bk] += h; else own[sk] += h;
-        if (h) addG(go, z, bk, bt, sk, stt, h);
-        if (d) addG(gd, z, bk, bt, sk, stt, d);
+        if (h) addG(go, z, bk, bt, sk, stt, ck, ct, h);
+        if (d) addG(gd, z, bk, bt, sk, stt, ck, ct, d);
       }
       // what each station reaches (shown on a quiet station's tag: no street nearby, a nearer station takes its streets, or empty land)
       for (let k = 0; k < S; k++) {
@@ -1154,10 +1197,10 @@ export class Sim {
       }
       for (const [mp, arr, tot] of [[go, this.zAccO, zO], [gd, this.zAccD, zD]] as const) {
         for (const [key, g] of mp) {
-          const z = Math.floor(key / ((S + 1) * (S + 1)));
+          const z = Math.floor(key / ((S + 1) * (S + 1) * (S + 1)));
           // a group without a metro station uses its bus stop as the main option
           const m = g.s >= 0, b = g.s2 >= 0;
-          const e = { s: m ? g.s : g.s2, w: (m ? g.tw : g.tw2) / g.f + 1, s2: m && b ? g.s2 : -1, w2: m && b ? g.tw2 / g.f + 1 : 0, f: g.f / tot[z] };
+          const e = { s: m ? g.s : g.s2, w: (m ? g.tw : g.tw2) / g.f + 1, s2: m && b ? g.s2 : -1, w2: m && b ? g.tw2 / g.f + 1 : 0, s3: g.s3, w3: g.s3 >= 0 ? g.tw3 / g.f + 1 : 0, f: g.f / tot[z] };
           arr[z].push(e);
         }
       }
@@ -1856,11 +1899,11 @@ export class Sim {
       if (go && go.length && gd.length) for (const o of go) for (const d of gd) {
         // the better access pair: the metro station or the bus stop at each end (s2 is the group's bus stop next to its metro station)
         let bs = -1, bt2 = -1, bc = Infinity, bw = 0;
-        for (let x = 0; x < 2; x++) {
-          const os = x ? o.s2 : o.s, ow = x ? o.w2 : o.w;
+        for (let x = 0; x < 3; x++) {
+          const os = x === 0 ? o.s : x === 1 ? o.s2 : o.s3, ow = x === 0 ? o.w : x === 1 ? o.w2 : o.w3;
           if (os < 0) continue;
-          for (let y = 0; y < 2; y++) {
-            const ds = y ? d.s2 : d.s, dw = y ? d.w2 : d.w;
+          for (let y = 0; y < 3; y++) {
+            const ds = y === 0 ? d.s : y === 1 ? d.s2 : d.s3, dw = y === 0 ? d.w : y === 1 ? d.w2 : d.w3;
             if (ds < 0 || os === ds) continue;
             const r = T_[os * S + ds];
             if (!(r < Infinity)) continue;
@@ -1917,6 +1960,58 @@ export class Sim {
         if (crowd > 0) route(a, o.zone, crowd * f, TRIP.transitASC - 1 + lockAsc, o.st.carPark ? 0 : 28);
       }
     }
+    // round 7 step 8: commuters from the region (a share of the city's jobs) through the portals: by car from the portal's zone, or by
+    // regional rail from a station by a rail portal (the ride from their town, then the city's network and the walk at the end)
+    {
+      const RG = this.regional;
+      RG.stats = { commuters: 0, car: 0, rail: 0, byPortal: [] };
+      if (REGION.on && RG.portals.length) {
+        const Cm = this.jobs * REGION.commuterShare;
+        const wts = RG.portals.map((p) => (p.kind === 'road' ? 1 : 0.7)), wsum = wts.reduce((x, y) => x + y, 0);
+        const g = new Float64Array(ZONES);
+        RG.portals.forEach((p, pi) => {
+          const P = Cm * wts[pi] / wsum;
+          let sum = 0;
+          for (let b = 0; b < ZONES; b++) {
+            g[b] = 0;
+            if (this.zJobs[b] <= 0) continue;
+            const dk = Math.hypot((b % NZ + 0.5) * ZONE - p.x, (((b / NZ) | 0) + 0.5) * ZONE - p.y) * CELL / 1000;
+            g[b] = this.zJobs[b] * Math.exp(-dk / REGION.decay); sum += g[b];
+          }
+          if (sum <= 0) return;
+          const ps = p.kind === 'rail' ? RG.portalStation(p) : -1;
+          let pr = 0;
+          for (let b = 0; b < ZONES; b++) {
+            if (g[b] <= 0) continue;
+            const T = P * g[b] / sum;
+            const drive = this.driveTime[p.zone * ZONES + b] + REGION.offCar + TUNE.parkMin * Math.min(1, this.zJobs[b] / 2500);
+            let F = 0;
+            if (ps >= 0) for (const d of this.zAccD[b]) {
+              let bc = Infinity, bt = -1, bw = 0;
+              for (let y = 0; y < 3; y++) {
+                const ds = y === 0 ? d.s : y === 1 ? d.s2 : d.s3, dw = y === 0 ? d.w : y === 1 ? d.w2 : d.w3;
+                if (ds < 0) continue;
+                const r = ds === ps ? 0 : T_[ps * S + ds];
+                if (!(r < Infinity)) continue;
+                if (dw * ww + r < bc) { bc = dw * ww + r; bt = ds; bw = dw; }
+              }
+              if (bt < 0) continue;
+              const ut = Math.exp(-beta * (REGION.offRail + bc + TRIP.transitASC - drive)), f = T * d.f * ut / (1 + ut);
+              F += f;
+              if (bt !== ps && f > 0.002) { stOD[ps * S + bt] += f; stOD[bt * S + ps] += f; stEntries[ps] += f; stEntries[bt] += f; }
+              const jk = ps * S + bt;
+              if (bt !== ps) { jF += f; jWalk += f * bw; jWait += f * JW[jk]; jRide += f * JR[jk]; jXfer += f * JX[jk]; jCrowd += f * JC[jk]; jCh += f * JN[jk]; }
+            }
+            const carT = T - F;
+            total += 2 * T; car += 2 * carT; transit += 2 * F;
+            this.demand.add(p.zone, b, 0, 2 * carT, 3, 0, 2 * F);
+            pr += F;
+          }
+          RG.stats.commuters += P; RG.stats.rail += pr; RG.stats.car += P - pr;
+          RG.stats.byPortal.push({ name: p.name, kind: p.kind, trips: P, rail: pr });
+        });
+      }
+    }
     for (let s = 0; s < S; s++)
       for (let t = 0; t < S; t++) {
         const F = stOD[s * S + t];
@@ -1957,11 +2052,11 @@ export class Sim {
     // fares, plus the value captured from approved station area plans (envelopes.ts)
     this.fares = (this.transitTrips + this.busTrips + this.modeTrips.tram) * FARE * 30;
     this.income = this.fares + this.envs.capture;
-    let trains = 0, km = 0;
-    for (const l of m.lines) { trains += l.trains; km += l.lengthKm; }
+    let trains = 0, km = 0, rail = 0;
+    for (const l of m.lines) { if (l.mode === 'rail') rail += l.trains; else { trains += l.trains; km += l.lengthKm; } }
     let buses = 0, trams = 0;
     for (const l of m.buses) if (l.lane === 3) trams += l.trains; else buses += l.trains;
-    this.expenses = trains * TRAIN_MONTH + m.stations.length * STATION_UPKEEP + km * TRACK_UPKEEP_KM + buses * BUS_MONTH + trams * TRAM_MONTH + m.stops.length * STOP_UPKEEP;
+    this.expenses = trains * TRAIN_MONTH + rail * REGION.rail.trainMonth + m.stations.length * STATION_UPKEEP + km * TRACK_UPKEEP_KM + buses * BUS_MONTH + trams * TRAM_MONTH + m.stops.length * STOP_UPKEEP;
     this.money += this.income - this.expenses;
   }
 
@@ -2038,14 +2133,15 @@ export class Sim {
         return { id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders, capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, lane: l.lane ?? 0, inherited: !!l.inherited, ride: l.segTime.reduce((a, b) => a + b, 0), pts, tram: l.tramCheck ? { ...l.tramCheck } : undefined };
       }),
       lines: this.metro.lines.map((l) => ({ id: l.id, color: l.color, stations: l.stations.slice(), trains: l.trains, headway: l.headway, riders: l.riders,
-        capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice(), by: l.by.slice(), elev: l.elev.slice() })),
+        capacity: l.capacity, peakLoad: l.peakLoad, rating: l.rating, lengthKm: l.lengthKm, segLoad: l.segLoad.slice(), by: l.by.slice(), elev: l.elev.slice(),
+        mode: l.mode === 'rail' ? 'rail' as const : undefined, pts: l.mode === 'rail' ? (l.railPts ?? []).flatMap((seg, k) => (k ? seg.slice(1) : seg).flat()) : undefined })),
       event: this.eventInfo(),
       graph: this.graphReport ? { defects: graphDefects(this.graphReport), report: this.graphReport, log: this.graphLog.splice(0) } : undefined,
       docks: this.docksInfo(),
       landmarks: this.lm.info(),
       assemblies: this.asm.infos(),
       projects: this.projects.infos(), notices: this.projects.notices.slice(-5),
-      env: this.envs.env.slice(), plans: this.envs.infos(), pressure: this.demand.info(), roadPlan: this.roadPlan.info(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
+      env: this.envs.env.slice(), plans: this.envs.infos(), pressure: this.demand.info(), roadPlan: this.roadPlan.info(), region: this.regional.info(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
       desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
       goals: this.goals.infos(), goalsDone: this.goals.count(), goalsTotal: this.goals.total(), moments: this.moments.slice(-10), unlocks: this.unlocks.slice(),
       log: this.log.slice(-8), speed: this.speed,

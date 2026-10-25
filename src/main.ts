@@ -138,6 +138,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     goalMarker = new GoalMarker((x, z) => terrain!.sample(x, z));
     env.scene.add(goalMarker.group);
     planner = new Planner(send, { height: m.height, water: m.water });
+    planner.rail = m.rail;
     const vx = m.villages.reduce((a, v) => a + v.x, 0) / m.villages.length;
     const vy = m.villages.reduce((a, v) => a + v.y, 0) / m.villages.length;
     env.focus((vx + 0.5) * CELL, (vy + 0.5) * CELL, 3600);
@@ -165,7 +166,9 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     markers?.update(m.projects);
     busView?.update(m.buses ?? [], m.stops ?? []);
     if (m.roadPlan) busView?.setRoads(m.roadPlan);
-    if (linesChanged) { perf.step('metro', () => metro?.update(m)); if (sunShadow) sunShadow.dirty = true; }
+    // regional rail lines run on the railway and are drawn by the surface view (round 7 step 8); the metro view draws the metro
+    if (linesChanged) { perf.step('metro', () => metro?.update({ ...m, lines: m.lines.filter((l) => l.mode !== 'rail') })); if (sunShadow) sunShadow.dirty = true; }
+    busView?.updateRail(m.lines.filter((l) => l.mode === 'rail'), m.stations);
     planner?.onState(m);
     perf.step('overlays', () => {
       if (hud.toggles.heat) terrain?.setHeat(m.lv, init!.water);
@@ -440,6 +443,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'o' || e.key === 'O') hud.toggle('pressure');
   else if (e.key === 'Escape' && card.isOpen && hud.tool !== 'plan') card.close();
   else if (hud.tool === 'plan' && planner && (e.key === 'b' || e.key === 'B')) { planner.setMode(planner.mode === 'bus' ? 'metro' : 'bus'); refreshPlan(); }
+  else if (hud.tool === 'plan' && planner && (e.key === 'r' || e.key === 'R')) { planner.setMode(planner.mode === 'rail' ? 'metro' : 'rail'); refreshPlan(); }
   else if (hud.tool === 'plan' && planner) {
     if (e.key === 'Enter') planner.commit();
     else if (e.key === 'Backspace') planner.undo();

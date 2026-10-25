@@ -35,6 +35,9 @@ export interface LineInfo {
   segLoad: number[];
   by: number[];        // km by construction type: cut-and-cover, bored tunnel, viaduct, under water, rack
   elev: number[];      // track elevation at each station (m)   // peak-hour load per segment (both directions summed / 2)
+  /** round 7 step 8: 'rail' for a regional line, with its track as cell points (x, y pairs) */
+  mode?: 'metro' | 'rail';
+  pts?: number[];
 }
 
 export interface Stats {
@@ -154,6 +157,8 @@ export interface StateMsg {
   /** round 7 step 3: demand pressure by mode (walk, car, transit opportunity: 3 bytes a cell, log scale) and missing-link candidates */
   pressure: { field: Uint8Array; cands: import('./pressure').LinkCandidate[] };
   /** round 7 step 7: the highways department's proposals (polyline in cells) and the transit streets (buses, trams, bikes, walkers) */
+  /** round 7 step 8: the portals to the region and this month's out-of-town commuters */
+  region?: { portals: { kind: string; x: number; y: number; name: string }[]; commuters: number; car: number; rail: number; byPortal: { name: string; kind: string; trips: number; rail: number }[] };
   roadPlan?: { proposals: { id: number; kind: string; state: string; name: string; pts: number[]; pressure: number; km: number }[]; transitStreets: number[][] };
   desire: DesireLine[];
   /** the active goal of each track, newest headline moments (each has a unique seq), unlocked upgrades */
@@ -170,9 +175,9 @@ export interface StateMsg {
 
 export type Command =
   | { type: 'speed'; speed: number }
-  | { type: 'placeStation'; x: number; y: number; kind?: 'bus' }
+  | { type: 'placeStation'; x: number; y: number; kind?: 'bus' | 'rail' }
   | { type: 'removeStation'; id: number; full?: boolean }
-  | { type: 'buildLine'; stations: number[]; mode?: 'bus' }
+  | { type: 'buildLine'; stations: number[]; mode?: 'bus' | 'rail' }
   /** round 7 step 4b: upgrade a bus line's streets (1 bus priority, 2 busway) */
   | { type: 'setLane'; line: number; lane: number }
   | { type: 'setTrains'; line: number; trains: number }

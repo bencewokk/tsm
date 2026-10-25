@@ -13,6 +13,11 @@ export class BusView {
   /** round 7 step 7: transit streets (no cars) and the road proposal waiting for a decision */
   private roads = new THREE.Group();
   private roadSig = '';
+  /** round 7 step 8: regional rail lines (a coloured band beside the track, platforms, long trains) */
+  private rail = new THREE.Group();
+  private railSig = '';
+  private railPaths: { pts: THREE.Vector3[]; len: number[]; total: number; n: number; ride: number; color: THREE.Color; tram: boolean }[] = [];
+  private railFleet: THREE.InstancedMesh;
   private stopsMesh: THREE.InstancedMesh | null = null;
   private fleet: THREE.InstancedMesh;
   private sig = '';
@@ -28,6 +33,10 @@ export class BusView {
   constructor(private ground: (x: number, z: number) => number) {
     this.group.add(this.routes);
     this.group.add(this.roads);
+    this.group.add(this.rail);
+    this.railFleet = new THREE.InstancedMesh(new THREE.BoxGeometry(60, 4, 3.2), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 }), 64);
+    this.railFleet.count = 0;
+    this.group.add(this.railFleet);
     const geo = new THREE.BoxGeometry(13, 3.6, 3.2);
     this.fleet = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }), 256);
     this.fleet.count = 0;
@@ -83,6 +92,40 @@ export class BusView {
     this.group.add(this.stopsMesh);
   }
 
+  updateRail(lines: { id: number; color: string; stations: number[]; trains: number; segLoad: number[]; pts?: number[] }[], stations: { id: number; x: number; y: number }[]) {
+    const sig = JSON.stringify(lines.map((l) => [l.id, l.trains, l.pts?.length, l.stations]));
+    if (sig === this.railSig) return;
+    this.railSig = sig;
+    this.rail.traverse((o) => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
+    this.rail.clear();
+    this.railPaths = [];
+    for (const l of lines) {
+      const flat = l.pts ?? [];
+      const pts: THREE.Vector3[] = [];
+      for (let k = 0; k + 1 < flat.length; k += 2) { const x = flat[k] * CELL, z = flat[k + 1] * CELL; pts.push(new THREE.Vector3(x, this.ground(x, z) + 1.0, z)); }
+      if (pts.length < 2) continue;
+      const len = [0];
+      for (let k = 1; k < pts.length; k++) len.push(len[k - 1] + pts[k].distanceTo(pts[k - 1]));
+      const col = new THREE.Color(l.color);
+      // a band in the line colour each side of the track, so the served railway reads as a line on the map
+      for (const off of [-4.6, 4.6]) this.rail.add(this.strip(pts, 3, off, col.getHex(), 0.95));
+      const ride = len[len.length - 1] / 1000 / 65 * 60 + l.stations.length;
+      this.railPaths.push({ pts, len, total: len[len.length - 1], n: l.trains, ride, color: col.clone().lerp(new THREE.Color(0xffffff), 0.35), tram: false });
+      for (const id of l.stations) {
+        const st = stations.find((q) => q.id === id);
+        if (!st) continue;
+        const x = st.x * CELL, z = st.y * CELL;
+        const plat = new THREE.Mesh(new THREE.BoxGeometry(70, 1.2, 9), new THREE.MeshStandardMaterial({ color: 0xd9d4c7 }));
+        // along the track at the station
+        let bk = 1, bd = Infinity;
+        for (let k = 1; k < pts.length; k++) { const d = Math.hypot((pts[k].x + pts[k - 1].x) / 2 - x, (pts[k].z + pts[k - 1].z) / 2 - z); if (d < bd) { bd = d; bk = k; } }
+        plat.rotation.y = -Math.atan2(pts[bk].z - pts[bk - 1].z, pts[bk].x - pts[bk - 1].x);
+        plat.position.set(x, this.ground(x, z) + 0.8, z);
+        this.rail.add(plat);
+      }
+    }
+  }
+
   /** transit streets as a terracotta street surface; a proposal waiting at City hall as a dashed orange line with posts at its ends */
   setRoads(info: { proposals: { id: number; state: string; pts: number[] }[]; transitStreets: number[][] }) {
     const asked = info.proposals.filter((p) => p.state === 'asked');
@@ -113,6 +156,31 @@ export class BusView {
     }
   }
 
+  /** regional trains: run out and back along their track, evenly spaced (the same motion as the buses) */
+  private moveFleet(paths: { pts: THREE.Vector3[]; len: number[]; total: number; n: number; ride: number; color: THREE.Color }[], fleet: THREE.InstancedMesh, t: number, max: number, lift: number, scale: THREE.Vector3) {
+    let i = 0;
+    for (const p of paths) {
+      const cycle = p.ride * 2 * 60 / 40;
+      for (let k = 0; k < p.n && i < max; k++, i++) {
+        let u = ((t / cycle + k / p.n) % 1 + 1) % 1;
+        const back = u > 0.5; u = back ? 1 - (u - 0.5) * 2 : u * 2;
+        const d = u * p.total;
+        let s = 1;
+        while (s < p.len.length - 1 && p.len[s] < d) s++;
+        const a = p.pts[s - 1], b = p.pts[s], f = (d - p.len[s - 1]) / Math.max(1e-6, p.len[s] - p.len[s - 1]);
+        this.v.lerpVectors(a, b, f); this.v.y += lift + 1.4;
+        this.dir.subVectors(b, a); this.dir.y = 0;
+        this.q.setFromAxisAngle(this.up, Math.atan2(-this.dir.z, this.dir.x));
+        this.m4.compose(this.v, this.q, scale);
+        fleet.setMatrixAt(i, this.m4);
+        fleet.setColorAt(i, p.color);
+      }
+    }
+    fleet.count = i;
+    fleet.instanceMatrix.needsUpdate = true;
+    if (fleet.instanceColor) fleet.instanceColor.needsUpdate = true;
+  }
+
   /** a flat strip of width w along the polyline, offset sideways by off (metres) */
   private strip(pts: THREE.Vector3[], w: number, off: number, color: number, opacity: number) {
     const pos: number[] = [];
@@ -134,6 +202,8 @@ export class BusView {
   animate(t: number, camDist: number) {
     const far = camDist > 3500;
     this.fleet.visible = !far;
+    this.railFleet.visible = camDist < 6000;
+    this.moveFleet(this.railPaths, this.railFleet, t, 64, 1, this.one);
     if (far) return;
     let i = 0;
     for (const p of this.paths) {

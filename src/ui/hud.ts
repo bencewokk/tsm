@@ -256,7 +256,7 @@ export class Hud {
       const load = l.capacity > 0 ? l.peakLoad / l.capacity : 0;
       const cls = load > 1 ? 'neg' : load > 0.8 ? 'warn' : '';
       return `<div class="line">
-        <div class="lh"><i class="sw" style="background:${l.color}"></i><b>Line ${l.id}</b><span class="muted">${l.stations.length} st · ${l.lengthKm.toFixed(1)} km</span>
+        <div class="lh"><i class="sw" style="background:${l.color}"></i><b>${l.mode === 'rail' ? `R${l.id}` : `Line ${l.id}`}</b><span class="muted">${l.stations.length} st · ${l.lengthKm.toFixed(1)} km${l.mode === 'rail' ? ' · regional rail' : ''}</span>
           <span class="spacer"></span><button class="mini" data-line="${l.id}" data-act="del" title="Close line">✕</button></div>
         <div class="lg">
           <span>Riders/day</span><b>${num(l.riders)}</b>

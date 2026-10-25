@@ -1,5 +1,6 @@
 import type { StateMsg, Command } from '../sim/protocol';
 import { STATION_COST, TRAIN_COST, LINE_COLORS, METRO_SPEED, BUS_STOP_COST, BUS_COST } from '../sim/constants';
+import { REGION } from '../sim/regional';
 import { quoteLine, RELIEF, SEG_NAMES, type Terr, type LineQuote } from '../sim/relief';
 import { money } from './hud';
 import { gameEvents } from './gameEvents';
@@ -8,11 +9,20 @@ import { gameEvents } from './gameEvents';
 export class Planner {
   draft: number[] = [];
   /** round 7 step 4: 'bus' plans a bus line (stops on streets, the route follows the streets); B toggles it in plan mode */
-  mode: 'metro' | 'bus' = 'metro';
-  setMode(m: 'metro' | 'bus') { if (m === this.mode) return; this.cancel(); this.mode = m; }
+  mode: 'metro' | 'bus' | 'rail' = 'metro';
+  setMode(m: 'metro' | 'bus' | 'rail') { if (m === this.mode) return; this.cancel(); this.mode = m; }
   private all(s: StateMsg) { return this.mode === 'bus' ? s.stations.concat(s.stops ?? []) : s.stations; }
-  private unit() { return this.mode === 'bus' ? BUS_STOP_COST : STATION_COST; }
-  private pending: { x: number; y: number }[] = [];
+  private unit() { return this.mode === 'bus' ? BUS_STOP_COST : this.mode === 'rail' ? REGION.rail.stationCost : STATION_COST; }
+  /** round 7 step 8: the railway (cell polylines) for rail mode: clicks must be near it */
+  rail: [number, number][][] = [];
+  private nearRail(x: number, y: number) {
+    for (const pl of this.rail) for (let k = 1; k < pl.length; k++) {
+      const [ax, ay] = pl[k - 1], [bx, by] = pl[k], dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L2));
+      if (Math.hypot(x - ax - dx * t, y - ay - dy * t) <= REGION.rail.snap) return true;
+    }
+    return false;
+  }
+  private pending: { x: number; y: number; known: Set<number> }[] = [];
   /** states seen since a placeholder was added: one the sim never fills (it refused the site) is dropped with a reason */
   private pendingAge = 0;
   hover: { x: number; y: number } | null = null;
@@ -44,13 +54,14 @@ export class Planner {
       return;
     }
     if (this.water[Math.floor(y) * 128 + Math.floor(x)]) return;
+    if (this.mode === 'rail' && !this.nearRail(x, y)) { this.notice = 'A regional station has to be on the railway (the grey track with sleepers).'; return; }
     if (s.stats.money < this.unit()) { this.notice = `Not enough money for another ${this.mode === 'bus' ? 'stop' : 'station'} (${money(this.unit())}).`; return; }
     gameEvents.emit({ kind: 'stationDug', x, y, cost: this.unit() });
     // placeholder keeps click order while the worker digs the station
-    this.pending.push({ x, y });
+    this.pending.push({ x, y, known: new Set(this.all(s).map((q) => q.id)) });
     this.pendingAge = 0;
     this.draft.push(-this.pending.length);
-    this.send(this.mode === 'bus' ? { type: 'placeStation', x, y, kind: 'bus' } : { type: 'placeStation', x, y });
+    this.send(this.mode === 'metro' ? { type: 'placeStation', x, y } : { type: 'placeStation', x, y, kind: this.mode });
   }
 
   /** After each state: attach a freshly dug station to the draft. */
@@ -60,14 +71,15 @@ export class Planner {
       this.draft = this.draft.map((id) => {
         if (id >= 0) return id;
         const c = this.pending[-id - 1];
-        const st = c && this.all(s).find((q) => q.x === c.x && q.y === c.y);
+        const st = c && (this.all(s).find((q) => q.x === c.x && q.y === c.y) ??
+          this.all(s).filter((q) => !c.known.has(q.id) && Math.hypot(q.x - c.x, q.y - c.y) < 3).sort((p, q) => Math.hypot(p.x - c.x, p.y - c.y) - Math.hypot(q.x - c.x, q.y - c.y))[0]);
         if (st) this.dug.add(st.id);
         return st ? st.id : id;
       });
       if (this.draft.every((id) => id >= 0)) this.pending = [];
       else if (++this.pendingAge >= 4 && !this.commitWhenReady) {
         this.draft = this.draft.filter((id) => id >= 0); this.pending = [];
-        this.notice = this.mode === 'bus' ? 'No stop there: a bus stop needs a street within about 75 m and 100 m from the next stop.' : 'No station there: the site was refused.';
+        this.notice = this.mode === 'bus' ? 'No stop there: a bus stop needs a street within about 75 m and 100 m from the next stop.' : this.mode === 'rail' ? 'No regional station there: it must be on the railway, 150 m or more from another station.' : 'No station there: the site was refused.';
       }
     }
     this.draft = this.draft.filter((id, k) => (id < 0 || this.all(s).some((q) => q.id === id)) && this.draft.indexOf(id) === k);
@@ -112,7 +124,7 @@ export class Planner {
       if (r.cost > this.last.stats.money) { this.notice = `Not enough money: the line costs ${money(r.cost)}, you have ${money(this.last.stats.money)}. Backspace removes the last station, or wait for more income.`; return; }
     }
     this.notice = '';
-    this.send(this.mode === 'bus' ? { type: 'buildLine', stations: this.draft.slice(), mode: 'bus' } : { type: 'buildLine', stations: this.draft.slice() });
+    this.send(this.mode === 'metro' ? { type: 'buildLine', stations: this.draft.slice() } : { type: 'buildLine', stations: this.draft.slice(), mode: this.mode });
     this.dug.clear();
     this.draft = [];
   }
@@ -128,13 +140,21 @@ export class Planner {
 
   /** Vertical profile and cost of the draft (plus the hovered point as a trial next station). */
   profile(s: StateMsg, withHover = false): LineQuote | null {
-    if (this.mode === 'bus') return null;
+    if (this.mode !== 'metro') return null;
     const pts = this.points(s).map((p) => ({ x: p.x, y: p.y }));
     if (withHover && this.hover && pts.length) pts.push({ x: this.hover.x, y: this.hover.y });
     return pts.length >= 2 ? quoteLine(pts, this.terr) : null;
   }
 
   quote(s: StateMsg) {
+    if (this.mode === 'rail') {
+      // regional rail: the track is about 5% longer than the straight line; trains for a 12-minute service
+      const pts = this.points(s);
+      let km = 0;
+      for (let k = 1; k < pts.length; k++) km += Math.hypot(pts[k].x - pts[k - 1].x, pts[k].y - pts[k - 1].y) * 0.05 * 1.05;
+      const trains = Math.max(2, Math.round((km / REGION.rail.speed * 60 * 2 + pts.length * 2 + 6) / 12));
+      return { km, wkm: 0, cost: km * REGION.rail.electrifyKm + trains * REGION.rail.trainCost, trains, q: null as LineQuote | null };
+    }
     if (this.mode === 'bus') {
       // buses: the street route is about a quarter longer than the straight line; enough buses for an 8-minute wait
       const pts = this.points(s);
@@ -152,13 +172,19 @@ export class Planner {
   }
 
   hint(s: StateMsg): string {
+    if (this.mode === 'rail') {
+      if (!this.draft.length) return `<b>Regional rail</b> (R switches back to the metro). Click on the railway to build a regional station (${money(REGION.rail.stationCost)}, a surface platform), or click stations by the track in order; trains run along the railway at 65 km/h. A station by the end of the line where it runs out to the region also carries commuters from out of town.`;
+      const r = this.quote(s), ok = r.cost <= s.stats.money;
+      const warn = this.notice ? `<b class="neg">${this.notice}</b><br>` : '';
+      return `${warn}Regional line draft: ${this.draft.length} stations, about ${r.km.toFixed(1)} km of railway, ${r.trains} trains. Cost <b class="${ok ? '' : 'neg'}">${money(r.cost)}</b> (electrification and trains), you have ${money(s.stats.money)}. <b>Enter</b> build · <b>Backspace</b> undo · <b>Esc</b> cancel · <b>R</b> metro`;
+    }
     if (this.mode === 'bus') {
       if (!this.draft.length) return `<b>Bus planning</b> (B switches back to the metro). Click a street to place a stop (${money(BUS_STOP_COST)}), or click existing stops and metro stations in order; the route follows the streets and runs in their traffic until you give it priority or a busway (Lines panel).`;
       const r = this.quote(s), ok = r.cost <= s.stats.money;
       const warn = this.notice ? `<b class="neg">${this.notice}</b><br>` : '';
       return `${warn}Bus line draft: ${this.draft.length} stops, about ${r.km.toFixed(1)} km of street, ${r.trains} buses. Cost <b class="${ok ? '' : 'neg'}">${money(r.cost)}</b>, you have ${money(s.stats.money)}. <b>Enter</b> build · <b>Backspace</b> undo · <b>Esc</b> cancel · <b>B</b> metro`;
     }
-    if (!this.draft.length) return `<b>Time is paused while you plan.</b> Click anywhere on land to dig a station (${money(STATION_COST)}), or click existing stations in order. Blue = within an 8-minute walk over the streets (slower uphill). Drag to pan, wheel to zoom. <b>B</b>: plan a bus line instead.`;
+    if (!this.draft.length) return `<b>Time is paused while you plan.</b> Click anywhere on land to dig a station (${money(STATION_COST)}), or click existing stations in order. Blue = within an 8-minute walk over the streets (slower uphill). Drag to pan, wheel to zoom. <b>B</b>: plan a bus line instead; <b>R</b>: regional rail on the railway.`;
     const r = this.quote(s);
     const q = r.q;
     const ok = r.cost <= s.stats.money && (!q || q.ok);

@@ -1,4 +1,5 @@
 import { N, CELL, METRO_SPEED, TRAIN_CAP, LINE_COLORS, TRAM_CAP } from './constants';
+const RAIL_SPEED = 65, RAIL_CAP = 900;   // regional rail (regional.ts REGION.rail)
 import { quoteLine, type Terr, type LineQuote } from './relief';
 
 /**
@@ -20,7 +21,9 @@ export interface Station { id: number; x: number; y: number; name: string; rider
   /** round 7, why a station is quiet: cells within an 8-minute walk, homes within it, and homes for which it is the nearest station */
   reach?: number; walkHomes?: number; ownHomes?: number;
   /** round 7 step 4b: a bus stop (kept in Metro.stops, never in stations) */
-  bus?: boolean }
+  bus?: boolean;
+  /** round 7 step 8: a regional rail station (on the railway, a surface platform) */
+  rail?: boolean }
 export interface Line {
   id: number;
   color: string;
@@ -43,7 +46,10 @@ export interface Line {
   rating: number;
   crowd: number;           // last month's crowding (load / capacity)
   /** round 7 step 4b: 'bus' lines run on the streets (Metro.buses); lane 0 ordinary traffic, 1 bus priority, 2 busway */
-  mode?: 'metro' | 'bus';
+  mode?: 'metro' | 'bus' | 'rail';
+  /** round 7 step 8, regional rail: the track of each segment (cell points) and its km */
+  railPts?: [number, number][][];
+  railKm?: number[];
   lane?: number;
   /** bus lines: the street edges of each segment, and the street km */
   path?: number[][];
@@ -125,6 +131,19 @@ export class Metro {
     return line;
   }
 
+  /** round 7 step 8: a regional rail line over the railway (ids from the metro's line numbers, named R + id) */
+  addRailLine(ids: number[], month: number, pts: [number, number][][], km: number[], trains: number): Line | null {
+    const clean = ids.filter((id, k) => this.station(id) && !this.station(id)!.bus && ids.indexOf(id) === k);
+    if (clean.length < 2 || pts.length !== clean.length - 1) return null;
+    clean.forEach((id) => { const st = this.station(id)!; if (st.opened < 0) st.opened = month; });
+    const id = this.nextLine++;
+    const total = km.reduce((a, b) => a + b, 0);
+    const line: Line = { id, color: '#2f5f8a', stations: clean, trains, segTime: [], lengthKm: total, wetKm: 0, by: [0, 0, 0, 0, 0], rack: clean.slice(1).map(() => false), elev: clean.map(() => 0), headway: 12, capacity: 0, riders: 0, peakLoad: 0, segLoad: [], rating: 100, crowd: 0, mode: 'rail', railPts: pts, railKm: km };
+    this.lines.push(line);
+    this.updateLine(line);
+    return line;
+  }
+
   addStation(x: number, y: number, water: Uint8Array): Station | null {
     if (x < 0 || y < 0 || x >= N || y >= N || water[Math.floor(y) * N + Math.floor(x)]) return null;
     if (this.stations.some((s) => Math.hypot(s.x - x, s.y - y) < 3)) return null;
@@ -175,6 +194,14 @@ export class Metro {
       const rt = ride * 2 + 6;
       l.headway = Math.max(3, rt / Math.max(1, l.trains));
       l.capacity = (60 / l.headway) * (l.lane === 3 ? TRAM_CAP : l.lane === 2 ? 110 : 70);
+      if (l.segLoad.length !== l.segTime.length) l.segLoad = l.segTime.map(() => 0);
+      return;
+    }
+    if (l.mode === 'rail') {
+      // regional trains: along the track at 65 km/h, a minute at each stop, 900 a train
+      for (let k = 1; k < l.stations.length; k++) { const t = ((l.railKm?.[k - 1] ?? 1) / (RAIL_SPEED * this.speedMul)) * 60 + 1; l.segTime.push(t); ride += t; }
+      l.headway = Math.max(4, (ride * 2 + 6) / Math.max(1, l.trains));
+      l.capacity = (60 / l.headway) * RAIL_CAP;
       if (l.segLoad.length !== l.segTime.length) l.segLoad = l.segTime.map(() => 0);
       return;
     }
