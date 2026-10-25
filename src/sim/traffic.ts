@@ -10,6 +10,7 @@
 import { N, ZONE, NZ, ZONES, CELL } from './constants';
 import { RC } from './roads';
 import { MinHeap } from './heap';
+import { FREIGHT } from './freight';
 import type { Sim } from './sim';
 
 export const TRAFFIC = {
@@ -21,8 +22,9 @@ export const TRAFFIC = {
   /** share of a day's trips in the peak hour, cars per car trip (occupancy 1.3) */
   peak: 0.11, perCar: 1 / 1.3,
   rounds: 3,
-  /** later months warm-start from last month's volumes: one round a month, relaxed by this much (the cold start runs `rounds`) */
-  relax: 0.5,
+  /** later months warm-start from last month's volumes: one round a month, relaxed by this much (the cold start runs `rounds`); 0.5
+   *  oscillated (mean v/c +-0.04 month to month on a fixed demand), 0.2 holds within +-0.01 (round 7 step 10) */
+  relax: 0.2,
   /** km/h from a zone's activity centre to its street node (local access) */
   accessKmh: 18,
 };
@@ -138,12 +140,14 @@ export class Traffic {
       this.access[z] = (Math.hypot(R.nx[n] - x, R.ny[n] - y) * CELL / 1000) / TRAFFIC.accessKmh * 60;
     }
     // OD: last month's car trips by zone pair (both directions summed), as peak-hour vehicles each way
-    const pc = sim.demand.pCar;
+    const pc = sim.demand.pCar, pf = sim.demand.pFreight;
+    // lorries (round 7 step 10): 2.5 cars each, with the freight peak share, expressed as car-trip equivalents
+    const lorry = FREIGHT.on ? FREIGHT.pcu * (FREIGHT.peak / TRAFFIC.peak) / TRAFFIC.perCar : 0;
     const od: { a: number; b: number; v: number }[] = [];
     for (let a = 0; a < ZONES; a++) {
       if (this.node[a] < 0) continue;
       for (let b = a + 1; b < ZONES; b++) {
-        const t = pc[a * ZONES + b];
+        const t = pc[a * ZONES + b] + lorry * pf[a * ZONES + b];
         if (t < 4 || this.node[b] < 0 || this.node[a] === this.node[b]) continue;
         od.push({ a, b, v: t * TRAFFIC.peak * TRAFFIC.perCar / 2 });
       }
@@ -153,13 +157,14 @@ export class Traffic {
     // cold start (the first month): the method of successive averages over a few rounds from free flow. Later months warm-start from
     // last month's volumes and run one round (the demand itself is last month's), which is also the pass the zone-to-zone times come from
     const cold = !this.warm;
-    const noCars = sim.roadPlan.noCars;
+    const noCars = sim.roadPlan.noCars, laneMul = sim.freight.laneMul;
+    const zoneOfEdge = (e: number) => { const mx = (R.nx[R.ea[e]] + R.nx[R.eb[e]]) / 2, my = (R.ny[R.ea[e]] + R.ny[R.eb[e]]) / 2; return Math.min(NZ - 1, Math.max(0, Math.floor(my / ZONE))) * NZ + Math.min(NZ - 1, Math.max(0, Math.floor(mx / ZONE))); };
     for (let e = 0; e < E; e++) {
       // dead streets and transit streets (round 7 step 7: buses, trams, bikes and walkers only) carry no cars
       if (!R.alive[e] || noCars.has(e)) { this.vol[e] = 0; this.time[e] = Infinity; continue; }
       if (cold) this.vol[e] = 0;
-      const c = R.ecls[e] as number;
-      this.time[e] = this.freeTime(e) * Math.min(5, 1 + TRAFFIC.bprA * Math.pow(this.vol[e] / TRAFFIC.cap[c], TRAFFIC.bprB));
+      const c = R.ecls[e] as number, zm = c === RC.Arterial ? 1 : laneMul[zoneOfEdge(e)];
+      this.time[e] = this.freeTime(e) * Math.min(5, 1 + TRAFFIC.bprA * Math.pow(this.vol[e] / (TRAFFIC.cap[c] * zm), TRAFFIC.bprB));
     }
     this.warm = true;
     const dist = new Float64Array(M), via = new Int32Array(M), load = new Float32Array(E);
@@ -190,7 +195,8 @@ export class Traffic {
       for (let e = 0; e < E; e++) {
         if (!R.alive[e] || noCars.has(e)) continue;
         this.vol[e] += (load[e] - this.vol[e]) * k;
-        const c = R.ecls[e] as number, vc = this.vol[e] / TRAFFIC.cap[c];
+        // round 7 step 10: deliveries at the kerb take capacity from the old town's local streets and collectors (freight.ts laneMul)
+        const c = R.ecls[e] as number, zm = c === RC.Arterial ? 1 : laneMul[zoneOfEdge(e)], vc = this.vol[e] / (TRAFFIC.cap[c] * zm);
         this.vc[e] = vc;
         // a jammed street crawls but moves: at most five times its free-flow time (queues spill to other routes instead)
         this.time[e] = this.freeTime(e) * Math.min(5, 1 + TRAFFIC.bprA * Math.pow(vc, TRAFFIC.bprB));

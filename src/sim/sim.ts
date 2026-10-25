@@ -5,6 +5,7 @@ import { Traffic, TRAFFIC } from './traffic';
 import { RoadPlanner } from './arterials';
 import { Regional, REGION } from './regional';
 import { GatewaySystem, GATEWAYS, GATEWAY_TYPES } from './gateways';
+import { FreightSystem } from './freight';
 import { BUS_STOP_COST, BUS_COST, BUS_MONTH, STOP_UPKEEP, LANE_COST_KM, TRAM_COST, TRAM_MONTH } from './constants';
 import { STATION_COST, TRAIN_COST, START_MONEY, PEAK_FACTOR, FARE, TRAIN_MONTH, STATION_UPKEEP, TRACK_UPKEEP_KM } from './constants';
 import { Rng } from './rng';
@@ -218,6 +219,8 @@ export class Sim {
   regional = new Regional(this);
   /** round 7 step 9: intercity station, motorway junction, ferry terminal, airport (gateways.ts) */
   gateways = new GatewaySystem(this);
+  /** round 7 step 10: lorries, the rail freight yard, old-town delivery rules (freight.ts) */
+  freight = new FreightSystem(this);
   /** the station whose plan preview the UI asked for */
   previewStation: number | null = null;
   lastEventMonth = -99;
@@ -660,6 +663,14 @@ export class Sim {
       this.pending = { def, variant: null, vars: {} };
       return;
     }
+    // freight (freight.ts): the rail freight yard, the old town's deliveries
+    const fd = this.freight.nextDecision();
+    if (fd) {
+      const fid = fd.id.slice(4);
+      const def: EventDef = { id: fd.id, trigger: {}, title: fd.title, text: fd.text, choices: fd.choices.map((c, k) => ({ ...c, effects: [{ kind: 'freight', id: fid, choice: k }] })) };
+      this.pending = { def, variant: null, vars: {} };
+      return;
+    }
     // development projects: queued decisions, one at a time and spaced out
     if (this.month < this.projects.lastDecision + PACE.decisionGap) return;
     const d = this.projects.nextDecision();
@@ -739,6 +750,7 @@ export class Sim {
       case 'project': this.projects.choose(e.inst, e.choice); this.projects.lastDecision = this.month; break;
       case 'hazard': this.hazards.choose(e.id, e.choice); break;
       case 'road': this.roadPlan.choose(e.id, e.choice); break;
+      case 'freight': this.freight.choose(e.id, e.choice); break;
       case 'plan': this.envs.choose(e.id, e.choice); break;
       case 'docksRoadRelief': this.docks.roadRelief = true; this.say('Bus lanes painted along the harbour roads'); break;
     }
@@ -820,6 +832,7 @@ export class Sim {
       else if (e.kind === 'project') c += Math.max(0, -this.projects.choiceMoney(e.inst, e.choice));
       else if (e.kind === 'hazard' && e.choice === 0) c += this.hazards.defenceCost(e.id);
       else if (e.kind === 'road') c += this.roadPlan.cost(e.id, e.choice);
+      else if (e.kind === 'freight') c += this.freight.cost(e.id, e.choice);
     }
     return c;
   }
@@ -856,6 +869,7 @@ export class Sim {
     this.demand.tick();
     this.roadPlan.tick();
     this.gateways.tick();
+    this.freight.compute();
     this.computeLandValue();
     for (let i = 0; i < N * N; i++) this.lvS[i] += (this.lv[i] - this.lvS[i]) * TUNE.lvLag;
     this.field.update(this);
@@ -2070,11 +2084,8 @@ export class Sim {
         total += 2 * T; car += 2 * (T - F); transit += 2 * F; tr += F;
         this.demand.add(gw.zone, b, 0, 2 * (T - F), 3, 0, 2 * F);
       }
-      // lorries: to the industrial zones, each counted as 2.5 cars on the streets (not trips of residents)
+      // its lorries go with the city's freight (freight.ts loads them on the streets)
       const lorries = t.cargoPotential * pop / 1000;
-      let isum = 0;
-      for (let b = 0; b < ZONES; b++) isum += this.zIndOf(b);
-      if (lorries > 0 && isum > 0) for (let b = 0; b < ZONES; b++) { const v = this.zIndOf(b); if (v > 0) this.demand.add(gw.zone, b, 0, 2 * 2.5 * lorries * v / isum, 3, 0, 0); }
       gw.stats = { trips: P, transit: tr, car: P - tr, cargo: lorries };
     }
     for (let s = 0; s < S; s++)
@@ -2116,12 +2127,12 @@ export class Sim {
     const m = this.metro;
     // fares, plus the value captured from approved station area plans (envelopes.ts)
     this.fares = (this.transitTrips + this.busTrips + this.modeTrips.tram) * FARE * 30;
-    this.income = this.fares + this.envs.capture;
+    this.income = this.fares + this.envs.capture + this.freight.stats.fees;
     let trains = 0, km = 0, rail = 0;
     for (const l of m.lines) { if (l.mode === 'rail') rail += l.trains; else { trains += l.trains; km += l.lengthKm; } }
     let buses = 0, trams = 0;
     for (const l of m.buses) if (l.lane === 3) trams += l.trains; else buses += l.trains;
-    this.expenses = trains * TRAIN_MONTH + rail * REGION.rail.trainMonth + m.stations.length * STATION_UPKEEP + km * TRACK_UPKEEP_KM + buses * BUS_MONTH + trams * TRAM_MONTH + m.stops.length * STOP_UPKEEP;
+    this.expenses = trains * TRAIN_MONTH + rail * REGION.rail.trainMonth + m.stations.length * STATION_UPKEEP + km * TRACK_UPKEEP_KM + buses * BUS_MONTH + trams * TRAM_MONTH + m.stops.length * STOP_UPKEEP + (this.freight.coreRule === 'consolidation' ? 0.1e6 : 0);
     this.money += this.income - this.expenses;
   }
 
@@ -2206,7 +2217,7 @@ export class Sim {
       landmarks: this.lm.info(),
       assemblies: this.asm.infos(),
       projects: this.projects.infos(), notices: this.projects.notices.slice(-5),
-      env: this.envs.env.slice(), plans: this.envs.infos(), pressure: this.demand.info(), roadPlan: this.roadPlan.info(), region: this.regional.info(), gateways: this.gateways.info(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
+      env: this.envs.env.slice(), plans: this.envs.infos(), pressure: this.demand.info(), roadPlan: this.roadPlan.info(), region: this.regional.info(), gateways: this.gateways.info(), freight: this.freight.info(), planPreview: this.previewStation !== null ? this.envs.preview(this.previewStation) : null, capture: this.envs.capture,
       desire: this.desire.map((d) => ({ ax: (d.a % NZ + 0.5) * ZONE, ay: (((d.a / NZ) | 0) + 0.5) * ZONE, bx: (d.b % NZ + 0.5) * ZONE, by: (((d.b / NZ) | 0) + 0.5) * ZONE, trips: d.trips })),
       goals: this.goals.infos(), goalsDone: this.goals.count(), goalsTotal: this.goals.total(), moments: this.moments.slice(-10), unlocks: this.unlocks.slice(),
       log: this.log.slice(-8), speed: this.speed,

@@ -170,7 +170,7 @@ worker.onmessage = (ev: MessageEvent<WorkerOut>) => {
     markers?.update(m.projects);
     busView?.update(m.buses ?? [], m.stops ?? []);
     if (m.roadPlan) busView?.setRoads(m.roadPlan);
-    if (m.gateways) gatewayView?.update(m.gateways);
+    if (m.gateways) gatewayView?.update(m.gateways.concat(m.freight?.yard ? [{ id: 'yard', x: m.freight.yard.x, y: m.freight.yard.y, ang: m.freight.yard.ang } as never] : []));
     // regional rail lines run on the railway and are drawn by the surface view (round 7 step 8); the metro view draws the metro
     if (linesChanged) { perf.step('metro', () => metro?.update({ ...m, lines: m.lines.filter((l) => l.mode !== 'rail') })); if (sunShadow) sunShadow.dirty = true; }
     busView?.updateRail(m.lines.filter((l) => l.mode === 'rail'), m.stations);

@@ -157,6 +157,8 @@ export interface StateMsg {
   /** round 7 step 3: demand pressure by mode (walk, car, transit opportunity: 3 bytes a cell, log scale) and missing-link candidates */
   pressure: { field: Uint8Array; cands: import('./pressure').LinkCandidate[] };
   /** round 7 step 7: the highways department's proposals (polyline in cells) and the transit streets (buses, trams, bikes, walkers) */
+  /** round 7 step 10: lorries a day (regional, local, by rail, into the old town), the freight yard, the old-town delivery rule */
+  freight?: { lorries: number; region: number; local: number; rail: number; core: number; fees: number; coreCong: number; yard: { x: number; y: number; ang: number } | null; coreRule: string };
   /** round 7 step 9: the open gateways (intercity station, motorway junction, ferry terminal, airport) and this month's travellers */
   gateways?: { id: string; type: string; name: string; x: number; y: number; ang: number; opened: number; serve: string; trips: number; transit: number; car: number; cargo: number }[];
   /** round 7 step 8: the portals to the region and this month's out-of-town commuters */

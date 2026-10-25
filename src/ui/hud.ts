@@ -58,6 +58,7 @@ export class Hud {
         <div class="row" data-k="tramrow" style="display:none"><span>Tram trips / day</span><b data-k="tramtrips">-</b></div>
         <div class="row" data-k="jrow"><span>Avg journey</span><b data-k="journey">-</b></div>
         <div data-k="gwrows"></div>
+        <div class="row" data-k="frow" title="Lorries and delivery vans a day (regional freight and local deliveries); a rail freight yard takes regional loads off the roads"><span>Lorries / day</span><b data-k="lorries">-</b></div>
         <div class="row" title="Station area plans pay the city a planning gain on the floors they allow above the old zoning"><span>Value captured</span><b data-k="capture">-</b></div>
         <div class="h lmh">Projects <span class="muted small" data-k="projbudget"></span></div>
         <div class="lmlist" data-k="projlist"></div>
@@ -330,6 +331,7 @@ export class Hud {
     e.bustrips.textContent = num(st.modeTrips.bus);
     e.tramrow.style.display = (s.buses ?? []).some((b) => b.lane === 3) ? '' : 'none';
     e.tramtrips.textContent = num(st.modeTrips.tram ?? 0);
+    if (s.freight) e.lorries.textContent = `${(s.freight.lorries / 1000).toFixed(1)}k${s.freight.rail > 0 ? ` · ${Math.round(s.freight.rail / Math.max(1, s.freight.region) * 100)}% rail` : ''}`;
     // round 7 step 9: the gateways, travellers a day and the share that come by transit; the tooltip says what serves them
     const gws = s.gateways ?? [];
     const gsig = JSON.stringify(gws.map((g) => [g.id, Math.round(g.trips / 100), Math.round(g.transit / Math.max(1, g.trips) * 100)]));

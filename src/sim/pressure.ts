@@ -33,6 +33,8 @@ export class PressureSystem {
   pOpp = new Float32Array(ZONES * ZONES);
   /** transit trips by zone pair (round 7 step 7: a viable transit alternative weighs against a new road) */
   pTr = new Float32Array(ZONES * ZONES);
+  /** lorries a day by zone pair (round 7 step 10, filled by the freight system; not residents' trips) */
+  pFreight = new Float32Array(ZONES * ZONES);
   cands: LinkCandidate[] = [];
   /** month each pair was last routed (no retest for a year) */
   private tested = new Map<number, number>();

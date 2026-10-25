@@ -47,6 +47,12 @@ export class GatewayView {
         this.group.add(this.box(130, 3, 14, 0xb9a98c, x, z, a, 0, 65));
         this.group.add(this.box(62, 9, 16, 0xf4f1ea, x, z, a, 3, 110, 16));
         this.group.add(this.box(30, 8, 22, 0xd9d2c2, x, z, a));
+      } else if (g.id === 'yard') {
+        // a rail freight yard: sidings beside the line, a gantry, stacks of containers
+        for (const sd of [-14, -7, 7, 14]) this.group.add(this.box(260, 0.5, 4, 0x6e655a, x, z, a, 0, 0, sd));
+        const cols = [0x2f5f8a, 0xb4613f, 0x6a8a4a, 0xc9a03c];
+        for (let k = 0; k < 10; k++) this.group.add(this.box(12, 3 + (k % 3), 3, cols[k % 4], x, z, a, 0.5, -100 + k * 22, k % 2 ? 21 : -21));
+        this.group.add(this.box(8, 18, 40, 0xd7c64a, x, z, a, 0, 40));
       } else if (g.id === 'motorway') {
         // a junction: a ring of carriageway and the motorway running out to the map edge
         const ring = new THREE.Mesh(new THREE.TorusGeometry(70, 7, 6, 32), new THREE.MeshStandardMaterial({ color: 0x6b6f74, roughness: 0.9 }));

@@ -40,7 +40,9 @@ export type Effect =
   | { kind: 'hazard'; id: string; choice: number }
   | { kind: 'plan'; id: number; choice: number }
   /** a decision on a road proposal from the highways department (arterials.ts) */
-  | { kind: 'road'; id: number; choice: number };
+  | { kind: 'road'; id: number; choice: number }
+  /** a decision on freight (freight.ts): the rail freight yard, the old town's deliveries */
+  | { kind: 'freight'; id: string; choice: number };
 
 export interface DocksDeal {
   id: string;
